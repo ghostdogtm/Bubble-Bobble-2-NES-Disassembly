@@ -2091,7 +2091,13 @@ UpdateProjectiles_ReadOp:
 	STA $8001
 .else
 	STA newPrgBank				;C - - - - - 0x012DE8 04:8DD8: 85 3B
+	;(Perf) Guard: skip the call when the bank is already mapped (83.6% of the time: the
+	;op loop comes back here after each op). prgBankB mirrors the $A000 slot, see
+	;docs/perf_notes.md "Phase 2+3". newPrgBank is still written as before.
+	CMP prgBankB
+	BEQ @mapped
 	JSR SwapPrgBankB				;C - - - - - 0x012DEA 04:8DDA: 20 56 FF
+@mapped:
 .endif
 
 	LDY projScriptOfs				;C - - - - - 0x012DED 04:8DDD: A4 5D
