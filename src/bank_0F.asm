@@ -2842,13 +2842,6 @@ DrawObjects:
 	LDA sprPrgBank
 	STA prgBankB
 	STA $8001
-.else
-	LDA #$07					;C - - - - - 0x01EEF2 07:EEE2: A9 07
-	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80
-	LDA sprPrgBank				;C - - - - - 0x01EEF9 07:EEE9: AD 61 05
-	STA prgBankB				;C - - - - - 0x01EEFF 07:EEEF: 85 53
-	STA $8001				;C - - - - - 0x01EEFC 07:EEEC: 8D 01 80
-.endif
 
 	LDA globalTimer				;C - - - - - 0x01EF10 07:EF00: A5 14
 	AND #$01					;C - - - - - 0x01EF12 07:EF02: 29 01
@@ -3089,12 +3082,303 @@ CODE_0FF067:
 	CPX #$00					;C - - - - - 0x01F085 07:F075: E0 00
 	BNE CODE_0FF067				;C - - - - - 0x01F087 07:F077: D0 EE
 CODE_0FF079:
-.ifdef REGION_JP
 	LDA nmiPrgBankB
 	STA prgBankB
 	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F089 07:F079: 60
+.else
+	;(Perf) US: optimized copy, see docs/perf_notes.md "Phase 5". JP keeps the original.
+	LDA #$07					;C - - - - - 0x01EEF2 07:EEE2: A9 07
+	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80
+	LDA sprPrgBank				;C - - - - - 0x01EEF9 07:EEE9: AD 61 05
+	STA prgBankB				;C - - - - - 0x01EEFF 07:EEEF: 85 53
+	STA $8001				;C - - - - - 0x01EEFC 07:EEEC: 8D 01 80
+
+	LDA globalTimer				;C - - - - - 0x01EF10 07:EF00: A5 14
+	AND #$01					;C - - - - - 0x01EF12 07:EF02: 29 01
+	BEQ CODE_0FEF09				;C - - - - - 0x01EF14 07:EF04: F0 03
+		JMP CODE_0FEFBB				;C - - - - - 0x01EF16 07:EF06: 4C BB EF
+CODE_0FEF09:
+	;Even frame, draw all objects
+	LDA #$00					;C - - - - - 0x01EF19 07:EF09: A9 00
+	STA oamBufferPos				;C - - - - - 0x01EF1B 07:EF0B: 8D 5E 05
+	LDA #$00					;C - - - - - 0x01EF1E 07:EF0E: A9 00
+	STA scratch4				;C - - - - - 0x01EF20 07:EF10: 85 04
+CODE_0FEF12:
+	LDY scratch4				;C - - - - - 0x01EF22 07:EF12: A4 04
+	LDA ram_0475				;C - - - - - 0x01EF24 07:EF14: AD 75 04
+	BEQ CODE_0FEF21				;C - - - - - 0x01EF27 07:EF17: F0 08
+		CPY ram_0475				;C - - - - - 0x01EF29 07:EF19: CC 75 04
+		BCC CODE_0FEF21				;C - - - - - 0x01EF2C 07:EF1C: 90 03
+			JMP CODE_0FEFAA				;C - - - - - 0x01EF2E 07:EF1E: 4C AA EF
+CODE_0FEF21:
+	LDA objState,Y				;C - - - - - 0x01EF31 07:EF21: B9 63 05
+	BNE CODE_0FEF29				;C - - - - - 0x01EF34 07:EF24: D0 03
+		JMP CODE_0FEFAA				;C - - - - - 0x01EF36 07:EF26: 4C AA EF
+CODE_0FEF29:
+	LDA objAttr,Y				;C - - - - - 0x01EF39 07:EF29: B9 F3 06
+	STA sprAttr				;C - - - - - 0x01EF3C 07:EF2C: 8D 60 05
+	LDA objY,Y				;C - - - - - 0x01EF3F 07:EF2F: B9 8B 05
+	STA scratch2				;C - - - - - 0x01EF42 07:EF32: 85 02
+	LDA objX,Y				;C - - - - - 0x01EF44 07:EF34: B9 B3 05
+	STA scratch3				;C - - - - - 0x01EF47 07:EF37: 85 03
+
+	LDX objChrSlot,Y				;C - - - - - 0x01EF49 07:EF39: BE 2B 06
+	LDA objChrBank,Y				;C - - - - - 0x01EF4C 07:EF3C: B9 53 06
+	BEQ CODE_0FEF43				;C - - - - - 0x01EF4F 07:EF3F: F0 02
+		STA chrBankC,X				;C - - - - - 0x01EF51 07:EF41: 95 4D
+CODE_0FEF43:
+	LDA objImgOfs,Y				;C - - - - - 0x01EF53 07:EF43: B9 DB 05
+	CLC							;C - - - - - 0x01EF56 07:EF46: 18
+	ADC #$00					;C - - - - - 0x01EF57 07:EF47: 69 00
+	STA scratch0				;C - - - - - 0x01EF59 07:EF49: 85 00
+
+	LDA objImgOfsHI,Y				;C - - - - - 0x01EF5B 07:EF4B: B9 03 06
+	ADC #$A0					;C - - - - - 0x01EF5E 07:EF4E: 69 A0
+	STA scratch1				;C - - - - - 0x01EF60 07:EF50: 85 01
+
+	LDY #$00					;C - - - - - 0x01EF62 07:EF52: A0 00
+	LDA (scratch0),Y			;C - - - - - 0x01EF64 07:EF54: B1 00
+	STA scratch8				;C - - - - - 0x01EF66 07:EF56: 85 08
+
+	INY							;C - - - - - 0x01EF68 07:EF58: C8
+	LDA (scratch0),Y			;C - - - - - 0x01EF69 07:EF59: B1 00
+	STA scratch9				;C - - - - - 0x01EF6B 07:EF5B: 85 09
+
+	;Get size of sprite struct
+	LDY #$00					;C - - - - - 0x01EF6D 07:EF5D: A0 00
+	LDA (scratch8),Y			;C - - - - - 0x01EF6F 07:EF5F: B1 08
+	CLC							;C - - - - - 0x01EF71 07:EF61: 18
+	ADC #$01					;C - - - - - 0x01EF72 07:EF62: 69 01
+	STA scratch1				;C - - - - - 0x01EF74 07:EF64: 85 01
+
+	LDA SprBaseTiles,X			;C - - - - - 0x01EF76 07:EF66: BD 27 EE
+	STA scratch5				;C - - - - - 0x01EF79 07:EF69: 85 05
+	LDX oamBufferPos				;C - - - - - 0x01EF7B 07:EF6B: AE 5E 05
+	LDY #$01					;C - - - - - 0x01EF7E 07:EF6E: A0 01
+CODE_0FEF70:
+	;02: Base Y
+	;03: Base X
+	;05: Base tile number
+	;sprAttr: Attributes
+
+	;Get Y
+	LDA (scratch8),Y			;C - - - - - 0x01EF80 07:EF70: B1 08
+	CLC							;C - - - - - 0x01EF82 07:EF72: 18
+	ADC scratch2				;C - - - - - 0x01EF83 07:EF73: 65 02
+	STA OAMBuffer,X				;C - - - - - 0x01EF85 07:EF75: 9D 00 02
+	INX							;C - - - - - 0x01EF88 07:EF78: E8
+	INY							;C - - - - - 0x01EF89 07:EF79: C8
+
+	;Get tile number
+	LDA (scratch8),Y			;C - - - - - 0x01EF8A 07:EF7A: B1 08
+	CLC							;C - - - - - 0x01EF8C 07:EF7C: 18
+	ADC scratch5				;C - - - - - 0x01EF8D 07:EF7D: 65 05
+	STA OAMBuffer,X				;C - - - - - 0x01EF8F 07:EF7F: 9D 00 02
+	INX							;C - - - - - 0x01EF92 07:EF82: E8
+	INY							;C - - - - - 0x01EF93 07:EF83: C8
+
+	;Get attributes
+	LDA (scratch8),Y			;C - - - - - 0x01EF94 07:EF84: B1 08
+	ORA sprAttr				;C - - - - - 0x01EF96 07:EF86: 0D 60 05
+	STA OAMBuffer,X				;C - - - - - 0x01EF99 07:EF89: 9D 00 02
+	INX							;C - - - - - 0x01EF9C 07:EF8C: E8
+	INY							;C - - - - - 0x01EF9D 07:EF8D: C8
+
+	;Get X
+	LDA (scratch8),Y			;C - - - - - 0x01EF9E 07:EF8E: B1 08
+	CLC							;C - - - - - 0x01EFA0 07:EF90: 18
+	ADC scratch3				;C - - - - - 0x01EFA1 07:EF91: 65 03
+	STA OAMBuffer,X				;C - - - - - 0x01EFA3 07:EF93: 9D 00 02
+	INX							;C - - - - - 0x01EFA6 07:EF96: E8
+	CPX #$00					;C - - - - - 0x01EFA7 07:EF97: E0 00
+	BNE CODE_0FEF9E				;C - - - - - 0x01EFA9 07:EF99: D0 03
+		JMP CODE_0FF079				;C - - - - - 0x01EFAB 07:EF9B: 4C 79 F0
+CODE_0FEF9E:
+	INY							;C - - - - - 0x01EFAE 07:EF9E: C8
+	CPY scratch1				;C - - - - - 0x01EFAF 07:EF9F: C4 01
+	BNE CODE_0FEF70				;C - - - - - 0x01EFB1 07:EFA1: D0 CD
+
+	STX oamBufferPos				;C - - - - - 0x01EFB3 07:EFA3: 8E 5E 05
+	CPX #$00					;C - - - - - 0x01EFB6 07:EFA6: E0 00
+	BEQ CODE_0FEFB8				;C - - - - - 0x01EFB8 07:EFA8: F0 0E
+CODE_0FEFAA:
+	INC scratch4				;C - - - - - 0x01EFBA 07:EFAA: E6 04
+	LDA scratch4				;C - - - - - 0x01EFBC 07:EFAC: A5 04
+	CMP #40					;C - - - - - 0x01EFBE 07:EFAE: C9 28
+	BEQ CODE_0FEFB5				;C - - - - - 0x01EFC0 07:EFB0: F0 03
+		JMP CODE_0FEF12				;C - - - - - 0x01EFC2 07:EFB2: 4C 12 EF
+CODE_0FEFB5:
+	JMP CODE_0FF064				;C - - - - - 0x01EFC5 07:EFB5: 4C 64 F0
+
+CODE_0FEFB8:
+	;Unreached
+	;OAM buffer completely full
+	JMP CODE_0FF064				;- - - - - - 0x01EFC8 07:EFB8: 4C
+
+CODE_0FEFBB:
+	;Uneven frame,
+	LDA #$00					;C - - - - - 0x01EFCB 07:EFBB: A9 00
+	STA oamBufferPos				;C - - - - - 0x01EFCD 07:EFBD: 8D 5E 05
+	LDA #$27					;C - - - - - 0x01EFD0 07:EFC0: A9 27
+	STA scratch4				;C - - - - - 0x01EFD2 07:EFC2: 85 04
+CODE_0FEFC4:
+	LDY scratch4				;C - - - - - 0x01EFD4 07:EFC4: A4 04
+	LDA ram_0475				;C - - - - - 0x01EFD6 07:EFC6: AD 75 04
+	BEQ CODE_0FEFD3				;C - - - - - 0x01EFD9 07:EFC9: F0 08
+		CPY ram_0475				;C - - - - - 0x01EFDB 07:EFCB: CC 75 04
+		BCC CODE_0FEFD3				;C - - - - - 0x01EFDE 07:EFCE: 90 03
+			JMP CODE_0FF059				;C - - - - - 0x01EFE0 07:EFD0: 4C 59 F0
+CODE_0FEFD3:
+	LDA objState,Y				;C - - - - - 0x01EFE3 07:EFD3: B9 63 05
+	BNE CODE_0FEFDB				;C - - - - - 0x01EFE6 07:EFD6: D0 03
+		JMP CODE_0FF059				;C - - - - - 0x01EFE8 07:EFD8: 4C 59 F0
+CODE_0FEFDB:
+	LDA objAttr,Y				;C - - - - - 0x01EFEB 07:EFDB: B9 F3 06
+	STA sprAttr				;C - - - - - 0x01EFEE 07:EFDE: 8D 60 05
+	LDA objY,Y				;C - - - - - 0x01EFF1 07:EFE1: B9 8B 05
+	STA scratch2				;C - - - - - 0x01EFF4 07:EFE4: 85 02
+	LDA objX,Y				;C - - - - - 0x01EFF6 07:EFE6: B9 B3 05
+	STA scratch3				;C - - - - - 0x01EFF9 07:EFE9: 85 03
+	LDX objChrSlot,Y				;C - - - - - 0x01EFFB 07:EFEB: BE 2B 06
+	LDA objChrBank,Y				;C - - - - - 0x01EFFE 07:EFEE: B9 53 06
+	BEQ CODE_0FEFF5				;C - - - - - 0x01F001 07:EFF1: F0 02
+		STA chrBankC,X				;C - - - - - 0x01F003 07:EFF3: 95 4D
+CODE_0FEFF5:
+	LDA objImgOfs,Y				;C - - - - - 0x01F005 07:EFF5: B9 DB 05
+	CLC							;C - - - - - 0x01F008 07:EFF8: 18
+	ADC #$00					;C - - - - - 0x01F009 07:EFF9: 69 00
+	STA scratch0				;C - - - - - 0x01F00B 07:EFFB: 85 00
+
+	LDA objImgOfsHI,Y				;C - - - - - 0x01F00D 07:EFFD: B9 03 06
+	ADC #$A0					;C - - - - - 0x01F010 07:F000: 69 A0
+	STA scratch1				;C - - - - - 0x01F012 07:F002: 85 01
+
+	LDY #$00					;C - - - - - 0x01F014 07:F004: A0 00
+	LDA (scratch0),Y			;C - - - - - 0x01F016 07:F006: B1 00
+	STA scratch8				;C - - - - - 0x01F018 07:F008: 85 08
+
+	INY							;C - - - - - 0x01F01A 07:F00A: C8
+	LDA (scratch0),Y			;C - - - - - 0x01F01B 07:F00B: B1 00
+	STA scratch9				;C - - - - - 0x01F01D 07:F00D: 85 09
+
+	LDY #$00					;C - - - - - 0x01F01F 07:F00F: A0 00
+	LDA (scratch8),Y			;C - - - - - 0x01F021 07:F011: B1 08
+	CLC							;C - - - - - 0x01F023 07:F013: 18
+	ADC #$01					;C - - - - - 0x01F024 07:F014: 69 01
+	STA scratch1				;C - - - - - 0x01F026 07:F016: 85 01
+
+	LDA SprBaseTiles,X			;C - - - - - 0x01F028 07:F018: BD 27 EE
+	STA scratch5				;C - - - - - 0x01F02B 07:F01B: 85 05
+	LDX oamBufferPos				;C - - - - - 0x01F02D 07:F01D: AE 5E 05
+	LDY #$01					;C - - - - - 0x01F030 07:F020: A0 01
+CODE_0FF022:
+	;Get Y
+	LDA (scratch8),Y			;C - - - - - 0x01F032 07:F022: B1 08
+	CLC							;C - - - - - 0x01F034 07:F024: 18
+	ADC scratch2				;C - - - - - 0x01F035 07:F025: 65 02
+	STA OAMBuffer,X				;C - - - - - 0x01F037 07:F027: 9D 00 02
+	INX							;C - - - - - 0x01F03A 07:F02A: E8
+	INY							;C - - - - - 0x01F03B 07:F02B: C8
+
+	;Get tile number
+	LDA (scratch8),Y			;C - - - - - 0x01F03C 07:F02C: B1 08
+	CLC							;C - - - - - 0x01F03E 07:F02E: 18
+	ADC scratch5				;C - - - - - 0x01F03F 07:F02F: 65 05
+	STA OAMBuffer,X				;C - - - - - 0x01F041 07:F031: 9D 00 02
+	INX							;C - - - - - 0x01F044 07:F034: E8
+	INY							;C - - - - - 0x01F045 07:F035: C8
+
+	;Get attr
+	LDA (scratch8),Y			;C - - - - - 0x01F046 07:F036: B1 08
+	ORA sprAttr				;C - - - - - 0x01F048 07:F038: 0D 60 05
+	STA OAMBuffer,X				;C - - - - - 0x01F04B 07:F03B: 9D 00 02
+	INX							;C - - - - - 0x01F04E 07:F03E: E8
+	INY							;C - - - - - 0x01F04F 07:F03F: C8
+
+	;Get X
+	LDA (scratch8),Y			;C - - - - - 0x01F050 07:F040: B1 08
+	CLC							;C - - - - - 0x01F052 07:F042: 18
+	ADC scratch3				;C - - - - - 0x01F053 07:F043: 65 03
+	STA OAMBuffer,X				;C - - - - - 0x01F055 07:F045: 9D 00 02
+
+	INX							;C - - - - - 0x01F058 07:F048: E8
+	CPX #$00					;C - - - - - 0x01F059 07:F049: E0 00
+	BEQ CODE_0FF079				;C - - - - - 0x01F05B 07:F04B: F0 2C
+
+	INY							;C - - - - - 0x01F05D 07:F04D: C8
+	CPY scratch1				;C - - - - - 0x01F05E 07:F04E: C4 01
+	BNE CODE_0FF022				;C - - - - - 0x01F060 07:F050: D0 D0
+
+	STX oamBufferPos				;C - - - - - 0x01F062 07:F052: 8E 5E 05
+	CPX #$00					;C - - - - - 0x01F065 07:F055: E0 00
+	BEQ CODE_0FF079				;C - - - - - 0x01F067 07:F057: F0 20
+CODE_0FF059:
+	DEC scratch4				;C - - - - - 0x01F069 07:F059: C6 04
+	LDA scratch4				;C - - - - - 0x01F06B 07:F05B: A5 04
+	CMP #$FF					;C - - - - - 0x01F06D 07:F05D: C9 FF
+	BEQ CODE_0FF064				;C - - - - - 0x01F06F 07:F05F: F0 03
+		JMP CODE_0FEFC4				;C - - - - - 0x01F071 07:F061: 4C C4 EF
+CODE_0FF064:
+	;(Perf) Hide the unused OAM entries (Y = $F0, tile = 1), as the original loop
+	;`LDA #$F0 / STA OAMBuffer,X / LDA #$01 / STA OAMBuffer+1,X / INX x4 / CPX #0 / BNE`
+	;(27 cycles per entry), but 4 entries per iteration (13.25 cycles per entry).
+	;oamBufferPos is a multiple of 4 here (0 + 4 per sprite), so first clear 1 and/or 2
+	;entries until X is a multiple of 16, then 16 bytes per iteration until X wraps to 0.
+	;The bytes written and the exit state are the same: A = 1, X = 0, Z = 1, C = 1, N = 0
+	;(V differs; nothing in the program reads V: no BVC/BVS/PHP). Y is not touched.
+	LDX oamBufferPos
+	TXA
+	AND #$04
+	BEQ DrawObjects_FillPair
+	LDA #$F0
+	STA OAMBuffer,X
+	LDA #$01
+	STA OAMBuffer+1,X
+	INX
+	INX
+	INX
+	INX
+	BEQ DrawObjects_FillDone
+DrawObjects_FillPair:
+	TXA
+	AND #$08
+	BEQ DrawObjects_FillQuads
+	LDA #$F0
+	STA OAMBuffer,X
+	STA OAMBuffer+4,X
+	LDA #$01
+	STA OAMBuffer+1,X
+	STA OAMBuffer+5,X
+	TXA
+	CLC
+	ADC #$08
+	TAX
+	BEQ DrawObjects_FillDone
+DrawObjects_FillQuads:
+	CLC
+CODE_0FF067:
+	;C = 0 here: CLC on entry; on the back edge X + 16 did not wrap (X <= $E0 before)
+	LDA #$F0
+	STA OAMBuffer,X
+	STA OAMBuffer+4,X
+	STA OAMBuffer+8,X
+	STA OAMBuffer+12,X
+	LDA #$01
+	STA OAMBuffer+1,X
+	STA OAMBuffer+5,X
+	STA OAMBuffer+9,X
+	STA OAMBuffer+13,X
+	TXA
+	ADC #$10
+	TAX
+	BNE CODE_0FF067
+DrawObjects_FillDone:
+	LDA #$01
+	CPX #$00
+CODE_0FF079:
+	RTS							;C - - - - - 0x01F089 07:F079: 60
+.endif
 
 CODE_0FF07A:
 	LDA ram_0081				;C - - - - - 0x01F08A 07:F07A: A5 81
