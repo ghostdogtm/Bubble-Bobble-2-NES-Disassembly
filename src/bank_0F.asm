@@ -1858,8 +1858,11 @@ SetRoundIRQ:
 	STA prgBankB					;- - - - - - 0x01EA46 07:EA36: 85
 	STA $8001					;- - - - - - 0x01EA48 07:EA38: 8D
 .else
-	STA $8001				;C - - - - - 0x01EA0F 07:E9FF: 8D 01 80
+	;(Perf) Original order was STA $8001 / STA prgBankB: a lag NMI between the two stores
+	;restored the old prgBankB into $A000 and left prgBankB != mapped bank. This order is
+	;race-free (an NMIShort in between maps the new bank itself).
 	STA prgBankB				;C - - - - - 0x01EA12 07:EA02: 85 53
+	STA $8001				;C - - - - - 0x01EA0F 07:E9FF: 8D 01 80
 .endif
 
 	LDX #$00					;C - - - - - 0x01EA14 07:EA04: A2 00
@@ -2552,19 +2555,11 @@ AnimateObjects:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01ED2E 07:ED1E: A9 00
-	ORA #$07					;C - - - - - 0x01ED30 07:ED20: 09 07
+	LDA #$07					;C - - - - - 0x01ED2E 07:ED1E: A9 07
 	STA $8000				;C - - - - - 0x01ED32 07:ED22: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01ED35 07:ED25: A9 0C
-	STA $8001				;C - - - - - 0x01ED37 07:ED27: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01ED3A 07:ED2A: 85 53
-
-	LDA #$00					;C - - - - - 0x01ED3C 07:ED2C: A9 00
-	ORA #$07					;C - - - - - 0x01ED3E 07:ED2E: 09 07
-	STA $8000				;C - - - - - 0x01ED40 07:ED30: 8D 00 80
-	LDA #.BANK(AnimTable)					;C - - - - - 0x01ED43 07:ED33: A9 0C
-	STA $8001				;C - - - - - 0x01ED45 07:ED35: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01ED48 07:ED38: 85 53
+	STA $8001				;C - - - - - 0x01ED37 07:ED27: 8D 01 80
 .endif
 
 	LDX #20					;C - - - - - 0x01ED4A 07:ED3A: A2 14
@@ -2575,6 +2570,7 @@ AnimateObjects:
 	LDA objAnimTimer,X				;C - - - - - 0x01ED51 07:ED41: BD A3 06
 	BNE @waiting				;C - - - - - 0x01ED54 07:ED44: D0 54
 
+.ifdef REGION_JP
 	LDA objAnim,X				;C - - - - - 0x01ED56 07:ED46: BD 7B 06
 	STA scratch0				;C - - - - - 0x01ED59 07:ED49: 85 00
 	LDA objAnimHI,X				;C - - - - - 0x01ED5B 07:ED4B: BD 1B 07
@@ -2588,6 +2584,24 @@ AnimateObjects:
 	LDA scratch1				;C - - - - - 0x01ED6B 07:ED5B: A5 01
 	ADC #.HIBYTE(AnimTable)					;C - - - - - 0x01ED6D 07:ED5D: 69 A0
 	STA scratch7				;C - - - - - 0x01ED6F 07:ED5F: 85 07
+.else
+	;(Perf) scratch0/1 = objAnim*2 and scratch6/7 = AnimTable + objAnim*2, as the original
+	;`LDA/STA/LDA/STA / ASL scratch0 / ROL scratch1 / LDA scratch0 / CLC / ADC #<AnimTable /
+	;STA scratch6 / LDA scratch1 / ADC #>AnimTable / STA scratch7` (42 -> 28 cycles).
+	;The low-byte add was a no-op because AnimTable is page aligned (asserted below).
+	;Same memory, A and flags (the last ADC has the same inputs).
+	.assert <AnimTable = 0, error, "AnimateObjects assumes AnimTable is page aligned"
+	LDA objAnim,X
+	ASL
+	STA scratch0
+	STA scratch6
+	LDA objAnimHI,X
+	ROL
+	STA scratch1
+	CLC
+	ADC #.HIBYTE(AnimTable)
+	STA scratch7
+.endif
 	LDY #$00					;C - - - - - 0x01ED71 07:ED61: A0 00
 	LDA (scratch6),Y			;C - - - - - 0x01ED73 07:ED63: B1 06
 	STA scratch8				;C - - - - - 0x01ED75 07:ED65: 85 08
@@ -2652,19 +2666,11 @@ CODE_0FEDA3:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;- - - - - - 0x01EDB7 07:EDA7: A9
-	ORA #$07					;- - - - - - 0x01EDB9 07:EDA9: 09
+	LDA #$07					;- - - - - - 0x01EDB7 07:EDA7: A9
 	STA $8000					;- - - - - - 0x01EDBB 07:EDAB: 8D
 	LDA #.BANK(ImageTable1)					;- - - - - - 0x01EDBE 07:EDAE: A9
-	STA $8001					;- - - - - - 0x01EDC0 07:EDB0: 8D
 	STA prgBankB				;- - - - - - 0x01EDC3 07:EDB3: 85
-
-	LDA #$00					;- - - - - - 0x01EDC5 07:EDB5: A9
-	ORA #$07					;- - - - - - 0x01EDC7 07:EDB7: 09
-	STA $8000					;- - - - - - 0x01EDC9 07:EDB9: 8D
-	LDA #.BANK(ImageTable1)					;- - - - - - 0x01EDCC 07:EDBC: A9
-	STA $8001					;- - - - - - 0x01EDCE 07:EDBE: 8D
-	STA prgBankB				;- - - - - - 0x01EDD1 07:EDC1: 85
+	STA $8001					;- - - - - - 0x01EDC0 07:EDB0: 8D
 .endif
 
 	LDA scratch0				;- - - - - - 0x01EDD3 07:EDC3: A5
@@ -2777,19 +2783,11 @@ AnimateNonBubbles:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01EE6C 07:EE5C: A9 00
-	ORA #$07					;C - - - - - 0x01EE6E 07:EE5E: 09 07
+	LDA #$07					;C - - - - - 0x01EE6C 07:EE5C: A9 07
 	STA $8000				;C - - - - - 0x01EE70 07:EE60: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01EE73 07:EE63: A9 0C
-	STA $8001				;C - - - - - 0x01EE75 07:EE65: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01EE78 07:EE68: 85 53
-
-	LDA #$00					;C - - - - - 0x01EE7A 07:EE6A: A9 00
-	ORA #$07					;C - - - - - 0x01EE7C 07:EE6C: 09 07
-	STA $8000				;C - - - - - 0x01EE7E 07:EE6E: 8D 00 80
-	LDA #.BANK(AnimTable)					;C - - - - - 0x01EE81 07:EE71: A9 0C
-	STA $8001				;C - - - - - 0x01EE83 07:EE73: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01EE86 07:EE76: 85 53
+	STA $8001				;C - - - - - 0x01EE75 07:EE65: 8D 01 80
 .endif
 
 	LDX #$00					;C - - - - - 0x01EE88 07:EE78: A2 00
@@ -2800,6 +2798,7 @@ AnimateNonBubbles:
 	LDA objAnimTimer,X				;C - - - - - 0x01EE8F 07:EE7F: BD A3 06
 	BNE @waiting				;C - - - - - 0x01EE92 07:EE82: D0 55
 
+.ifdef REGION_JP
 	LDA objAnim,X				;C - - - - - 0x01EE94 07:EE84: BD 7B 06
 	STA scratch0				;C - - - - - 0x01EE97 07:EE87: 85 00
 	LDA objAnimHI,X				;C - - - - - 0x01EE99 07:EE89: BD 1B 07
@@ -2814,6 +2813,20 @@ AnimateNonBubbles:
 	LDA scratch1				;C - - - - - 0x01EEAA 07:EE9A: A5 01
 	ADC #$A0					;C - - - - - 0x01EEAC 07:EE9C: 69 A0
 	STA scratch7				;C - - - - - 0x01EEAE 07:EE9E: 85 07
+.else
+	;(Perf) Same as in AnimateObjects (the `ADC #$00` was a no-op with C = 0 and the CLC
+	;before ASL was dead: ASL sets C). 44 -> 28 cycles, same memory, A and flags.
+	LDA objAnim,X
+	ASL
+	STA scratch0
+	STA scratch6
+	LDA objAnimHI,X
+	ROL
+	STA scratch1
+	CLC
+	ADC #$A0
+	STA scratch7
+.endif
 	LDY #$00					;C - - - - - 0x01EEB0 07:EEA0: A0 00
 	LDA (scratch6),Y			;C - - - - - 0x01EEB2 07:EEA2: B1 06
 	STA scratch8				;C - - - - - 0x01EEB4 07:EEA4: 85 08
@@ -2863,21 +2876,6 @@ DrawObjects:
 	LDA sprPrgBank
 	STA prgBankB
 	STA $8001
-.else
-	LDA #$00					;C - - - - - 0x01EEF2 07:EEE2: A9 00
-	ORA #$07					;C - - - - - 0x01EEF4 07:EEE4: 09 07
-	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80
-	LDA sprPrgBank				;C - - - - - 0x01EEF9 07:EEE9: AD 61 05
-	STA $8001				;C - - - - - 0x01EEFC 07:EEEC: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01EEFF 07:EEEF: 85 53
-
-	LDA #$00					;C - - - - - 0x01EF01 07:EEF1: A9 00
-	ORA #$07					;C - - - - - 0x01EF03 07:EEF3: 09 07
-	STA $8000				;C - - - - - 0x01EF05 07:EEF5: 8D 00 80
-	LDA sprPrgBank				;C - - - - - 0x01EF08 07:EEF8: AD 61 05
-	STA $8001				;C - - - - - 0x01EF0B 07:EEFB: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01EF0E 07:EEFE: 85 53
-.endif
 
 	LDA globalTimer				;C - - - - - 0x01EF10 07:EF00: A5 14
 	AND #$01					;C - - - - - 0x01EF12 07:EF02: 29 01
@@ -3118,12 +3116,331 @@ CODE_0FF067:
 	CPX #$00					;C - - - - - 0x01F085 07:F075: E0 00
 	BNE CODE_0FF067				;C - - - - - 0x01F087 07:F077: D0 EE
 CODE_0FF079:
-.ifdef REGION_JP
 	LDA nmiPrgBankB
 	STA prgBankB
 	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F089 07:F079: 60
+.else
+	;(Perf) US: optimized copy, see docs/perf_notes.md "Phase 5". JP keeps the original.
+	LDA #$07					;C - - - - - 0x01EEF2 07:EEE2: A9 07
+	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80
+	LDA sprPrgBank				;C - - - - - 0x01EEF9 07:EEE9: AD 61 05
+	STA prgBankB				;C - - - - - 0x01EEFF 07:EEEF: 85 53
+	STA $8001				;C - - - - - 0x01EEFC 07:EEEC: 8D 01 80
+
+	LDA globalTimer				;C - - - - - 0x01EF10 07:EF00: A5 14
+	AND #$01					;C - - - - - 0x01EF12 07:EF02: 29 01
+	BEQ CODE_0FEF09				;C - - - - - 0x01EF14 07:EF04: F0 03
+		JMP CODE_0FEFBB				;C - - - - - 0x01EF16 07:EF06: 4C BB EF
+CODE_0FEF09:
+	;Even frame, draw all objects
+	;(Perf) The slot loop keeps the slot number in Y. The original reloaded it from scratch4
+	;and tested ram_0475 before objState for every slot (34 cycles per empty slot, now 13).
+	;Both tests only decide "skip or draw", so their order does not matter. scratch4 is
+	;still written with the slot before an object is drawn, and the exits leave scratch4 =
+	;40 and Y as the original did.
+	LDA #$00
+	STA oamBufferPos
+	TAY
+DrawObjects_EvenScan:
+	LDA objState,Y
+	BNE DrawObjects_EvenUsed
+DrawObjects_EvenNext:
+	INY
+	CPY #40
+	BNE DrawObjects_EvenScan
+	;Slot 39 was not drawn: the original exits with Y = 39 (LDY scratch4)
+	STY scratch4
+	DEY
+	JMP CODE_0FF064
+DrawObjects_EvenUsed:
+	;Slots >= ram_0475 are skipped when ram_0475 != 0
+	LDA ram_0475
+	BEQ CODE_0FEF29
+	CPY ram_0475
+	BCS DrawObjects_EvenNext
+CODE_0FEF29:
+	STY scratch4
+	LDA objAttr,Y				;C - - - - - 0x01EF39 07:EF29: B9 F3 06
+	STA sprAttr				;C - - - - - 0x01EF3C 07:EF2C: 8D 60 05
+	LDA objY,Y				;C - - - - - 0x01EF3F 07:EF2F: B9 8B 05
+	STA scratch2				;C - - - - - 0x01EF42 07:EF32: 85 02
+	LDA objX,Y				;C - - - - - 0x01EF44 07:EF34: B9 B3 05
+	STA scratch3				;C - - - - - 0x01EF47 07:EF37: 85 03
+
+	LDX objChrSlot,Y				;C - - - - - 0x01EF49 07:EF39: BE 2B 06
+	LDA objChrBank,Y				;C - - - - - 0x01EF4C 07:EF3C: B9 53 06
+	BEQ CODE_0FEF43				;C - - - - - 0x01EF4F 07:EF3F: F0 02
+		STA chrBankC,X				;C - - - - - 0x01EF51 07:EF41: 95 4D
+CODE_0FEF43:
+	LDA objImgOfs,Y				;C - - - - - 0x01EF53 07:EF43: B9 DB 05
+	STA scratch0				;C - - - - - 0x01EF59 07:EF49: 85 00
+
+	LDA objImgOfsHI,Y				;C - - - - - 0x01EF5B 07:EF4B: B9 03 06
+	;(Perf) `CLC / ADC #$00` on the low byte was a no-op apart from C = 0 (and V = 0,
+	;which the ADC below redefines), so the CLC moved here.
+	CLC
+	ADC #$A0					;C - - - - - 0x01EF5E 07:EF4E: 69 A0
+	STA scratch1				;C - - - - - 0x01EF60 07:EF50: 85 01
+
+	LDY #$00					;C - - - - - 0x01EF62 07:EF52: A0 00
+	LDA (scratch0),Y			;C - - - - - 0x01EF64 07:EF54: B1 00
+	STA scratch8				;C - - - - - 0x01EF66 07:EF56: 85 08
+
+	INY							;C - - - - - 0x01EF68 07:EF58: C8
+	LDA (scratch0),Y			;C - - - - - 0x01EF69 07:EF59: B1 00
+	STA scratch9				;C - - - - - 0x01EF6B 07:EF5B: 85 09
+
+	;Get size of sprite struct
+	DEY							;(Perf) was LDY #$00 (Y = 1 here: same Y and N/Z)
+	LDA (scratch8),Y			;C - - - - - 0x01EF6F 07:EF5F: B1 08
+	CLC							;C - - - - - 0x01EF71 07:EF61: 18
+	ADC #$01					;C - - - - - 0x01EF72 07:EF62: 69 01
+	STA scratch1				;C - - - - - 0x01EF74 07:EF64: 85 01
+
+	LDA SprBaseTiles,X			;C - - - - - 0x01EF76 07:EF66: BD 27 EE
+	STA scratch5				;C - - - - - 0x01EF79 07:EF69: 85 05
+	LDX oamBufferPos				;C - - - - - 0x01EF7B 07:EF6B: AE 5E 05
+	LDY #$01					;C - - - - - 0x01EF7E 07:EF6E: A0 01
+CODE_0FEF70:
+	;02: Base Y
+	;03: Base X
+	;05: Base tile number
+	;sprAttr: Attributes
+
+	;Get Y
+	LDA (scratch8),Y			;C - - - - - 0x01EF80 07:EF70: B1 08
+	CLC							;C - - - - - 0x01EF82 07:EF72: 18
+	ADC scratch2				;C - - - - - 0x01EF83 07:EF73: 65 02
+	STA OAMBuffer,X				;C - - - - - 0x01EF85 07:EF75: 9D 00 02
+	INX							;C - - - - - 0x01EF88 07:EF78: E8
+	INY							;C - - - - - 0x01EF89 07:EF79: C8
+
+	;Get tile number
+	LDA (scratch8),Y			;C - - - - - 0x01EF8A 07:EF7A: B1 08
+	CLC							;C - - - - - 0x01EF8C 07:EF7C: 18
+	ADC scratch5				;C - - - - - 0x01EF8D 07:EF7D: 65 05
+	STA OAMBuffer,X				;C - - - - - 0x01EF8F 07:EF7F: 9D 00 02
+	INX							;C - - - - - 0x01EF92 07:EF82: E8
+	INY							;C - - - - - 0x01EF93 07:EF83: C8
+
+	;Get attributes
+	LDA (scratch8),Y			;C - - - - - 0x01EF94 07:EF84: B1 08
+	ORA sprAttr				;C - - - - - 0x01EF96 07:EF86: 0D 60 05
+	STA OAMBuffer,X				;C - - - - - 0x01EF99 07:EF89: 9D 00 02
+	INX							;C - - - - - 0x01EF9C 07:EF8C: E8
+	INY							;C - - - - - 0x01EF9D 07:EF8D: C8
+
+	;Get X
+	LDA (scratch8),Y			;C - - - - - 0x01EF9E 07:EF8E: B1 08
+	CLC							;C - - - - - 0x01EFA0 07:EF90: 18
+	ADC scratch3				;C - - - - - 0x01EFA1 07:EF91: 65 03
+	STA OAMBuffer,X				;C - - - - - 0x01EFA3 07:EF93: 9D 00 02
+	INX							;C - - - - - 0x01EFA6 07:EF96: E8
+	;(Perf) INX already sets Z: `CPX #$00 / BNE / JMP CODE_0FF079` became one BEQ (not taken:
+	;2 cycles instead of 2 + 3). The full-buffer exit sets C = 1 as CPX #$00 did.
+	BEQ DrawObjects_EvenFull
+CODE_0FEF9E:
+	INY							;C - - - - - 0x01EFAE 07:EF9E: C8
+	CPY scratch1				;C - - - - - 0x01EFAF 07:EF9F: C4 01
+	BNE CODE_0FEF70				;C - - - - - 0x01EFB1 07:EFA1: D0 CD
+
+	STX oamBufferPos				;C - - - - - 0x01EFB3 07:EFA3: 8E 5E 05
+	;(Perf) The original `CPX #$00 / BEQ CODE_0FEFB8` here was never taken: X != 0, because
+	;the loop above leaves through the wrap check when X becomes 0. INC/LDA/CMP scratch4
+	;became LDY/INY/CPY (the next slot test needs the slot in Y anyway).
+CODE_0FEFAA:
+	LDY scratch4
+	INY
+	CPY #40
+	BEQ DrawObjects_EvenLast
+	JMP DrawObjects_EvenScan
+DrawObjects_EvenFull:
+	;OAM buffer full: return as the original did after CPX #$00 (C = 1, Z = 1, N = 0)
+	SEC
+	RTS
+DrawObjects_EvenLast:
+	;Slot 39 was drawn: the original exits with Y = scratch1 (end of its sprite loop)
+	STY scratch4
+	LDY scratch1
+	JMP CODE_0FF064
+CODE_0FEFBB:
+	;Uneven frame, draw all objects in reverse order
+	;(Perf) Same slot loop as the even path, counting down. The slots >= ram_0475 (skipped
+	;when ram_0475 != 0) all come first in this order, so the loop starts below them
+	;instead of testing ram_0475 per slot. ram_0475 is not written during DrawObjects.
+	LDA #$00
+	STA oamBufferPos
+	LDY #$27
+	LDA ram_0475
+	BEQ DrawObjects_OddScan
+	CMP #$28
+	BCS DrawObjects_OddScan
+	TAY
+	DEY
+DrawObjects_OddScan:
+	LDA objState,Y
+	BNE CODE_0FEFDB
+	DEY
+	BPL DrawObjects_OddScan
+	;Slot 0 was not drawn: the original exits with Y = 0 (LDY scratch4)
+	STY scratch4
+	INY
+	JMP CODE_0FF064
+CODE_0FEFDB:
+	STY scratch4
+	LDA objAttr,Y				;C - - - - - 0x01EFEB 07:EFDB: B9 F3 06
+	STA sprAttr				;C - - - - - 0x01EFEE 07:EFDE: 8D 60 05
+	LDA objY,Y				;C - - - - - 0x01EFF1 07:EFE1: B9 8B 05
+	STA scratch2				;C - - - - - 0x01EFF4 07:EFE4: 85 02
+	LDA objX,Y				;C - - - - - 0x01EFF6 07:EFE6: B9 B3 05
+	STA scratch3				;C - - - - - 0x01EFF9 07:EFE9: 85 03
+	LDX objChrSlot,Y				;C - - - - - 0x01EFFB 07:EFEB: BE 2B 06
+	LDA objChrBank,Y				;C - - - - - 0x01EFFE 07:EFEE: B9 53 06
+	BEQ CODE_0FEFF5				;C - - - - - 0x01F001 07:EFF1: F0 02
+		STA chrBankC,X				;C - - - - - 0x01F003 07:EFF3: 95 4D
+CODE_0FEFF5:
+	LDA objImgOfs,Y				;C - - - - - 0x01F005 07:EFF5: B9 DB 05
+	STA scratch0				;C - - - - - 0x01F00B 07:EFFB: 85 00
+
+	LDA objImgOfsHI,Y				;C - - - - - 0x01F00D 07:EFFD: B9 03 06
+	;(Perf) `CLC / ADC #$00` on the low byte was a no-op apart from C = 0 (and V = 0,
+	;which the ADC below redefines), so the CLC moved here.
+	CLC
+	ADC #$A0					;C - - - - - 0x01F010 07:F000: 69 A0
+	STA scratch1				;C - - - - - 0x01F012 07:F002: 85 01
+
+	LDY #$00					;C - - - - - 0x01F014 07:F004: A0 00
+	LDA (scratch0),Y			;C - - - - - 0x01F016 07:F006: B1 00
+	STA scratch8				;C - - - - - 0x01F018 07:F008: 85 08
+
+	INY							;C - - - - - 0x01F01A 07:F00A: C8
+	LDA (scratch0),Y			;C - - - - - 0x01F01B 07:F00B: B1 00
+	STA scratch9				;C - - - - - 0x01F01D 07:F00D: 85 09
+
+	DEY							;(Perf) was LDY #$00 (Y = 1 here: same Y and N/Z)
+	LDA (scratch8),Y			;C - - - - - 0x01F021 07:F011: B1 08
+	CLC							;C - - - - - 0x01F023 07:F013: 18
+	ADC #$01					;C - - - - - 0x01F024 07:F014: 69 01
+	STA scratch1				;C - - - - - 0x01F026 07:F016: 85 01
+
+	LDA SprBaseTiles,X			;C - - - - - 0x01F028 07:F018: BD 27 EE
+	STA scratch5				;C - - - - - 0x01F02B 07:F01B: 85 05
+	LDX oamBufferPos				;C - - - - - 0x01F02D 07:F01D: AE 5E 05
+	LDY #$01					;C - - - - - 0x01F030 07:F020: A0 01
+CODE_0FF022:
+	;Get Y
+	LDA (scratch8),Y			;C - - - - - 0x01F032 07:F022: B1 08
+	CLC							;C - - - - - 0x01F034 07:F024: 18
+	ADC scratch2				;C - - - - - 0x01F035 07:F025: 65 02
+	STA OAMBuffer,X				;C - - - - - 0x01F037 07:F027: 9D 00 02
+	INX							;C - - - - - 0x01F03A 07:F02A: E8
+	INY							;C - - - - - 0x01F03B 07:F02B: C8
+
+	;Get tile number
+	LDA (scratch8),Y			;C - - - - - 0x01F03C 07:F02C: B1 08
+	CLC							;C - - - - - 0x01F03E 07:F02E: 18
+	ADC scratch5				;C - - - - - 0x01F03F 07:F02F: 65 05
+	STA OAMBuffer,X				;C - - - - - 0x01F041 07:F031: 9D 00 02
+	INX							;C - - - - - 0x01F044 07:F034: E8
+	INY							;C - - - - - 0x01F045 07:F035: C8
+
+	;Get attr
+	LDA (scratch8),Y			;C - - - - - 0x01F046 07:F036: B1 08
+	ORA sprAttr				;C - - - - - 0x01F048 07:F038: 0D 60 05
+	STA OAMBuffer,X				;C - - - - - 0x01F04B 07:F03B: 9D 00 02
+	INX							;C - - - - - 0x01F04E 07:F03E: E8
+	INY							;C - - - - - 0x01F04F 07:F03F: C8
+
+	;Get X
+	LDA (scratch8),Y			;C - - - - - 0x01F050 07:F040: B1 08
+	CLC							;C - - - - - 0x01F052 07:F042: 18
+	ADC scratch3				;C - - - - - 0x01F053 07:F043: 65 03
+	STA OAMBuffer,X				;C - - - - - 0x01F055 07:F045: 9D 00 02
+
+	INX							;C - - - - - 0x01F058 07:F048: E8
+	;(Perf) INX already sets Z (CPX #$00 removed). The full-buffer exit sets C = 1.
+	BEQ DrawObjects_OddFull
+
+	INY							;C - - - - - 0x01F05D 07:F04D: C8
+	CPY scratch1				;C - - - - - 0x01F05E 07:F04E: C4 01
+	BNE CODE_0FF022				;C - - - - - 0x01F060 07:F050: D0 D0
+
+	STX oamBufferPos				;C - - - - - 0x01F062 07:F052: 8E 5E 05
+	;(Perf) `CPX #$00 / BEQ CODE_0FF079` was never taken here (X != 0, see the even path).
+CODE_0FF059:
+	LDY scratch4
+	DEY
+	BMI DrawObjects_OddLast
+	JMP DrawObjects_OddScan
+DrawObjects_OddFull:
+	;OAM buffer full: return as the original did after CPX #$00 (C = 1, Z = 1, N = 0)
+	SEC
+	RTS
+DrawObjects_OddLast:
+	;Slot 0 was drawn: the original exits with Y = scratch1 (end of its sprite loop)
+	STY scratch4
+	LDY scratch1
+CODE_0FF064:
+	;(Perf) Hide the unused OAM entries (Y = $F0, tile = 1), as the original loop
+	;`LDA #$F0 / STA OAMBuffer,X / LDA #$01 / STA OAMBuffer+1,X / INX x4 / CPX #0 / BNE`
+	;(27 cycles per entry), but 4 entries per iteration (13.25 cycles per entry).
+	;oamBufferPos is a multiple of 4 here (0 + 4 per sprite), so first clear 1 and/or 2
+	;entries until X is a multiple of 16, then 16 bytes per iteration until X wraps to 0.
+	;The bytes written and the exit state are the same: A = 1, X = 0, Z = 1, C = 1, N = 0
+	;(V differs; nothing in the program reads V: no BVC/BVS/PHP). Y is not touched.
+	LDX oamBufferPos
+	TXA
+	AND #$04
+	BEQ DrawObjects_FillPair
+	LDA #$F0
+	STA OAMBuffer,X
+	LDA #$01
+	STA OAMBuffer+1,X
+	INX
+	INX
+	INX
+	INX
+	BEQ DrawObjects_FillDone
+DrawObjects_FillPair:
+	TXA
+	AND #$08
+	BEQ DrawObjects_FillQuads
+	LDA #$F0
+	STA OAMBuffer,X
+	STA OAMBuffer+4,X
+	LDA #$01
+	STA OAMBuffer+1,X
+	STA OAMBuffer+5,X
+	TXA
+	CLC
+	ADC #$08
+	TAX
+	BEQ DrawObjects_FillDone
+DrawObjects_FillQuads:
+	CLC
+CODE_0FF067:
+	;C = 0 here: CLC on entry; on the back edge X + 16 did not wrap (X <= $E0 before)
+	LDA #$F0
+	STA OAMBuffer,X
+	STA OAMBuffer+4,X
+	STA OAMBuffer+8,X
+	STA OAMBuffer+12,X
+	LDA #$01
+	STA OAMBuffer+1,X
+	STA OAMBuffer+5,X
+	STA OAMBuffer+9,X
+	STA OAMBuffer+13,X
+	TXA
+	ADC #$10
+	TAX
+	BNE CODE_0FF067
+DrawObjects_FillDone:
+	LDA #$01
+	CPX #$00
+CODE_0FF079:
+	RTS							;C - - - - - 0x01F089 07:F079: 60
+.endif
 
 CODE_0FF07A:
 	LDA ram_0081				;C - - - - - 0x01F08A 07:F07A: A5 81
@@ -3853,19 +4170,11 @@ CODE_0FF4D2:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F4EA 07:F4DA: A9 00
-	ORA #$07					;C - - - - - 0x01F4EC 07:F4DC: 09 07
+	LDA #$07					;C - - - - - 0x01F4EA 07:F4DA: A9 07
 	STA $8000				;C - - - - - 0x01F4EE 07:F4DE: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F4F1 07:F4E1: A9 06
-	STA $8001				;C - - - - - 0x01F4F3 07:F4E3: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F4F6 07:F4E6: 85 53
-
-	LDA #$00					;C - - - - - 0x01F4F8 07:F4E8: A9 00
-	ORA #$07					;C - - - - - 0x01F4FA 07:F4EA: 09 07
-	STA $8000				;C - - - - - 0x01F4FC 07:F4EC: 8D 00 80
-	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F4FF 07:F4EF: A9 06
-	STA $8001				;C - - - - - 0x01F501 07:F4F1: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F504 07:F4F4: 85 53
+	STA $8001				;C - - - - - 0x01F4F3 07:F4E3: 8D 01 80
 .endif
 
 	LDA scratch0				;C - - - - - 0x01F506 07:F4F6: A5 00
@@ -3873,7 +4182,11 @@ CODE_0FF4D2:
 	TAY							;C - - - - - 0x01F50A 07:F4FA: A8
 	LDA (ram_0027),Y			;C - - - - - 0x01F50B 07:F4FB: B1 27
 	STA ram_0080				;C - - - - - 0x01F50D 07:F4FD: 85 80
+.ifdef REGION_JP
 	BEQ CODE_0FF563				;C - - - - - 0x01F50F 07:F4FF: F0 62
+.else
+	BEQ CODE_0FF563f
+.endif
 
 	TAY							;C - - - - - 0x01F511 07:F501: A8
 	LDA ram_0760,Y				;C - - - - - 0x01F512 07:F502: B9 60 07
@@ -3887,19 +4200,11 @@ CODE_0FF50A:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;- - - - - - 0x01F51A 07:F50A: A9
-	ORA #$07					;- - - - - - 0x01F51C 07:F50C: 09
+	LDA #$07					;- - - - - - 0x01F51A 07:F50A: A9
 	STA $8000					;- - - - - - 0x01F51E 07:F50E: 8D
 	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F521 07:F511: A9
-	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
 	STA prgBankB				;- - - - - - 0x01F526 07:F516: 85
-
-	LDA #$00					;- - - - - - 0x01F528 07:F518: A9
-	ORA #$07					;- - - - - - 0x01F52A 07:F51A: 09
-	STA $8000					;- - - - - - 0x01F52C 07:F51C: 8D
-	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F52F 07:F51F: A9
-	STA $8001					;- - - - - - 0x01F531 07:F521: 8D
-	STA prgBankB				;- - - - - - 0x01F534 07:F524: 85
+	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
 .endif
 
 	LDA scratch0				;- - - - - - 0x01F536 07:F526: A5
@@ -3922,7 +4227,35 @@ CODE_0FF535:
 	ADC ram_00D2				;C - - - - - 0x01F551 07:F541: 65 D2
 	STA ram_001F				;C - - - - - 0x01F553 07:F543: 85 1F
 	CLC							;C - - - - - 0x01F555 07:F545: 18
+.ifdef REGION_JP
 	JMP CODE_0FF56D				;C - - - - - 0x01F556 07:F546: 4C 6D F5
+.else
+	;(Perf) Flow path (irqEffect 1/3/4): bank 6 (RoundsFlowTable) was just mapped, so the
+	;terrainBank switch below is never redundant here (measured 0%), and the selector is
+	;still 7 (no other $8000 write since; NMIShort also leaves 7), so the switch needs no
+	;STA $8000. The other paths take the guarded switch at CODE_0FF56E. Same code as
+	;CODE_0FF563/CODE_0FF56D up to the switch.
+	JMP CODE_0FF56Df
+CODE_0FF563f:
+	LDA scratch0
+	AND #$F0
+	STA scratch2
+	LDA scratch1
+	STA ram_001F
+CODE_0FF56Df:
+	LSR
+	LSR
+	LSR
+	LSR
+	CLC
+	ADC scratch2
+	STA ram_0046
+	TAY
+	LDA terrainBank
+	STA prgBankB
+	STA $8001
+	JMP CODE_0FF595
+.endif
 CODE_0FF549:
 	LDA scratch0				;C - - - - - 0x01F559 07:F549: A5 00
 	AND #$F0					;C - - - - - 0x01F55B 07:F54B: 29 F0
@@ -3961,21 +4294,18 @@ CODE_0FF56E:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F587 07:F577: A9 00
-	ORA #$07					;C - - - - - 0x01F589 07:F579: 09 07
-	STA $8000				;C - - - - - 0x01F58B 07:F57B: 8D 00 80
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F58E 07:F57E: AD 5B 07
-	STA $8001				;C - - - - - 0x01F591 07:F581: 8D 01 80
+	CMP prgBankB
+	BEQ CODE_0FF595
 	STA prgBankB				;C - - - - - 0x01F594 07:F584: 85 53
-
-	LDA #$00					;C - - - - - 0x01F596 07:F586: A9 00
-	ORA #$07					;C - - - - - 0x01F598 07:F588: 09 07
-	STA $8000				;C - - - - - 0x01F59A 07:F58A: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F59D 07:F58D: AD 5B 07
-	STA $8001				;C - - - - - 0x01F5A0 07:F590: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F5A3 07:F593: 85 53
+	LDA #$07					;C - - - - - 0x01F587 07:F577: A9 07
+	STA $8000				;C - - - - - 0x01F58B 07:F57B: 8D 00 80
+	LDA prgBankB
+	STA $8001				;C - - - - - 0x01F591 07:F581: 8D 01 80
 .endif
-
+CODE_0FF595:
 	;Get 16x16 tile number
 	LDA (terrainAdr),Y			;C - - - - - 0x01F5A5 07:F595: B1 42
 	STA scratch3				;C - - - - - 0x01F5A7 07:F597: 85 03
@@ -4043,19 +4373,17 @@ CODE_0FF5E6:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F5FE 07:F5EE: A9 00
-	ORA #$07					;C - - - - - 0x01F600 07:F5F0: 09 07
-	STA $8000				;C - - - - - 0x01F602 07:F5F2: 8D 00 80
+	;(Perf) Guard: skip the switch when the bank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F605 07:F5F5: A9 06
-	STA $8001				;C - - - - - 0x01F607 07:F5F7: 8D 01 80
+	CMP prgBankB
+	BEQ @mapped
 	STA prgBankB				;C - - - - - 0x01F60A 07:F5FA: 85 53
-
-	LDA #$00					;C - - - - - 0x01F60C 07:F5FC: A9 00
-	ORA #$07					;C - - - - - 0x01F60E 07:F5FE: 09 07
-	STA $8000				;C - - - - - 0x01F610 07:F600: 8D 00 80
-	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F613 07:F603: A9 06
-	STA $8001				;C - - - - - 0x01F615 07:F605: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F618 07:F608: 85 53
+	LDA #$07					;C - - - - - 0x01F5FE 07:F5EE: A9 07
+	STA $8000				;C - - - - - 0x01F602 07:F5F2: 8D 00 80
+	LDA #.BANK(RoundsFlowTable)
+	STA $8001				;C - - - - - 0x01F607 07:F5F7: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch0				;C - - - - - 0x01F61A 07:F60A: A5 00
@@ -4395,19 +4723,17 @@ CheckWall:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F7F2 07:F7E2: A9 00
-	ORA #$07					;C - - - - - 0x01F7F4 07:F7E4: 09 07
-	STA $8000				;C - - - - - 0x01F7F6 07:F7E6: 8D 00 80
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F7F9 07:F7E9: AD 5B 07
-	STA $8001				;C - - - - - 0x01F7FC 07:F7EC: 8D 01 80
+	CMP prgBankB
+	BEQ @mapped
 	STA prgBankB				;C - - - - - 0x01F7FF 07:F7EF: 85 53
-
-	LDA #$00					;C - - - - - 0x01F801 07:F7F1: A9 00
-	ORA #$07					;C - - - - - 0x01F803 07:F7F3: 09 07
-	STA $8000				;C - - - - - 0x01F805 07:F7F5: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F808 07:F7F8: AD 5B 07
-	STA $8001				;C - - - - - 0x01F80B 07:F7FB: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F80E 07:F7FE: 85 53
+	LDA #$07					;C - - - - - 0x01F7F2 07:F7E2: A9 07
+	STA $8000				;C - - - - - 0x01F7F6 07:F7E6: 8D 00 80
+	LDA prgBankB
+	STA $8001				;C - - - - - 0x01F7FC 07:F7EC: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F810 07:F800: A5 04
@@ -4436,19 +4762,17 @@ CheckFloor:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F82A 07:F81A: A9 00
-	ORA #$07					;C - - - - - 0x01F82C 07:F81C: 09 07
-	STA $8000				;C - - - - - 0x01F82E 07:F81E: 8D 00 80
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F831 07:F821: AD 5B 07
-	STA $8001				;C - - - - - 0x01F834 07:F824: 8D 01 80
+	CMP prgBankB
+	BEQ @mapped
 	STA prgBankB				;C - - - - - 0x01F837 07:F827: 85 53
-
-	LDA #$00					;C - - - - - 0x01F839 07:F829: A9 00
-	ORA #$07					;C - - - - - 0x01F83B 07:F82B: 09 07
-	STA $8000				;C - - - - - 0x01F83D 07:F82D: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F840 07:F830: AD 5B 07
-	STA $8001				;C - - - - - 0x01F843 07:F833: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F846 07:F836: 85 53
+	LDA #$07					;C - - - - - 0x01F82A 07:F81A: A9 07
+	STA $8000				;C - - - - - 0x01F82E 07:F81E: 8D 00 80
+	LDA prgBankB
+	STA $8001				;C - - - - - 0x01F834 07:F824: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F848 07:F838: A5 04
@@ -4477,18 +4801,17 @@ CODE_0FF852:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F862 07:F852: A9 00
-	ORA #$07					;C - - - - - 0x01F864 07:F854: 09 07
-	STA $8000				;C - - - - - 0x01F866 07:F856: 8D 00 80
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F869 07:F859: AD 5B 07
-	STA $8001				;C - - - - - 0x01F86C 07:F85C: 8D 01 80
+	CMP prgBankB
+	BEQ @mapped
 	STA prgBankB				;C - - - - - 0x01F86F 07:F85F: 85 53
-	LDA #$00					;C - - - - - 0x01F871 07:F861: A9 00
-	ORA #$07					;C - - - - - 0x01F873 07:F863: 09 07
-	STA $8000				;C - - - - - 0x01F875 07:F865: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F878 07:F868: AD 5B 07
-	STA $8001				;C - - - - - 0x01F87B 07:F86B: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F87E 07:F86E: 85 53
+	LDA #$07					;C - - - - - 0x01F862 07:F852: A9 07
+	STA $8000				;C - - - - - 0x01F866 07:F856: 8D 00 80
+	LDA prgBankB
+	STA $8001				;C - - - - - 0x01F86C 07:F85C: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F880 07:F870: A5 04
@@ -4575,18 +4898,17 @@ CODE_0FF8F3:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F903 07:F8F3: A9 00
-	ORA #$07					;C - - - - - 0x01F905 07:F8F5: 09 07
-	STA $8000				;C - - - - - 0x01F907 07:F8F7: 8D 00 80
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F90A 07:F8FA: AD 5B 07
-	STA $8001				;C - - - - - 0x01F90D 07:F8FD: 8D 01 80
+	CMP prgBankB
+	BEQ @mapped
 	STA prgBankB				;C - - - - - 0x01F910 07:F900: 85 53
-	LDA #$00					;C - - - - - 0x01F912 07:F902: A9 00
-	ORA #$07					;C - - - - - 0x01F914 07:F904: 09 07
-	STA $8000				;C - - - - - 0x01F916 07:F906: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F919 07:F909: AD 5B 07
-	STA $8001				;C - - - - - 0x01F91C 07:F90C: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F91F 07:F90F: 85 53
+	LDA #$07					;C - - - - - 0x01F903 07:F8F3: A9 07
+	STA $8000				;C - - - - - 0x01F907 07:F8F7: 8D 00 80
+	LDA prgBankB
+	STA $8001				;C - - - - - 0x01F90D 07:F8FD: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F921 07:F911: A5 04
@@ -4665,18 +4987,17 @@ CODE_0FF986:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F996 07:F986: A9 00
-	ORA #$07					;C - - - - - 0x01F998 07:F988: 09 07
-	STA $8000				;C - - - - - 0x01F99A 07:F98A: 8D 00 80
+	;(Perf) Guard: skip the switch when the bank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F99D 07:F98D: A9 06
-	STA $8001				;C - - - - - 0x01F99F 07:F98F: 8D 01 80
+	CMP prgBankB
+	BEQ @mapped
 	STA prgBankB				;C - - - - - 0x01F9A2 07:F992: 85 53
-	LDA #$00					;C - - - - - 0x01F9A4 07:F994: A9 00
-	ORA #$07					;C - - - - - 0x01F9A6 07:F996: 09 07
-	STA $8000				;C - - - - - 0x01F9A8 07:F998: 8D 00 80
-	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F9AB 07:F99B: A9 06
-	STA $8001				;C - - - - - 0x01F9AD 07:F99D: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01F9B0 07:F9A0: 85 53
+	LDA #$07					;C - - - - - 0x01F996 07:F986: A9 07
+	STA $8000				;C - - - - - 0x01F99A 07:F98A: 8D 00 80
+	LDA #.BANK(RoundsFlowTable)
+	STA $8001				;C - - - - - 0x01F99F 07:F98F: 8D 01 80
+@mapped:
 .endif
 
 	LDA ram_0046				;C - - - - - 0x01F9B2 07:F9A2: A5 46
@@ -5951,11 +6272,28 @@ SwapPrgBankA:
 	STA $8001				;C - - - - - 0x01FF54 07:FF44: 8D 01 80
 	STA prgBankA				;C - - - - - 0x01FF57 07:FF47: 85 54
 
-	LDA #$06					;C - - - - - 0x01FF59 07:FF49: A9 06
-	STA $8000				;C - - - - - 0x01FF5B 07:FF4B: 8D 00 80
-	LDA newPrgBank				;C - - - - - 0x01FF5E 07:FF4E: A5 3B
-	STA $8001				;C - - - - - 0x01FF60 07:FF50: 8D 01 80
-	STA prgBankA				;C - - - - - 0x01FF63 07:FF53: 85 54
+	;(Perf) The original repeated the whole switch to survive a lag NMI (NMIShort) landing
+	;between STA $8000 and STA $8001: NMIShort leaves the selector at 7, so the $8001 write
+	;went to the $A000 slot. The repeat fixed the $8000 window but left $A000 wrong.
+	;NMIShort swaps banks only when nmiProgress == 1 and always makes it 2 first, so if
+	;nmiProgress is still 1 (or 3: outside the logic) no swap can have happened. Otherwise
+	;redo the switch and re-assert the $A000 slot; NMIShort cannot swap again this tick.
+	;AND keeps C and V; the reload of newPrgBank restores A and N/Z.
+	LDA nmiProgress
+	AND #$01
+	BEQ @lagNMI
+	LDA newPrgBank
+	RTS
+@lagNMI:
+	LDA #$06
+	STA $8000
+	LDA newPrgBank
+	STA $8001
+	LDA #$07
+	STA $8000
+	LDA prgBankB
+	STA $8001
+	LDA newPrgBank
 	RTS							;C - - - - - 0x01FF65 07:FF55: 60
 .endif
 
@@ -5964,14 +6302,8 @@ SwapPrgBankB:
 	LDA #$07					;C - - - - - 0x01FF66 07:FF56: A9 07
 	STA $8000				;C - - - - - 0x01FF68 07:FF58: 8D 00 80
 	LDA newPrgBank				;C - - - - - 0x01FF6B 07:FF5B: A5 3B
-	STA $8001				;C - - - - - 0x01FF6D 07:FF5D: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01FF70 07:FF60: 85 53
-
-	LDA #$07					;C - - - - - 0x01FF72 07:FF62: A9 07
-	STA $8000				;C - - - - - 0x01FF74 07:FF64: 8D 00 80
-	LDA newPrgBank				;C D 0 - - - 0x01FF77 07:FF67: A5 3B
-	STA $8001				;C - - - - - 0x01FF79 07:FF69: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01FF7C 07:FF6C: 85 53
+	STA $8001				;C - - - - - 0x01FF6D 07:FF5D: 8D 01 80
 	RTS							;C - - - - - 0x01FF7E 07:FF6E: 60
 .endif
 

@@ -13,7 +13,16 @@ CODE_098008:
 	STA terrainResult				;C - - - - - 0x01201A 04:800A: 8D E9 04
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01201D 04:800D: BD 77 05
 	BNE CODE_098015				;C - - - - - 0x012020 04:8010: D0 03
+.ifdef REGION_JP
 		JMP CODE_09815D				;C - - - - - 0x012022 04:8012: 4C 5D 81
+.else
+		;Empty slot: step to the next slot right here instead of JMP CODE_09815D (perf phase 4)
+		INX
+		CPX #20
+		BNE CODE_098008
+		JMP CODE_098165
+.endif
+.ifdef REGION_JP
 CODE_098015:
 	CMP #BUBBLE_RISING					;C - - - - - 0x012025 04:8015: C9 01
 	BNE CODE_09803C				;C - - - - - 0x012027 04:8017: D0 23
@@ -166,6 +175,160 @@ CODE_098135:
 .endif
 		JSR BubbleEmergingUpdate				;C - - - - - 0x012149 04:8139: 20 9C 8B
 		JMP CODE_09815D				;C - - - - - 0x01214C 04:813C: 4C 5D 81
+.else
+;Perf phase 4: the same compare/handler blocks, reordered by measured state frequency
+;(RISING, ENEMY, EXPIRING, POWER, POPPING, EMERGING first). Every handler is still entered from its
+;own CMP #state / BNE pair, so A = state, Z = 1, C = 1, N = 0 and X/Y/V are unchanged. POPPED and
+;EXPIRED_POP must stay near the end: their BCC CODE_09815D has to reach the loop tail.
+CODE_098015:
+	CMP #BUBBLE_RISING					;C - - - - - 0x012025 04:8015: C9 01
+	BNE CODE_098052				;C - - - - - 0x012027 04:8017: D0 23 (orig: BNE CODE_09803C)
+		LDA globalTimer				;C - - - - - 0x012029 04:8019: A5 14
+		AND #$0E					;C - - - - - 0x01202B 04:801B: 29 0E
+		BNE CODE_098039				;C - - - - - 0x01202D 04:801D: D0 1A
+			INC bubbleProgress,X				;C - - - - - 0x01202F 04:801F: FE D5 04
+			LDA bubbleProgress,X				;C - - - - - 0x012032 04:8022: BD D5 04
+			CMP bubbleLifespan				;C - - - - - 0x012035 04:8025: CD 1C 05
+			BNE CODE_098039				;C - - - - - 0x012038 04:8028: D0 0F
+				LDA #BUBBLE_EXPIRING					;C - - - - - 0x01203A 04:802A: A9 02
+				STA scratch0				;C - - - - - 0x01203C 04:802C: 85 00
+				LDA #.LOBYTE(anBubbleWeak_ID)					;C - - - - - 0x01203E 04:802E: A9 30
+				STA scratch1				;C - - - - - 0x012040 04:8030: 85 01
+				LDA #.HIBYTE(anBubbleWeak_ID)					;C - - - - - 0x012042 04:8032: A9 00
+				STA scratch2				;C - - - - - 0x012044 04:8034: 85 02
+				JSR ReplaceBubble				;C - - - - - 0x012046 04:8036: 20 CE 8A
+	CODE_098039:
+		JMP CODE_098149				;C - - - - - 0x012049 04:8039: 4C 49 81
+CODE_098052:
+	CMP #BUBBLE_ENEMY					;C - - - - - 0x012062 04:8052: C9 03
+	BNE CODE_09803C				;C - - - - - 0x012064 04:8054: D0 23 (orig: BNE CODE_098079)
+		LDA globalTimer				;C - - - - - 0x012066 04:8056: A5 14
+		AND #$0E					;C - - - - - 0x012068 04:8058: 29 0E
+		BNE CODE_098076				;C - - - - - 0x01206A 04:805A: D0 1A
+			INC bubbleProgress,X				;C - - - - - 0x01206C 04:805C: FE D5 04
+			LDA bubbleProgress,X				;C - - - - - 0x01206F 04:805F: BD D5 04
+			CMP bubbleLifespan				;C - - - - - 0x012072 04:8062: CD 1C 05
+			BNE CODE_098076				;C - - - - - 0x012075 04:8065: D0 0F
+				LDA #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x012077 04:8067: A9 04
+				STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x012079 04:8069: 9D 77 05
+				LDA #$03					;C - - - - - 0x01207C 04:806C: A9 03
+				STA objAttr+OSLOT_BUBBLE,X				;C - - - - - 0x01207E 04:806E: 9D 07 07
+				LDA #$00					;C - - - - - 0x012081 04:8071: A9 00
+				STA bubbleProgress,X				;C - - - - - 0x012083 04:8073: 9D D5 04
+	CODE_098076:
+		JMP CODE_098149				;C - - - - - 0x012086 04:8076: 4C 49 81
+CODE_09803C:
+	CMP #BUBBLE_EXPIRING					;C - - - - - 0x01204C 04:803C: C9 02
+	BNE CODE_0980B5				;C - - - - - 0x01204E 04:803E: D0 12 (orig: BNE CODE_098052)
+		INC bubbleProgress,X				;C - - - - - 0x012050 04:8040: FE D5 04
+		LDA bubbleProgress,X				;C - - - - - 0x012053 04:8043: BD D5 04
+		CMP #$FF					;C - - - - - 0x012056 04:8046: C9 FF
+		BNE CODE_09804F				;C - - - - - 0x012058 04:8048: D0 05
+			LDA #BUBBLE_EXPIRED					;C - - - - - 0x01205A 04:804A: A9 19
+			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01205C 04:804C: 9D 77 05
+	CODE_09804F:
+		JMP CODE_098149				;C - - - - - 0x01205F 04:804F: 4C 49 81
+CODE_0980B5:
+	CMP #BUBBLE_POWER					;C - - - - - 0x0120C5 04:80B5: C9 05
+	BNE CODE_0980F8				;C - - - - - 0x0120C7 04:80B7: D0 03 (orig: BNE CODE_0980BC)
+		JMP CODE_098149				;C - - - - - 0x0120C9 04:80B9: 4C 49 81
+CODE_0980F8:
+	CMP #BUBBLE_POPPING					;C - - - - - 0x012108 04:80F8: C9 22
+	BNE CODE_098135				;C - - - - - 0x01210A 04:80FA: D0 1D (orig: BNE CODE_098119)
+		LDA objAnimHI+OSLOT_BUBBLE,X				;C - - - - - 0x01210C 04:80FC: BD 2F 07
+		BEQ CODE_098107				;C - - - - - 0x01210F 04:80FF: F0 06
+			JSR CODE_0981F8				;C - - - - - 0x012111 04:8101: 20 F8 81
+			JMP CODE_09815D				;C - - - - - 0x012114 04:8104: 4C 5D 81
+	CODE_098107:
+		LDA #BUBBLE_POPPED					;C - - - - - 0x012117 04:8107: A9 23
+		STA scratch0				;C - - - - - 0x012119 04:8109: 85 00
+		LDA #.LOBYTE(anBubblePop_ID)					;C - - - - - 0x01211B 04:810B: A9 2E
+		STA scratch1				;C - - - - - 0x01211D 04:810D: 85 01
+		LDA #.HIBYTE(anBubblePop_ID)					;C - - - - - 0x01211F 04:810F: A9 00
+		STA scratch2				;C - - - - - 0x012121 04:8111: 85 02
+		JSR ReplaceBubble				;C - - - - - 0x012123 04:8113: 20 CE 8A
+		JMP CODE_09815D				;C - - - - - 0x012126 04:8116: 4C 5D 81
+CODE_098135:
+	CMP #BUBBLE_EMERGING					;C - - - - - 0x012145 04:8135: C9 80
+	BNE CODE_098079				;C - - - - - 0x012147 04:8137: D0 06 (orig: BNE CODE_09813F)
+		JSR BubbleEmergingUpdate				;C - - - - - 0x012149 04:8139: 20 9C 8B
+		JMP CODE_09815D				;C - - - - - 0x01214C 04:813C: 4C 5D 81
+CODE_098079:
+	CMP #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x012089 04:8079: C9 04
+	BNE CODE_098119				;C - - - - - 0x01208B 04:807B: D0 38 (orig: BNE CODE_0980B5)
+		INC bubbleProgress,X				;C - - - - - 0x01208D 04:807D: FE D5 04
+		LDA bubbleProgress,X				;C - - - - - 0x012090 04:8080: BD D5 04
+		CMP #$80					;C - - - - - 0x012093 04:8083: C9 80
+		BCC CODE_0980B2				;C - - - - - 0x012095 04:8085: 90 2B
+			STX scratch1				;C - - - - - 0x012097 04:8087: 86 01
+			LDA bubbleTrappedSlot,X				;C - - - - - 0x012099 04:8089: BD FF 04
+			TAX							;C - - - - - 0x01209C 04:808C: AA
+			TAY							;C - - - - - 0x01209D 04:808D: A8
+
+			LDA #$01					;C - - - - - 0x01209E 04:808E: A9 01
+			STA objState+OSLOT_ENEMY,X				;C - - - - - 0x0120A0 04:8090: 9D 6C 05
+			STA enemyMad,X				;C - - - - - 0x0120A3 04:8093: 95 63
+
+			LDX scratch1				;C - - - - - 0x0120A5 04:8095: A6 01
+			LDA objY+OSLOT_BUBBLE,X				;C - - - - - 0x0120A7 04:8097: BD 9F 05
+			STA objY+OSLOT_ENEMY,Y				;C - - - - - 0x0120AA 04:809A: 99 94 05
+			LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x0120AD 04:809D: BD C7 05
+			STA objX+OSLOT_ENEMY,Y				;C - - - - - 0x0120B0 04:80A0: 99 BC 05
+
+			LDA #3					;C - - - - - 0x0120B3 04:80A3: A9 03
+			STA objAttr+OSLOT_ENEMY,Y				;C - - - - - 0x0120B5 04:80A5: 99 FC 06
+			LDA #BUBBLE_EXPIRED					;C - - - - - 0x0120B8 04:80A8: A9 19
+			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x0120BA 04:80AA: 9D 77 05
+
+			LDA #$00					;C - - - - - 0x0120BD 04:80AD: A9 00
+			STA bubbleTrappedSlot,X				;C - - - - - 0x0120BF 04:80AF: 9D FF 04
+	CODE_0980B2:
+		JMP CODE_098149				;C - - - - - 0x0120C2 04:80B2: 4C 49 81
+CODE_098119:
+	CMP #BUBBLE_POPPED					;C - - - - - 0x012129 04:8119: C9 23
+	BNE CODE_0980BC				;C - - - - - 0x01212B 04:811B: D0 18 (orig: BNE CODE_098135)
+		INC bubbleProgress,X				;C - - - - - 0x01212D 04:811D: FE D5 04
+		LDA bubbleProgress,X				;C - - - - - 0x012130 04:8120: BD D5 04
+		CMP #$04					;C - - - - - 0x012133 04:8123: C9 04
+		BCC CODE_09815D				;C - - - - - 0x012135 04:8125: 90 36
+			LDA #$00					;C - - - - - 0x012137 04:8127: A9 00
+			STA scratch0				;C - - - - - 0x012139 04:8129: 85 00
+			STA scratch1				;C - - - - - 0x01213B 04:812B: 85 01
+			STA scratch2				;C - - - - - 0x01213D 04:812D: 85 02
+			JSR ReplaceBubble				;C - - - - - 0x01213F 04:812F: 20 CE 8A
+			JMP CODE_09815D				;C - - - - - 0x012142 04:8132: 4C 5D 81
+CODE_0980BC:
+	CMP #BUBBLE_POWER_POPPED					;C - - - - - 0x0120CC 04:80BC: C9 06
+	BNE CODE_0980DC				;C - - - - - 0x0120CE 04:80BE: D0 06 (orig: BNE CODE_0980C6)
+		JSR CODE_098339				;C - - - - - 0x0120D0 04:80C0: 20 39 83
+		JMP CODE_09815D				;C - - - - - 0x0120D3 04:80C3: 4C 5D 81
+CODE_0980DC:
+	CMP #BUBBLE_EXPIRED_POP					;C - - - - - 0x0120EC 04:80DC: C9 20
+	BNE CODE_0980C6				;C - - - - - 0x0120EE 04:80DE: D0 18 (orig: BNE CODE_0980F8)
+
+	INC bubbleProgress,X				;C - - - - - 0x0120F0 04:80E0: FE D5 04
+	LDA bubbleProgress,X				;C - - - - - 0x0120F3 04:80E3: BD D5 04
+	CMP #$04					;C - - - - - 0x0120F6 04:80E6: C9 04
+	BCC CODE_09815D				;C - - - - - 0x0120F8 04:80E8: 90 73
+
+	LDA #$00					;C - - - - - 0x0120FA 04:80EA: A9 00
+	STA scratch0				;C - - - - - 0x0120FC 04:80EC: 85 00
+	STA scratch1				;C - - - - - 0x0120FE 04:80EE: 85 01
+	STA scratch2				;C - - - - - 0x012100 04:80F0: 85 02
+	JSR ReplaceBubble				;C - - - - - 0x012102 04:80F2: 20 CE 8A
+	JMP CODE_09815D				;C - - - - - 0x012105 04:80F5: 4C 5D 81
+CODE_0980C6:
+	CMP #BUBBLE_EXPIRED					;C - - - - - 0x0120D6 04:80C6: C9 19
+	BNE CODE_09813F				;C - - - - - 0x0120D8 04:80C8: D0 12 (orig: BNE CODE_0980DC)
+		LDA #$20					;C - - - - - 0x0120DA 04:80CA: A9 20
+		STA scratch0				;C - - - - - 0x0120DC 04:80CC: 85 00
+		LDA #.LOBYTE(anBubblePop_ID)					;C - - - - - 0x0120DE 04:80CE: A9 2E
+		STA scratch1				;C - - - - - 0x0120E0 04:80D0: 85 01
+		LDA #.HIBYTE(anBubblePop_ID)					;C - - - - - 0x0120E2 04:80D2: A9 00
+		STA scratch2				;C - - - - - 0x0120E4 04:80D4: 85 02
+		JSR ReplaceBubble				;C - - - - - 0x0120E6 04:80D6: 20 CE 8A
+		JMP CODE_09815D				;C - - - - - 0x0120E9 04:80D9: 4C 5D 81
+.endif
 CODE_09813F:
 .ifndef REGION_JP
 	TXA							;C - - - - - 0x01214F 04:813F: 8A
@@ -955,19 +1118,11 @@ CODE_0986AB:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x0126CE 04:86BE: A9 00
-	ORA #$07					;C - - - - - 0x0126D0 04:86C0: 09 07
+	LDA #$07					;C - - - - - 0x0126CE 04:86BE: A9 07
 	STA $8000				;C - - - - - 0x0126D2 04:86C2: 8D 00 80
 	LDA #.BANK(DATA_04BF88)					;C - - - - - 0x0126D5 04:86C5: A9 04
-	STA $8001				;C - - - - - 0x0126D7 04:86C7: 8D 01 80
 	STA prgBankB				;C - - - - - 0x0126DA 04:86CA: 85 53
-
-	LDA #$00					;C - - - - - 0x0126DC 04:86CC: A9 00
-	ORA #$07					;C - - - - - 0x0126DE 04:86CE: 09 07
-	STA $8000				;C - - - - - 0x0126E0 04:86D0: 8D 00 80
-	LDA #.BANK(DATA_04BF88)					;C - - - - - 0x0126E3 04:86D3: A9 04
-	STA $8001				;C - - - - - 0x0126E5 04:86D5: 8D 01 80
-	STA prgBankB				;C - - - - - 0x0126E8 04:86D8: 85 53
+	STA $8001				;C - - - - - 0x0126D7 04:86C7: 8D 01 80
 .endif
 
 	LDY bubbleProgress,X				;C - - - - - 0x0126EA 04:86DA: BC D5 04
@@ -2099,7 +2254,13 @@ UpdateProjectiles_ReadOp:
 	STA $8001
 .else
 	STA newPrgBank				;C - - - - - 0x012DE8 04:8DD8: 85 3B
+	;(Perf) Guard: skip the call when the bank is already mapped (83.6% of the time: the
+	;op loop comes back here after each op). prgBankB mirrors the $A000 slot, see
+	;docs/perf_notes.md "Phase 2+3". newPrgBank is still written as before.
+	CMP prgBankB
+	BEQ @mapped
 	JSR SwapPrgBankB				;C - - - - - 0x012DEA 04:8DDA: 20 56 FF
+@mapped:
 .endif
 
 	LDY projScriptOfs				;C - - - - - 0x012DED 04:8DDD: A4 5D
@@ -4411,19 +4572,11 @@ CODE_099CB7:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x013CC7 04:9CB7: A9 00
-	ORA #$07					;C - - - - - 0x013CC9 04:9CB9: 09 07
+	LDA #$07					;C - - - - - 0x013CC7 04:9CB7: A9 07
 	STA $8000				;C - - - - - 0x013CCB 04:9CBB: 8D 00 80
 	LDA #.BANK(DATA_06B8B6)					;C - - - - - 0x013CCE 04:9CBE: A9 06
-	STA $8001				;C - - - - - 0x013CD0 04:9CC0: 8D 01 80
 	STA prgBankB				;C - - - - - 0x013CD3 04:9CC3: 85 53
-
-	LDA #$00					;C - - - - - 0x013CD5 04:9CC5: A9 00
-	ORA #$07					;C - - - - - 0x013CD7 04:9CC7: 09 07
-	STA $8000				;C - - - - - 0x013CD9 04:9CC9: 8D 00 80
-	LDA #.BANK(DATA_06B8B6)					;C - - - - - 0x013CDC 04:9CCC: A9 06
-	STA $8001				;C - - - - - 0x013CDE 04:9CCE: 8D 01 80
-	STA prgBankB				;C - - - - - 0x013CE1 04:9CD1: 85 53
+	STA $8001				;C - - - - - 0x013CD0 04:9CC0: 8D 01 80
 .endif
 
 	LDA #.LOBYTE(DATA_06B8B6)					;C - - - - - 0x013CE3 04:9CD3: A9 B6
@@ -4871,7 +5024,8 @@ BubblesTravelUpdate:
 	LDA #$01					;C - - - - - 0x013DC8 04:9DB8: A9 01
 	STA scratch1				;C - - - - - 0x013DCA 04:9DBA: 85 01
 CODE_099DBC:
-	LDX scratch0				;C - - - - - 0x013DCC 04:9DBC: A6 00
+	;(Perf) X = scratch0 on every entry here (LDX #$00 / STX scratch0 above, and the loop
+	;steps below leave X = scratch0), so the original `LDX scratch0` is gone.
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013DCE 04:9DBE: BD 77 05
 	BEQ CODE_099DDF				;C - - - - - 0x013DD1 04:9DC1: F0 1C
 	CMP #BUBBLE_EMERGING					;C - - - - - 0x013DD3 04:9DC3: C9 80
@@ -4882,13 +5036,21 @@ CODE_099DBC:
 		BEQ CODE_099DE2				;C - - - - - 0x013DDD 04:9DCD: F0 13
 			LDA bubbleDir,X				;C - - - - - 0x013DDF 04:9DCF: BD EB 04
 			BNE CODE_099DDF				;C - - - - - 0x013DE2 04:9DD2: D0 0B
-				LDA scratch0				;C - - - - - 0x013DE4 04:9DD4: A5 00
+				TXA					;(Perf) was LDA scratch0 (= X)
 				AND scratch6				;C - - - - - 0x013DE6 04:9DD6: 25 06
 				CMP scratch6				;C - - - - - 0x013DE8 04:9DD8: C5 06
-				BNE CODE_099DDF				;C - - - - - 0x013DEA 04:9DDA: D0 03
-					JMP CODE_099DE2				;C - - - - - 0x013DEC 04:9DDC: 4C E2 9D
+				BEQ CODE_099DE2				;(Perf) was BNE CODE_099DDF / JMP CODE_099DE2
 CODE_099DDF:
-	JMP CODE_099E88				;C - - - - - 0x013DEF 04:9DDF: 4C 88 9E
+	;(Perf) Loop step, was JMP CODE_099E88: `INC scratch0 / LDX scratch0 / STX scratch1 /
+	;INC scratch1 / CPX #19`. Same memory, same X and flags at the exit (X = 19, Z = C = 1).
+	INX
+	STX scratch0
+	INX
+	STX scratch1
+	DEX
+	CPX #19
+	BNE CODE_099DBC
+	JMP CODE_099E97
 CODE_099DE2:
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013DF2 04:9DE2: BD 77 05
 	STA scratch7				;C - - - - - 0x013DF5 04:9DE5: 85 07
@@ -4902,11 +5064,13 @@ CODE_099DF1:
 	;03: Y
 	;07: State
 
+	LDX scratch1				;C - - - - - 0x013E07 04:9DF7: A6 01
+	;(Perf) The inner loop keeps X = scratch1 (the other bubble's slot): the back edge
+	;enters below the original `LDX scratch1`.
+CODE_099DF1_X:
 	LDA #$00					;C - - - - - 0x013E01 04:9DF1: A9 00
 	STA scratch8				;C - - - - - 0x013E03 04:9DF3: 85 08
 	STA scratch9				;C - - - - - 0x013E05 04:9DF5: 85 09
-
-	LDX scratch1				;C - - - - - 0x013E07 04:9DF7: A6 01
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013E09 04:9DF9: BD 77 05
 	BEQ CODE_099E6E				;C - - - - - 0x013E0C 04:9DFC: F0 70
 
@@ -4968,6 +5132,7 @@ CODE_099E2A:
 	CODE_099E52:
 		;Pop self
 		JSR PopBubble				;C - - - - - 0x013E62 04:9E52: 20 7B FC
+		LDX scratch1				;(Perf) PopBubble returns X = scratch1 already; the loop step below needs it
 		JMP CODE_099E6E				;C - - - - - 0x013E65 04:9E55: 4C 6E 9E
 CODE_099E58:
 	;04: HDistance
@@ -4986,27 +5151,34 @@ CODE_099E66:
 CODE_099E6B:
 	STA bubbleDir,X				;C - - - - - 0x013E7B 04:9E6B: 9D EB 04
 CODE_099E6E:
-	INC scratch1				;C - - - - - 0x013E7E 04:9E6E: E6 01
-	LDX scratch1				;C - - - - - 0x013E80 04:9E70: A6 01
+	;(Perf) X = scratch1 on every path to here (nothing in the loop body changes X), so
+	;`INC scratch1 / LDX scratch1` became `INX / STX scratch1` (same memory, X and N/Z).
+	INX
+	STX scratch1
 	CPX scratch0				;C - - - - - 0x013E82 04:9E72: E4 00
 	BEQ CODE_099E88				;C - - - - - 0x013E84 04:9E74: F0 12
 		CPX #20					;C - - - - - 0x013E86 04:9E76: E0 14
 		BEQ CODE_099E7D				;C - - - - - 0x013E88 04:9E78: F0 03
-			JMP CODE_099DF1				;C - - - - - 0x013E8A 04:9E7A: 4C F1 9D
+			JMP CODE_099DF1_X				;(Perf) was JMP CODE_099DF1
 	CODE_099E7D:
-		LDA #$00					;C - - - - - 0x013E8D 04:9E7D: A9 00
-		CMP scratch0				;C - - - - - 0x013E8F 04:9E7F: C5 00
-		BEQ CODE_099E88				;C - - - - - 0x013E91 04:9E81: F0 05
-			STA scratch1				;C - - - - - 0x013E93 04:9E83: 85 01
-			JMP CODE_099DF1				;C - - - - - 0x013E95 04:9E85: 4C F1 9D
+		;(Perf) was LDA #$00 / CMP scratch0 / BEQ / STA scratch1: X = 0 serves both exits
+		;(A is reloaded before any use on both paths)
+		LDX #$00
+		CPX scratch0
+		BEQ CODE_099E88
+			STX scratch1
+			JMP CODE_099DF1_X
 CODE_099E88:
-	INC scratch0				;C - - - - - 0x013E98 04:9E88: E6 00
-	LDX scratch0				;C - - - - - 0x013E9A 04:9E8A: A6 00
-	STX scratch1				;C - - - - - 0x013E9C 04:9E8C: 86 01
-	INC scratch1				;C - - - - - 0x013E9E 04:9E8E: E6 01
-	CPX #19					;C - - - - - 0x013EA0 04:9E90: E0 13
-	BEQ CODE_099E97				;C - - - - - 0x013EA2 04:9E92: F0 03
-		JMP CODE_099DBC				;C - - - - - 0x013EA4 04:9E94: 4C BC 9D
+	;(Perf) X = scratch0 here (inner loop met scratch0, or X = 0 = scratch0 above).
+	;Same step as CODE_099DDF.
+	INX
+	STX scratch0
+	INX
+	STX scratch1
+	DEX
+	CPX #19
+	BEQ CODE_099E97
+		JMP CODE_099DBC
 CODE_099E97:
 	LDA ram_051B				;C - - - - - 0x013EA7 04:9E97: AD 1B 05
 	BEQ CODE_099EA5				;C - - - - - 0x013EAA 04:9E9A: F0 09
@@ -5014,19 +5186,11 @@ CODE_099E97:
 		STA ram_0549				;C - - - - - 0x013EAF 04:9E9F: 8D 49 05
 		JMP CODE_099EF8				;C - - - - - 0x013EB2 04:9EA2: 4C F8 9E
 CODE_099EA5:
-	LDA #$00					;C - - - - - 0x013EB5 04:9EA5: A9 00
-	ORA #$07					;C - - - - - 0x013EB7 04:9EA7: 09 07
+	LDA #$07					;C - - - - - 0x013EB5 04:9EA5: A9 07
 	STA $8000				;C - - - - - 0x013EB9 04:9EA9: 8D 00 80
 	LDA #.BANK(DATA_04BF6D)					;C - - - - - 0x013EBC 04:9EAC: A9 04
-	STA $8001				;C - - - - - 0x013EBE 04:9EAE: 8D 01 80
 	STA prgBankB				;C - - - - - 0x013EC1 04:9EB1: 85 53
-
-	LDA #$00					;C - - - - - 0x013EC3 04:9EB3: A9 00
-	ORA #$07					;C - - - - - 0x013EC5 04:9EB5: 09 07
-	STA $8000				;C - - - - - 0x013EC7 04:9EB7: 8D 00 80
-	LDA #.BANK(DATA_04BF6D)					;C - - - - - 0x013ECA 04:9EBA: A9 04
-	STA $8001				;C - - - - - 0x013ECC 04:9EBC: 8D 01 80
-	STA prgBankB				;C - - - - - 0x013ECF 04:9EBF: 85 53
+	STA $8001				;C - - - - - 0x013EBE 04:9EAE: 8D 01 80
 
 	LDY ram_051A				;C - - - - - 0x013ED1 04:9EC1: AC 1A 05
 	BEQ CODE_099EF0				;C - - - - - 0x013ED4 04:9EC4: F0 2A

@@ -4290,19 +4290,11 @@ CODE_089D6A:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x011D7A 04:9D6A: A9 00
-	ORA #$07					;C - - - - - 0x011D7C 04:9D6C: 09 07
+	LDA #$07					;C - - - - - 0x011D7A 04:9D6A: A9 07
 	STA $8000				;C - - - - - 0x011D7E 04:9D6E: 8D 00 80
 	LDA #.BANK(RoundMaps)					;C - - - - - 0x011D81 04:9D71: A9 04
-	STA $8001				;C - - - - - 0x011D83 04:9D73: 8D 01 80
 	STA prgBankB				;C - - - - - 0x011D86 04:9D76: 85 53
-
-	LDA #$00					;C - - - - - 0x011D88 04:9D78: A9 00
-	ORA #$07					;C - - - - - 0x011D8A 04:9D7A: 09 07
-	STA $8000				;C - - - - - 0x011D8C 04:9D7C: 8D 00 80
-	LDA #.BANK(RoundMaps)					;C - - - - - 0x011D8F 04:9D7F: A9 04
-	STA $8001				;C - - - - - 0x011D91 04:9D81: 8D 01 80
-	STA prgBankB				;C - - - - - 0x011D94 04:9D84: 85 53
+	STA $8001				;C - - - - - 0x011D83 04:9D73: 8D 01 80
 .endif
 
 	LDX currentRound				;C - - - - - 0x011D96 04:9D86: A6 D8
