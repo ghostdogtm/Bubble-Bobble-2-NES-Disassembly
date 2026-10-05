@@ -3140,11 +3140,12 @@ CODE_0FEF29:
 		STA chrBankC,X				;C - - - - - 0x01EF51 07:EF41: 95 4D
 CODE_0FEF43:
 	LDA objImgOfs,Y				;C - - - - - 0x01EF53 07:EF43: B9 DB 05
-	CLC							;C - - - - - 0x01EF56 07:EF46: 18
-	ADC #$00					;C - - - - - 0x01EF57 07:EF47: 69 00
 	STA scratch0				;C - - - - - 0x01EF59 07:EF49: 85 00
 
 	LDA objImgOfsHI,Y				;C - - - - - 0x01EF5B 07:EF4B: B9 03 06
+	;(Perf) `CLC / ADC #$00` on the low byte was a no-op apart from C = 0 (and V = 0,
+	;which the ADC below redefines), so the CLC moved here.
+	CLC
 	ADC #$A0					;C - - - - - 0x01EF5E 07:EF4E: 69 A0
 	STA scratch1				;C - - - - - 0x01EF60 07:EF50: 85 01
 
@@ -3157,7 +3158,7 @@ CODE_0FEF43:
 	STA scratch9				;C - - - - - 0x01EF6B 07:EF5B: 85 09
 
 	;Get size of sprite struct
-	LDY #$00					;C - - - - - 0x01EF6D 07:EF5D: A0 00
+	DEY							;(Perf) was LDY #$00 (Y = 1 here: same Y and N/Z)
 	LDA (scratch8),Y			;C - - - - - 0x01EF6F 07:EF5F: B1 08
 	CLC							;C - - - - - 0x01EF71 07:EF61: 18
 	ADC #$01					;C - - - - - 0x01EF72 07:EF62: 69 01
@@ -3202,9 +3203,9 @@ CODE_0FEF70:
 	ADC scratch3				;C - - - - - 0x01EFA1 07:EF91: 65 03
 	STA OAMBuffer,X				;C - - - - - 0x01EFA3 07:EF93: 9D 00 02
 	INX							;C - - - - - 0x01EFA6 07:EF96: E8
-	CPX #$00					;C - - - - - 0x01EFA7 07:EF97: E0 00
-	BNE CODE_0FEF9E				;C - - - - - 0x01EFA9 07:EF99: D0 03
-		JMP CODE_0FF079				;C - - - - - 0x01EFAB 07:EF9B: 4C 79 F0
+	;(Perf) INX already sets Z: `CPX #$00 / BNE / JMP CODE_0FF079` became one BEQ (not taken:
+	;2 cycles instead of 2 + 3). The full-buffer exit sets C = 1 as CPX #$00 did.
+	BEQ DrawObjects_EvenFull
 CODE_0FEF9E:
 	INY							;C - - - - - 0x01EFAE 07:EF9E: C8
 	CPY scratch1				;C - - - - - 0x01EFAF 07:EF9F: C4 01
@@ -3220,6 +3221,10 @@ CODE_0FEFAA:
 	CPY #40
 	BEQ DrawObjects_EvenLast
 	JMP DrawObjects_EvenScan
+DrawObjects_EvenFull:
+	;OAM buffer full: return as the original did after CPX #$00 (C = 1, Z = 1, N = 0)
+	SEC
+	RTS
 DrawObjects_EvenLast:
 	;Slot 39 was drawn: the original exits with Y = scratch1 (end of its sprite loop)
 	STY scratch4
@@ -3262,11 +3267,12 @@ CODE_0FEFDB:
 		STA chrBankC,X				;C - - - - - 0x01F003 07:EFF3: 95 4D
 CODE_0FEFF5:
 	LDA objImgOfs,Y				;C - - - - - 0x01F005 07:EFF5: B9 DB 05
-	CLC							;C - - - - - 0x01F008 07:EFF8: 18
-	ADC #$00					;C - - - - - 0x01F009 07:EFF9: 69 00
 	STA scratch0				;C - - - - - 0x01F00B 07:EFFB: 85 00
 
 	LDA objImgOfsHI,Y				;C - - - - - 0x01F00D 07:EFFD: B9 03 06
+	;(Perf) `CLC / ADC #$00` on the low byte was a no-op apart from C = 0 (and V = 0,
+	;which the ADC below redefines), so the CLC moved here.
+	CLC
 	ADC #$A0					;C - - - - - 0x01F010 07:F000: 69 A0
 	STA scratch1				;C - - - - - 0x01F012 07:F002: 85 01
 
@@ -3278,7 +3284,7 @@ CODE_0FEFF5:
 	LDA (scratch0),Y			;C - - - - - 0x01F01B 07:F00B: B1 00
 	STA scratch9				;C - - - - - 0x01F01D 07:F00D: 85 09
 
-	LDY #$00					;C - - - - - 0x01F01F 07:F00F: A0 00
+	DEY							;(Perf) was LDY #$00 (Y = 1 here: same Y and N/Z)
 	LDA (scratch8),Y			;C - - - - - 0x01F021 07:F011: B1 08
 	CLC							;C - - - - - 0x01F023 07:F013: 18
 	ADC #$01					;C - - - - - 0x01F024 07:F014: 69 01
@@ -3319,8 +3325,8 @@ CODE_0FF022:
 	STA OAMBuffer,X				;C - - - - - 0x01F055 07:F045: 9D 00 02
 
 	INX							;C - - - - - 0x01F058 07:F048: E8
-	CPX #$00					;C - - - - - 0x01F059 07:F049: E0 00
-	BEQ CODE_0FF079				;C - - - - - 0x01F05B 07:F04B: F0 2C
+	;(Perf) INX already sets Z (CPX #$00 removed). The full-buffer exit sets C = 1.
+	BEQ DrawObjects_OddFull
 
 	INY							;C - - - - - 0x01F05D 07:F04D: C8
 	CPY scratch1				;C - - - - - 0x01F05E 07:F04E: C4 01
@@ -3333,6 +3339,10 @@ CODE_0FF059:
 	DEY
 	BMI DrawObjects_OddLast
 	JMP DrawObjects_OddScan
+DrawObjects_OddFull:
+	;OAM buffer full: return as the original did after CPX #$00 (C = 1, Z = 1, N = 0)
+	SEC
+	RTS
 DrawObjects_OddLast:
 	;Slot 0 was drawn: the original exits with Y = scratch1 (end of its sprite loop)
 	STY scratch4
