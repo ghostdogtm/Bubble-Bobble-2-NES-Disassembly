@@ -664,3 +664,97 @@ large +/- swings between `09:UpdateBubbles`, `09:0x8290`, `09:0x812a`, `09:CODE_
 also bank 05/0B `0x....` names. This is the same naming artifact as in Phase 3: bank 9 code
 moved by 5 bytes, so some JSR-target names now land on other addresses. Only the totals are
 meaningful.
+
+## Phase 5: DrawObjects, BubblesTravelUpdate, Animate* (measured candidates)
+
+The stop rule (≥1500 cycles/frame gained on stress scenes) was not met after Phase 4 (≈1000-1200),
+so Phase 5 was in scope. The Phase 5 agent was cut off by a usage limit after committing its five
+changes, but before writing this section. Each step had passed `regress` 12/12 by then
+(`tmp/p5_scripts/regress_p5a..e.txt`). The orchestrator then re-verified HEAD independently and
+wrote this section from the commits.
+
+| commit | change | idea |
+|---|---|---|
+| c425e2d | DrawObjects: unrolled OAM fill | The loop that hides unused OAM entries (Y=$F0, tile 1) first aligns X to 16, then writes 4 entries per iteration: 27 → ~13 cycles per entry. Same bytes, same exit state (A=1, X=0, Z=C=1, N=0). Only V differs, and nothing outside the audio bank reads V (no BVC/BVS/PHP). |
+| cb3e47b | DrawObjects slot loops keep the slot in Y | Empty slot: 34 → 13 (even) / 11 (odd) cycles. objState is tested first. `ram_0475` is tested only for used slots (even path) or folded into the start slot (odd path, reverse order). scratch4 is still written before each drawn object, and both exits leave scratch4/Y as before. The `CPX #$00 / BEQ` after each object was never taken and is gone. |
+| ccad389 | DrawObjects per-sprite wrap test | `INX` already sets Z, so the per-sprite `CPX #$00` is dropped, and the full-buffer exits set C=1 as CPX did. Per object, the no-op `CLC / ADC #$00` on the pointer low byte became the CLC for the high byte, and the second `LDY #$00` (Y=1) became DEY. |
+| 805f1fc | BubblesTravelUpdate keeps the pair slots in X | `INC scratchN / LDX scratchN` → `INX / STX scratchN`. The outer skip path steps locally instead of through a JMP trampoline. Same memory, same X/flags at every exit (X=19, Z=C=1). |
+| 2e84c9c | AnimateObjects / AnimateNonBubbles pointer math | 42/44 → 28 cycles per new animation frame. The low-byte `ADC #0` was a no-op because AnimTable is page-aligned; a link-time `.assert` now guarantees that. |
+
+All Phase 5 code sits in US-only branches; JP keeps the original code.
+
+**Coverage.** Every new label in the changed code executes in the scenarios, with two exceptions:
+`DrawObjects_EvenFull` and `DrawObjects_OddFull` (`SEC / RTS`, the OAM-buffer-full exits). The
+original full path (`JMP CODE_0FF079` at base $EF9B) never ran either: 0 executions, because no
+scenario reaches 64 hardware sprites. By analysis, the original wrap exit returned with X=0,
+Z=1 (INX), C=1 (CPX #0), N=0, without storing oamBufferPos. The new exit (`INX` → BEQ →
+`SEC / RTS`) returns the same state. The `ram_0475 != 0` paths (object limit) are exercised in
+`natural` (1233 ticks).
+
+**Regression** (orchestrator, HEAD = build `p5h` = agent's `p5e`): 12/12 PASS.
+
+**Measured delta vs Phase 4** (`stats p5h --vs p4`): play-mean sum **-18 767 cycles (-8.67%)**.
+Every gameplay scenario gains 1480-1740 cycles per tick; lag frames drop by up to 90 (r50).
+
+## Phase 6: wrap-up
+
+### 6.1 Final numbers: original ROM (`base`) vs final (`p5h`, HEAD)
+```
+scen      ticks    mean    play     p95     max lagNMI |  d_play d_play%   d_p95  d_lag
+natural    6000    9191    9772   19281   34734      5 |   -1643 -14.39%   -2413     -8
+r01        3000   13387   17981   33202   44665    138 |   -2458 -12.02%   -3138   -107
+r08        3000   13577   17665   28581   39616     57 |   -2605 -12.85%   -3643    -93
+r17        3000   14574   19832   35191   46558    226 |   -2744 -12.16%   -4150   -127
+r20        3000   11675   14238   20063   27846      0 |   -2150 -13.12%   -2549     -1
+r33        3000   13684   18161   24007   30380      1 |   -2482 -12.02%   -3119    -23
+r40        3000   11367   14104   19770   30042      1 |   -2290 -13.97%   -2674     -3
+r50        3000   17403   24020   37097   51047    303 |   -2832 -10.55%   -3854   -165
+r64        3000   14836   19752   25681   34304     11 |   -2708 -12.06%   -3301    -49
+r69        3000   13177   17194   23749   26413      0 |   -2553 -12.93%   -3067     -1
+r70        3000    8891   11426   16437   22207      0 |   -2078 -15.38%   -2479      0
+camp03     6000   12188   13662   17229   18792      0 |   -2222 -13.99%   -2427      0
+TOTAL    play-mean sum delta -28764 cycles (-12.70%)
+```
+Ticks whose logic exceeds 27 000 cycles (≈ a frame minus vblank work), gameplay ticks only:
+r01 308 → 244, r50 629 → 428.
+
+Per-phase play-mean sum deltas (12 scenarios; the base sum is ≈ 226 500):
+
+| phase | delta | cumulative |
+|---|---|---|
+| 1 (F2 + F1 race-free single switch) | -7 340 | -3.24% |
+| 2+3 (race fixes + guards) | -2 004 | -4.12% |
+| 4 (bubble ladder: empty-slot step + reorder) | -654 | -4.41% |
+| 5 (DrawObjects, BubblesTravelUpdate, Animate*) | -18 767 | **-12.70%** |
+
+Stress scenes (r17, r50, r64) gained 2 700-2 850 cycles per gameplay tick, which is past the
+plan's 1500 stop rule. Phase 5 is therefore closed.
+
+Estimated busy cycles over the gameplay scenarios (exec-counter profile, NMI included):
+558.6M → 487.3M (-12.8%). Final top consumers:
+DrawObjects (split into Even/Odd/Fill parts) ≈ 26%, GetTile 9.8%, BubblesTravelUpdate 8.1%,
+ReadPad (NMI, off-limits) 4.3%, ColorBufferToVRAM (NMI) 3.3%.
+
+### 6.2 QA
+* The automated part is the `regress` suite over the 12 scenarios: title, intro, rounds
+  1/8/17/20(wide)/33/40/50/64/69/70, deaths, game over/continue, IRQ-effect rounds, and
+  expiring bubbles. Every tick passes against the original ROM.
+* Not covered automatically: 2-player alternating mode, bonus rounds (round warp to 81-83 hangs
+  the harness), the round-20 boss fight to completion, and rounds 10+ reached by natural
+  progression. These need a manual play-through in Mesen.
+
+### 6.3 JP build
+`-D REGION_JP` assembles, and the result is byte-identical to the JP build of the original sources
+(md5 8d2855ea5505bf094b7a40155caa92b4). Every change lives in US-only code.
+
+### 6.4 Baseline for the co-op work
+HEAD of `bb2_performance_optimization` is the new baseline. Byte identity with the original ROM
+no longer holds, so use `perf.py regress base <build>` for regression instead (rule 3 of the co-op
+plan). `bb2_coop_implementation_plan.md` is not in this repo, so its Rule 3 still has to be
+updated by hand.
+
+### Open decision (not implemented)
+"Selector always 7": logic leaves the MMC3 selector ($8000) at 7 everywhere except right after
+SwapPrgBankA. If SwapPrgBankA restored it to 7, every $A000 switch could drop `LDA #7 / STA $8000`
+(estimated ≈ -100 cycles/tick). The cost is a new global rule: any future code that writes $8000
+must restore 7. Pending the owner's decision.
