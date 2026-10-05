@@ -15,7 +15,9 @@ Commands (run from the repo root):
 
 The regression check compares, for every logic tick, the 2 KB of CPU RAM (snapshot when the
 banked game logic finishes) plus nametable RAM and palette (snapshot at the start of the tick).
-Excluded: the hardware stack ($010A-$01FF) and the IRQ-handler-private bytes $20/$24/$25. RAM words that hold code pointers are compared after
+Excluded: the hardware stack ($010A-$01FF), the IRQ-handler-private bytes $20/$24/$25, and
+lag-frame dependent state (nmiProgress on ticks whose lag differs; audio-engine RAM once the lag
+pattern has diverged - audio triggers $E0-$E2 stay compared with bit 7 masked). RAM words that hold code pointers are compared after
 translating them through the symbol tables of both builds (label + offset), so relinking does
 not cause false mismatches.
 """
@@ -69,6 +71,16 @@ STACK = set(range(0x10A, 0x200))
 # written only by the raster IRQ handlers (CODE_0FEB25 / CODE_0FEB7A) and never read by game logic;
 # their value at the snapshot point depends on which scanline the logic finished on.
 IRQ_VOLATILE = {0x20, 0x24, 0x25}
+# Lag-frame dependent state (approved relaxation, see docs/perf_notes.md "Phase 1"):
+# - nmiProgress ($15) at the snapshot is 2 instead of 1 iff a lag NMI arrived during the tick;
+#   ignored on ticks where the two runs disagree about lag.
+# - The audio engine advances once per *frame* (NMIShort runs AudioUpdate on lag frames), so once
+#   the lag pattern differs its RAM is legitimately out of step with the logic ticks. From the
+#   first tick with differing lag on, the engine-private RAM is ignored and the trigger bytes the
+#   logic writes ($E0-$E2) are compared with bit 7 ("started" flag set by the engine) masked.
+NMI_PROGRESS = 0x15
+AUDIO_TRIGGERS = {0xE0, 0xE1, 0xE2}
+AUDIO_PRIVATE = set(range(0xE3, 0xF2)) | set(range(0x790, 0x7F6))
 
 
 def sh(cmd, **kw):
@@ -238,15 +250,21 @@ def compare_runs(base, test, scen, verbose=True):
     for w in POINTER_WORDS:
         ptr_bytes[w] = w
         ptr_bytes[w + 1] = w
+    lag_a = [r[5] > 0 for r in load_csv(base, scen)]
+    lag_b = [r[5] > 0 for r in load_csv(test, scen)]
     tick = 0
     warnings = 0
     ptr_cache = {}
+    audio_desync = None   # first tick where the lag pattern differed
     while True:
         ra, rb = fa.read(REC_SIZE), fb.read(REC_SIZE)
         if not ra and not rb:
             break
         if len(ra) != len(rb):
             return False, f"tick {tick}: run length differs (base {'ended' if not ra else 'longer'})"
+        lag_differs = tick < len(lag_a) and tick < len(lag_b) and lag_a[tick] != lag_b[tick]
+        if lag_differs and audio_desync is None:
+            audio_desync = tick
         if ra != rb:
             diffs = [i for i in range(REC_SIZE) if ra[i] != rb[i]]
             hard = []
@@ -254,6 +272,13 @@ def compare_runs(base, test, scen, verbose=True):
                 if i < RAM_SIZE:
                     if i in STACK or i in IRQ_VOLATILE:
                         continue
+                    if i == NMI_PROGRESS and lag_differs:
+                        continue
+                    if audio_desync is not None:
+                        if i in AUDIO_PRIVATE:
+                            continue
+                        if i in AUDIO_TRIGGERS and (ra[i] & 0x7F) == (rb[i] & 0x7F):
+                            continue
                     if i in SCRATCH:
                         warnings += 1
                         continue
@@ -277,7 +302,12 @@ def compare_runs(base, test, scen, verbose=True):
                 msg = f"tick {tick}: {len(hard)} mismatches\n    " + "\n    ".join(hard[:24])
                 return False, msg
         tick += 1
-    return True, f"{tick} ticks identical" + (f" ({warnings} scratch-byte diffs ignored)" if warnings else "")
+    msg = f"{tick} ticks identical"
+    if audio_desync is not None:
+        msg += f" (lag pattern differs from tick {audio_desync}: audio-engine RAM excluded after it)"
+    if warnings:
+        msg += f" ({warnings} scratch-byte diffs ignored)"
+    return True, msg
 
 
 def cmd_regress(a):
