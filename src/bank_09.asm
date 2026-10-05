@@ -5024,7 +5024,8 @@ BubblesTravelUpdate:
 	LDA #$01					;C - - - - - 0x013DC8 04:9DB8: A9 01
 	STA scratch1				;C - - - - - 0x013DCA 04:9DBA: 85 01
 CODE_099DBC:
-	LDX scratch0				;C - - - - - 0x013DCC 04:9DBC: A6 00
+	;(Perf) X = scratch0 on every entry here (LDX #$00 / STX scratch0 above, and the loop
+	;steps below leave X = scratch0), so the original `LDX scratch0` is gone.
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013DCE 04:9DBE: BD 77 05
 	BEQ CODE_099DDF				;C - - - - - 0x013DD1 04:9DC1: F0 1C
 	CMP #BUBBLE_EMERGING					;C - - - - - 0x013DD3 04:9DC3: C9 80
@@ -5035,13 +5036,21 @@ CODE_099DBC:
 		BEQ CODE_099DE2				;C - - - - - 0x013DDD 04:9DCD: F0 13
 			LDA bubbleDir,X				;C - - - - - 0x013DDF 04:9DCF: BD EB 04
 			BNE CODE_099DDF				;C - - - - - 0x013DE2 04:9DD2: D0 0B
-				LDA scratch0				;C - - - - - 0x013DE4 04:9DD4: A5 00
+				TXA					;(Perf) was LDA scratch0 (= X)
 				AND scratch6				;C - - - - - 0x013DE6 04:9DD6: 25 06
 				CMP scratch6				;C - - - - - 0x013DE8 04:9DD8: C5 06
-				BNE CODE_099DDF				;C - - - - - 0x013DEA 04:9DDA: D0 03
-					JMP CODE_099DE2				;C - - - - - 0x013DEC 04:9DDC: 4C E2 9D
+				BEQ CODE_099DE2				;(Perf) was BNE CODE_099DDF / JMP CODE_099DE2
 CODE_099DDF:
-	JMP CODE_099E88				;C - - - - - 0x013DEF 04:9DDF: 4C 88 9E
+	;(Perf) Loop step, was JMP CODE_099E88: `INC scratch0 / LDX scratch0 / STX scratch1 /
+	;INC scratch1 / CPX #19`. Same memory, same X and flags at the exit (X = 19, Z = C = 1).
+	INX
+	STX scratch0
+	INX
+	STX scratch1
+	DEX
+	CPX #19
+	BNE CODE_099DBC
+	JMP CODE_099E97
 CODE_099DE2:
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013DF2 04:9DE2: BD 77 05
 	STA scratch7				;C - - - - - 0x013DF5 04:9DE5: 85 07
@@ -5055,11 +5064,13 @@ CODE_099DF1:
 	;03: Y
 	;07: State
 
+	LDX scratch1				;C - - - - - 0x013E07 04:9DF7: A6 01
+	;(Perf) The inner loop keeps X = scratch1 (the other bubble's slot): the back edge
+	;enters below the original `LDX scratch1`.
+CODE_099DF1_X:
 	LDA #$00					;C - - - - - 0x013E01 04:9DF1: A9 00
 	STA scratch8				;C - - - - - 0x013E03 04:9DF3: 85 08
 	STA scratch9				;C - - - - - 0x013E05 04:9DF5: 85 09
-
-	LDX scratch1				;C - - - - - 0x013E07 04:9DF7: A6 01
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013E09 04:9DF9: BD 77 05
 	BEQ CODE_099E6E				;C - - - - - 0x013E0C 04:9DFC: F0 70
 
@@ -5121,6 +5132,7 @@ CODE_099E2A:
 	CODE_099E52:
 		;Pop self
 		JSR PopBubble				;C - - - - - 0x013E62 04:9E52: 20 7B FC
+		LDX scratch1				;(Perf) PopBubble returns X = scratch1 already; the loop step below needs it
 		JMP CODE_099E6E				;C - - - - - 0x013E65 04:9E55: 4C 6E 9E
 CODE_099E58:
 	;04: HDistance
@@ -5139,27 +5151,34 @@ CODE_099E66:
 CODE_099E6B:
 	STA bubbleDir,X				;C - - - - - 0x013E7B 04:9E6B: 9D EB 04
 CODE_099E6E:
-	INC scratch1				;C - - - - - 0x013E7E 04:9E6E: E6 01
-	LDX scratch1				;C - - - - - 0x013E80 04:9E70: A6 01
+	;(Perf) X = scratch1 on every path to here (nothing in the loop body changes X), so
+	;`INC scratch1 / LDX scratch1` became `INX / STX scratch1` (same memory, X and N/Z).
+	INX
+	STX scratch1
 	CPX scratch0				;C - - - - - 0x013E82 04:9E72: E4 00
 	BEQ CODE_099E88				;C - - - - - 0x013E84 04:9E74: F0 12
 		CPX #20					;C - - - - - 0x013E86 04:9E76: E0 14
 		BEQ CODE_099E7D				;C - - - - - 0x013E88 04:9E78: F0 03
-			JMP CODE_099DF1				;C - - - - - 0x013E8A 04:9E7A: 4C F1 9D
+			JMP CODE_099DF1_X				;(Perf) was JMP CODE_099DF1
 	CODE_099E7D:
-		LDA #$00					;C - - - - - 0x013E8D 04:9E7D: A9 00
-		CMP scratch0				;C - - - - - 0x013E8F 04:9E7F: C5 00
-		BEQ CODE_099E88				;C - - - - - 0x013E91 04:9E81: F0 05
-			STA scratch1				;C - - - - - 0x013E93 04:9E83: 85 01
-			JMP CODE_099DF1				;C - - - - - 0x013E95 04:9E85: 4C F1 9D
+		;(Perf) was LDA #$00 / CMP scratch0 / BEQ / STA scratch1: X = 0 serves both exits
+		;(A is reloaded before any use on both paths)
+		LDX #$00
+		CPX scratch0
+		BEQ CODE_099E88
+			STX scratch1
+			JMP CODE_099DF1_X
 CODE_099E88:
-	INC scratch0				;C - - - - - 0x013E98 04:9E88: E6 00
-	LDX scratch0				;C - - - - - 0x013E9A 04:9E8A: A6 00
-	STX scratch1				;C - - - - - 0x013E9C 04:9E8C: 86 01
-	INC scratch1				;C - - - - - 0x013E9E 04:9E8E: E6 01
-	CPX #19					;C - - - - - 0x013EA0 04:9E90: E0 13
-	BEQ CODE_099E97				;C - - - - - 0x013EA2 04:9E92: F0 03
-		JMP CODE_099DBC				;C - - - - - 0x013EA4 04:9E94: 4C BC 9D
+	;(Perf) X = scratch0 here (inner loop met scratch0, or X = 0 = scratch0 above).
+	;Same step as CODE_099DDF.
+	INX
+	STX scratch0
+	INX
+	STX scratch1
+	DEX
+	CPX #19
+	BEQ CODE_099E97
+		JMP CODE_099DBC
 CODE_099E97:
 	LDA ram_051B				;C - - - - - 0x013EA7 04:9E97: AD 1B 05
 	BEQ CODE_099EA5				;C - - - - - 0x013EAA 04:9E9A: F0 09
