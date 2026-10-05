@@ -1858,8 +1858,11 @@ SetRoundIRQ:
 	STA prgBankB					;- - - - - - 0x01EA46 07:EA36: 85
 	STA $8001					;- - - - - - 0x01EA48 07:EA38: 8D
 .else
-	STA $8001				;C - - - - - 0x01EA0F 07:E9FF: 8D 01 80
+	;(Perf) Original order was STA $8001 / STA prgBankB: a lag NMI between the two stores
+	;restored the old prgBankB into $A000 and left prgBankB != mapped bank. This order is
+	;race-free (an NMIShort in between maps the new bank itself).
 	STA prgBankB				;C - - - - - 0x01EA12 07:EA02: 85 53
+	STA $8001				;C - - - - - 0x01EA0F 07:E9FF: 8D 01 80
 .endif
 
 	LDX #$00					;C - - - - - 0x01EA14 07:EA04: A2 00
