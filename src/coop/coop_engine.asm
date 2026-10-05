@@ -51,3 +51,48 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 	STA coopMode
 .endif
 	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopSwap: exchange the resident player with the one stored in ctxOther / object slot OSLOT_P2.
+;   - every COOP_CTX_SCALARS entry <-> its shadow byte ctxOther_<name>
+;   - every COOP_CTX_ARRAYS array: slot 0 <-> slot OSLOT_P2
+;   - powerUps: only the bits in COOP_POWERUP_MASK are exchanged with ctxOther_powerUps
+;   - coopResident ^= 1; currentPlayer = coopResident
+; Clobbers A and X; preserves Y; flags undefined. Unrolled (the lists live in coop.inc).
+; Nothing calls it in a normal build yet (Phase 2: only the COOP_SWAPTEST hook in RoundUpdate).
+; ---------------------------------------------------------------------------------------------
+.macro COOP_SWAP_SCALAR name
+	LDA name
+	LDX .ident(.concat("ctxOther_", .string(name)))
+	STX name
+	STA .ident(.concat("ctxOther_", .string(name)))
+.endmacro
+
+.macro COOP_SWAP_ARRAY name
+	LDA name
+	LDX name+OSLOT_P2
+	STX name
+	STA name+OSLOT_P2
+.endmacro
+
+CoopSwap:
+	COOP_CTX_SCALARS COOP_SWAP_SCALAR
+	COOP_CTX_ARRAYS COOP_SWAP_ARRAY
+
+	;powerUps: x = (powerUps ^ shadow) & mask; both bytes ^= x  (bits outside the mask are untouched;
+	;the shadow only ever holds mask bits, since it starts at 0 and only gets x bits flipped)
+	LDA powerUps
+	EOR ctxOther_powerUps
+	AND #COOP_POWERUP_MASK
+	TAX
+	EOR powerUps
+	STA powerUps
+	TXA
+	EOR ctxOther_powerUps
+	STA ctxOther_powerUps
+
+	LDA coopResident
+	EOR #$01
+	STA coopResident
+	STA currentPlayer
+	RTS

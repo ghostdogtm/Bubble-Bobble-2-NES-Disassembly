@@ -3734,6 +3734,13 @@ CODE_099728:
 	LDA #.BANK(*)					;C - - - - - 0x013744 04:9734: A9 09
 	STA bankedSubRetBank				;C - - - - - 0x013746 04:9736: 85 58
 	JSR RunBankedSub				;C - - - - - 0x013748 04:9738: 20 72 E7
+.ifndef REGION_JP
+.ifdef COOP_SWAPTEST
+	JSR CoopSwap					;co-op phase 2 self-test: double swap per tick must be the identity
+CoopSwapTest_mid:
+	JSR CoopSwap
+.endif
+.endif
 
 	LDA globalTimer				;C - - - - - 0x01374B 04:973B: A5 14
 	AND #$01					;C - - - - - 0x01374D 04:973D: 29 01

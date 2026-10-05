@@ -151,3 +151,128 @@ Round 5 has the most Needlers; round 22 was picked for Snaggers (screenshot show
 ### Hardware note
 Real hardware needs an MMC3 board with PRG-RAM (TSROM/TKROM class) and the emulator/flash cart must honor the NES 2.0
 PRG-RAM size. Mesen does. The game itself never used `$6000-$7FFF` before.
+
+## Phase 2 (data model, CoopSwap)
+
+### Implemented
+- `src/coop/coop.inc`: the swap list as two ca65 macros, the single source of truth: `COOP_CTX_SCALARS M` (31 entries, one
+  per line) and `COOP_CTX_ARRAYS M` (12 per-object arrays), plus `COOP_POWERUP_MASK = POWERUP_CANDY | POWERUP_SHOE`.
+  Adding a per-player variable later = add one `M name` line to `COOP_CTX_SCALARS`; both the shadow storage and the
+  exchange code follow. (The macro name is passed as a macro parameter: `COOP_CTX_SCALARS COOP_SWAP_SCALAR` works in ca65.)
+- `src/coop/coop_ram.asm`: `ctxOther` is now exactly 32 bytes (`$6006-$6025` in c2): one shadow byte per scalar, named
+  `ctxOther_<symbol>` (`ctxOther_playerLives`, `ctxOther_playerState`, `ctxOther_shootSlot`, ...) plus `ctxOther_powerUps`
+  (only bits 0-1 are ever non-zero). The object arrays need no shadow: slot `OSLOT_P2` (39) is the shadow.
+  `coopP2Lives` is a second label on `ctxOther_playerLives` (same address, `$6016`): an equate `coopP2Lives = ...` is
+  NOT written to `labels.txt` by `ld65 -Ln`, and the harness looks the symbol up there, so it has to be a label.
+- `src/coop/coop_engine.asm`: `CoopSwap` (`COOP_CODE`), generated from the lists. Per scalar
+  `LDA native / LDX ctxOther_x / STX native / STA ctxOther_x` (zero-page natives assemble with ZP addressing), per array
+  `LDA arr / LDX arr+OSLOT_P2 / STX arr / STA arr+OSLOT_P2`. powerUps (only the 2 per-player bits):
+  `x = (powerUps ^ shadow) & mask; powerUps ^= x; shadow ^= x` (keeps the shared bits 2-7 in place, and the shadow never
+  gets bits outside the mask). Then `coopResident ^= 1; currentPlayer = coopResident`. Clobbers A and X, preserves Y.
+- Test hook (`src/bank_09.asm`, `RoundUpdate`, inside `.ifndef REGION_JP` + `.ifdef COOP_SWAPTEST`): `JSR CoopSwap` /
+  `CoopSwapTest_mid:` / `JSR CoopSwap` right after the every-tick player banked sub, before `LDA globalTimer`.
+  Normal build: no call to `CoopSwap` anywhere (ROM search for `20 81 CF` finds 0 hits in c2, 2 in c2t).
+
+### CoopSwap size and cycles
+- Size 519 bytes (14 ZP scalars x 10 + 17 ABS scalars x 12 + 12 arrays x 12 + powerUps 19 + bookkeeping 11 + RTS 1).
+  `COOP_CODE` is now 584 B ($248) of 960 B (376 B free; `CoopReset` is 65 B).
+- Cycles: ZP scalar 14, ABS scalar 16, array 16, powerUps 27, bookkeeping 14: body 701 + RTS 6 = **707** after the
+  `JSR` has executed, **713** including the JSR. Measured in Mesen: exactly 707 between the first instruction of `CoopSwap`
+  and the instruction after its RTS, on every one of 2032 + 3446 + 2052 swaps.
+- A co-op tick with one P2 window (2 swaps) pays about 1426 cycles; see item 4 below for the measured self-test cost.
+
+### Final swap list
+All addresses checked against `src/ram.inc`; uses grepped over all of `src/`. "dyn" = writes counted inside the player
+windows in `tmp/coop_scripts/ctx_summary.txt` (PU = player update, HS = HandleShooting, EC = PlayerCheckEnemyCollision,
+BT = bubble touch, PC = projectile collision).
+
+| symbol | addr | kind | evidence |
+|--------|------|------|----------|
+| ram_0062 | $62 | ZP | dyn PU 7247 / other 7; 9 refs, bank 05 only (player update) |
+| playerHeld | $72 | ZP | dyn PU; set by `LDA heldP1,X / STA playerHeld` with `X = currentPlayer` (bank 05 `$8E94`) each player update |
+| playerPressed | $73 | ZP | same, `LDA pressedP1,X` |
+| playerState | $75 | ZP | dyn PU 75, other 15; used in banks 05,07,08,09,0B,0F (player) |
+| ram_0076 | $76 | ZP | dyn PU 8242; 56 refs in bank 05 (player sub-state) |
+| playerDir | $77 | ZP | dyn PU 7164 |
+| ram_0078 | $78 | ZP | dyn PU 39287 |
+| hBlocked | $79 | ZP | dyn PU 57806 (terrain result for the player) |
+| ram_007A | $7A | ZP | no dyn write in the traces; 2 refs, bank 05 only (static; kept) |
+| ram_007B | $7B | ZP | dyn PU 23141 |
+| playerDmgType | $7C | ZP | dyn PU 3909, EC 391 |
+| ram_007D | $7D | ZP | dyn PU 123, BT 208 |
+| playerHazardTrigger | $7E | ZP | dyn PU 52 |
+| playerHazardSlot | $7F | ZP | no dyn write in the traces; cleared in banks 08/09 with the other hazard bytes (static; kept) |
+| playerInvFrames | $0477 | ABS | dyn PU 7580 |
+| playerHearts | $0478 | ABS | dyn PU 65 |
+| playerLives | $0479 | ABS | dyn PU 66 |
+| ram_047A | $047A | ABS | dyn PU 32; 4 refs in bank 05 |
+| ram_047B | $047B | ABS | dyn PU 24936 |
+| inflateTime | $047C | ABS | dyn PU 735 |
+| extraBubbles | $047D | ABS | dyn PU 703 |
+| ram_047E | $047E | ABS | dyn PU 7197; 11 refs, bank 05 only |
+| shootSlot | $0513 | ABS | dyn HS 640; 9 refs, bank 09 only |
+| shootDir | $0514 | ABS | dyn PU 671 |
+| shootTrigger | $0515 | ABS | dyn PU 671, HS 640 |
+| shootQueuedBubbles | $0516 | ABS | dyn PU 32 |
+| shooting | $0517 | ABS | dyn HS 640 |
+| shootInitialSlot | $0518 | ABS | dyn HS 640 |
+| bubbleVariant | $0519 | ABS | dyn PU 32 |
+| shootCounter | $0546 | ABS | dyn PU 1342; 2 refs, bank 05 only |
+| ram_077B | $077B | ABS | no dyn write in the traces; 8 refs in banks 05/08/0F (player movement) (static; kept) |
+| powerUps | $DE | masked | dyn PU 32; only `POWERUP_CANDY`/`POWERUP_SHOE` (cleared on death, banks 07/08); shadow `ctxOther_powerUps` |
+| 12 object arrays | | array | slot 0 <-> slot 39: objState $0563, objY $058B, objX $05B3, objImgOfs $05DB, objImgOfsHI $0603, objChrSlot $062B, objChrBank $0653, objAnim $067B, objAnimTimer $06A3, objAnimProgress $06CB, objAttr $06F3, objAnimHI $071B |
+
+Bookkeeping: `coopResident ^= 1`, `currentPlayer = coopResident` (the player update reloads `playerHeld/playerPressed`
+from `heldP1,X`/`pressedP1,X` with `X = currentPlayer`, so `currentPlayer` must already be right when the player code runs).
+
+### Not swapped
+- Scratch `$00-$09`: transient inside a routine, never live across a swap.
+- Terrain-probe temporaries `ram_001F ram_0046 terrainTileDef($60/$61) ram_0080 ram_0081 ram_00D2 ram_00D4 ram_00D5
+  ram_075C collW collH terrainResult`: rewritten at the start of every probe, no value survives to the next player update.
+- Shared/global: `multiplayer`, `currentPlayer` (set explicitly by the swap), score digits (`scoreDigits` at `$0481`, P2's
+  score at `ram_0491`, both indexed by `currentPlayer`/X), `scoreAdditionDigits`, `livesCurrentPos` (HUD cursor, Phase 7
+  decides), `rewardsEaten`, `sameRewardStreak`, `lastRewardType`, `ram_0545 ram_0547 ram_054A` (round statistics),
+  `wideHScroll`, `roundFlags`.
+
+### Written inside the player windows but in neither list (reported, not changed)
+Every address with a PU/HS/EC/BT/PC count in `ctx_summary.txt` that is in neither list:
+- Banking/engine state, not player state: `newPrgBank $3B`, `prgBankA/B $54/$53`, `bankedSubRetBank $58`, `terrainAdr+1 $43`
+  (map-address temporary), `nmiProgress`, `bufPPUCTRL/PPUMASK`, IRQ-private `$20/$24/$25`, `soundTrigger $E1`, and the
+  music/sound engine bytes (`$E5-$EB`, `$0796-$07F4`; the BT window just catches audio code running inside the NMI).
+- Arrays indexed by bubble/enemy slot, not by player: `bubbleProgress $04D5`(x20), `bubbleDir $04EB`(x20),
+  `bubbleTrappedSlot $04FF`(x20), `enemyType+1 $0099` (EC, 2 writes), `ram_00AC-AF` (BT; banks 07/08/0B, indexed by X),
+  `ram_04AF-04B2` (BT; indexed by X). Both players share the enemy/bubble slots.
+- `bubbleSpawnSlot/State/Y/X/ChrSlot/Anim $0743-$074A` (HS, 640 writes each): spawn parameters written and consumed inside
+  one `HandleShooting` call: transient.
+- `ram_051A` (BT, 16 writes): multi-bubble reward counter, incremented while the bubble-touch loop runs and consumed and
+  cleared at its end (`bank_09` `$9E97-$9EF8`, together with `ram_051B`/`ram_0549`). Fine as long as a swap window never
+  splits a BT loop; Phase 5 should remember that P2's BT loop shares it. Not swapped.
+- Score/reward bytes reached from the EC window (`scoreDigits`, `scoreAdditionDigits`, `ram_0491-97`, `rewardsEaten`,
+  `sameRewardStreak`, `lastRewardType`, `livesCurrentPos`): global or indexed, see above.
+- No unexplained address.
+
+### Verification
+1. `build c2` (CoopSwap present, never called) -> `regress base c2 --reuse-base`: REGRESSION PASS, 12/12.
+2. `build c2t --define COOP_SWAPTEST` (double swap every tick) -> `regress base c2t --reuse-base`: REGRESSION PASS, 12/12.
+   Both runs print the same "lag pattern differs from tick N" notes for each scenario (the lag pattern already differs
+   from the original ROM since the c1/c2 boot-time changes); the compared RAM still matches everywhere.
+3. Single-swap content check, `tmp/coop_scripts/swapcheck.py` (Lua exec callbacks on the first `JSR CoopSwap` and on
+   `CoopSwapTest_mid`; the list is parsed from `coop.inc`). It captures all 31 natives, 31 shadows, slots 0/39 of the 12
+   arrays, powerUps + shadow, coopResident, the whole CPU RAM and PRG-RAM; at `_mid` it asserts natives == old shadows,
+   shadows == old natives, slot 0 == old slot 39 and vice versa, powerUps bits 0-1 exchanged and bits 2-7 unchanged,
+   shadow inside the mask, Y preserved, `coopResident` toggled, `currentPlayer == coopResident`, and that no other byte
+   of CPU RAM (stack excluded) or PRG-RAM changed; after the second swap everything is back to the captured state.
+   `--inject` first fills `ctxOther` and slot 39 with random bytes (restored afterwards), so data really moves both ways
+   (without it the shadow is all zero). Results (swaps / checks / failures): r01 plain 2032 / 20448016 / 0;
+   r01 inject 2032 / 20448016 / 0; natural plain 3446 / 34677098 / 0; natural inject 3446 / 34677098 / 0;
+   r17 inject 2052 / 20649276 / 0. 707 cycles on every swap.
+   (The first run flagged `$01F6`: the JSR's return address on the stack; the stack is now excluded from the check.)
+4. `stats c2t --vs c2` (2 swaps + 2 JSR per tick): d_play +954 (natural) and +1203 (r70) up to +1507 cycles, +1422..+1507 in the other
+   scenarios (play ticks include a few without `RoundUpdate`, hence the lower means); 2 x 713 = 1426 as predicted. Total play-mean
+   delta over the 12 scenarios +8.39%.
+5. JP build: `8d2855ea5505bf094b7a40155caa92b4` unchanged.
+
+### Concerns / notes for the next phases
+- Nothing wrong with the list was found. Three entries (`ram_007A`, `playerHazardSlot`, `ram_077B`) have no writes in the
+  dynamic traces (rare paths); they were kept on the strength of the static references in the player code.
+- `ram_051A` and the `bubbleSpawn*` bytes are the only shared transient state that could cross a routine boundary.
