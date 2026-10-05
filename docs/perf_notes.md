@@ -750,8 +750,19 @@ ReadPad (NMI, off-limits) 4.3%, ColorBufferToVRAM (NMI) 3.3%.
 ### 6.4 Baseline for the co-op work
 HEAD of `bb2_performance_optimization` is the new baseline. Byte identity with the original ROM
 no longer holds, so use `perf.py regress base <build>` for regression instead (rule 3 of the co-op
-plan). `bb2_coop_implementation_plan.md` is not in this repo, so its Rule 3 still has to be
-updated by hand.
+plan). `tmp/bb2_coop_implementation_plan.md` has been updated to match (2026-10-05):
+* a starting-point note;
+* Rule 3 (harness regression instead of byte identity) and Rule 4 (savestates valid only per
+  build);
+* new Rule 9 (bank-switch discipline: race-free order, the `prgBankB` invariant the guards rely
+  on, the nmiProgress retry for non-7 commands);
+* new Rule 10 (performance budget, lag frames);
+* §1.1 free bytes per bank (fixed bank F now has 238 B);
+* §1.5 execution model;
+* Phase 0 (harness extension for pad 2 and co-op scenarios);
+* Phase 4.4 (new baked-in bubble-loop bounds `CPX #20` / `CPX #19` added by the perf work);
+* 5.4 / 9.4 measurement via `perf.py`;
+* 9.1 (DrawObjects already alternates draw order).
 
 ### Open decision (not implemented)
 "Selector always 7": logic leaves the MMC3 selector ($8000) at 7 everywhere except right after
