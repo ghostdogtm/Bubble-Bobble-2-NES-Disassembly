@@ -13,7 +13,15 @@ CODE_098008:
 	STA terrainResult				;C - - - - - 0x01201A 04:800A: 8D E9 04
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01201D 04:800D: BD 77 05
 	BNE CODE_098015				;C - - - - - 0x012020 04:8010: D0 03
+.ifdef REGION_JP
 		JMP CODE_09815D				;C - - - - - 0x012022 04:8012: 4C 5D 81
+.else
+		;Empty slot: step to the next slot right here instead of JMP CODE_09815D (perf phase 4)
+		INX
+		CPX #20
+		BNE CODE_098008
+		JMP CODE_098165
+.endif
 CODE_098015:
 	CMP #BUBBLE_RISING					;C - - - - - 0x012025 04:8015: C9 01
 	BNE CODE_09803C				;C - - - - - 0x012027 04:8017: D0 23
