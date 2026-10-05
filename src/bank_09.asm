@@ -22,6 +22,7 @@ CODE_098008:
 		BNE CODE_098008
 		JMP CODE_098165
 .endif
+.ifdef REGION_JP
 CODE_098015:
 	CMP #BUBBLE_RISING					;C - - - - - 0x012025 04:8015: C9 01
 	BNE CODE_09803C				;C - - - - - 0x012027 04:8017: D0 23
@@ -174,6 +175,160 @@ CODE_098135:
 .endif
 		JSR BubbleEmergingUpdate				;C - - - - - 0x012149 04:8139: 20 9C 8B
 		JMP CODE_09815D				;C - - - - - 0x01214C 04:813C: 4C 5D 81
+.else
+;Perf phase 4: the same compare/handler blocks, reordered by measured state frequency
+;(RISING, ENEMY, EXPIRING, POWER, POPPING, EMERGING first). Every handler is still entered from its
+;own CMP #state / BNE pair, so A = state, Z = 1, C = 1, N = 0 and X/Y/V are unchanged. POPPED and
+;EXPIRED_POP must stay near the end: their BCC CODE_09815D has to reach the loop tail.
+CODE_098015:
+	CMP #BUBBLE_RISING					;C - - - - - 0x012025 04:8015: C9 01
+	BNE CODE_098052				;C - - - - - 0x012027 04:8017: D0 23 (orig: BNE CODE_09803C)
+		LDA globalTimer				;C - - - - - 0x012029 04:8019: A5 14
+		AND #$0E					;C - - - - - 0x01202B 04:801B: 29 0E
+		BNE CODE_098039				;C - - - - - 0x01202D 04:801D: D0 1A
+			INC bubbleProgress,X				;C - - - - - 0x01202F 04:801F: FE D5 04
+			LDA bubbleProgress,X				;C - - - - - 0x012032 04:8022: BD D5 04
+			CMP bubbleLifespan				;C - - - - - 0x012035 04:8025: CD 1C 05
+			BNE CODE_098039				;C - - - - - 0x012038 04:8028: D0 0F
+				LDA #BUBBLE_EXPIRING					;C - - - - - 0x01203A 04:802A: A9 02
+				STA scratch0				;C - - - - - 0x01203C 04:802C: 85 00
+				LDA #.LOBYTE(anBubbleWeak_ID)					;C - - - - - 0x01203E 04:802E: A9 30
+				STA scratch1				;C - - - - - 0x012040 04:8030: 85 01
+				LDA #.HIBYTE(anBubbleWeak_ID)					;C - - - - - 0x012042 04:8032: A9 00
+				STA scratch2				;C - - - - - 0x012044 04:8034: 85 02
+				JSR ReplaceBubble				;C - - - - - 0x012046 04:8036: 20 CE 8A
+	CODE_098039:
+		JMP CODE_098149				;C - - - - - 0x012049 04:8039: 4C 49 81
+CODE_098052:
+	CMP #BUBBLE_ENEMY					;C - - - - - 0x012062 04:8052: C9 03
+	BNE CODE_09803C				;C - - - - - 0x012064 04:8054: D0 23 (orig: BNE CODE_098079)
+		LDA globalTimer				;C - - - - - 0x012066 04:8056: A5 14
+		AND #$0E					;C - - - - - 0x012068 04:8058: 29 0E
+		BNE CODE_098076				;C - - - - - 0x01206A 04:805A: D0 1A
+			INC bubbleProgress,X				;C - - - - - 0x01206C 04:805C: FE D5 04
+			LDA bubbleProgress,X				;C - - - - - 0x01206F 04:805F: BD D5 04
+			CMP bubbleLifespan				;C - - - - - 0x012072 04:8062: CD 1C 05
+			BNE CODE_098076				;C - - - - - 0x012075 04:8065: D0 0F
+				LDA #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x012077 04:8067: A9 04
+				STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x012079 04:8069: 9D 77 05
+				LDA #$03					;C - - - - - 0x01207C 04:806C: A9 03
+				STA objAttr+OSLOT_BUBBLE,X				;C - - - - - 0x01207E 04:806E: 9D 07 07
+				LDA #$00					;C - - - - - 0x012081 04:8071: A9 00
+				STA bubbleProgress,X				;C - - - - - 0x012083 04:8073: 9D D5 04
+	CODE_098076:
+		JMP CODE_098149				;C - - - - - 0x012086 04:8076: 4C 49 81
+CODE_09803C:
+	CMP #BUBBLE_EXPIRING					;C - - - - - 0x01204C 04:803C: C9 02
+	BNE CODE_0980B5				;C - - - - - 0x01204E 04:803E: D0 12 (orig: BNE CODE_098052)
+		INC bubbleProgress,X				;C - - - - - 0x012050 04:8040: FE D5 04
+		LDA bubbleProgress,X				;C - - - - - 0x012053 04:8043: BD D5 04
+		CMP #$FF					;C - - - - - 0x012056 04:8046: C9 FF
+		BNE CODE_09804F				;C - - - - - 0x012058 04:8048: D0 05
+			LDA #BUBBLE_EXPIRED					;C - - - - - 0x01205A 04:804A: A9 19
+			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01205C 04:804C: 9D 77 05
+	CODE_09804F:
+		JMP CODE_098149				;C - - - - - 0x01205F 04:804F: 4C 49 81
+CODE_0980B5:
+	CMP #BUBBLE_POWER					;C - - - - - 0x0120C5 04:80B5: C9 05
+	BNE CODE_0980F8				;C - - - - - 0x0120C7 04:80B7: D0 03 (orig: BNE CODE_0980BC)
+		JMP CODE_098149				;C - - - - - 0x0120C9 04:80B9: 4C 49 81
+CODE_0980F8:
+	CMP #BUBBLE_POPPING					;C - - - - - 0x012108 04:80F8: C9 22
+	BNE CODE_098135				;C - - - - - 0x01210A 04:80FA: D0 1D (orig: BNE CODE_098119)
+		LDA objAnimHI+OSLOT_BUBBLE,X				;C - - - - - 0x01210C 04:80FC: BD 2F 07
+		BEQ CODE_098107				;C - - - - - 0x01210F 04:80FF: F0 06
+			JSR CODE_0981F8				;C - - - - - 0x012111 04:8101: 20 F8 81
+			JMP CODE_09815D				;C - - - - - 0x012114 04:8104: 4C 5D 81
+	CODE_098107:
+		LDA #BUBBLE_POPPED					;C - - - - - 0x012117 04:8107: A9 23
+		STA scratch0				;C - - - - - 0x012119 04:8109: 85 00
+		LDA #.LOBYTE(anBubblePop_ID)					;C - - - - - 0x01211B 04:810B: A9 2E
+		STA scratch1				;C - - - - - 0x01211D 04:810D: 85 01
+		LDA #.HIBYTE(anBubblePop_ID)					;C - - - - - 0x01211F 04:810F: A9 00
+		STA scratch2				;C - - - - - 0x012121 04:8111: 85 02
+		JSR ReplaceBubble				;C - - - - - 0x012123 04:8113: 20 CE 8A
+		JMP CODE_09815D				;C - - - - - 0x012126 04:8116: 4C 5D 81
+CODE_098135:
+	CMP #BUBBLE_EMERGING					;C - - - - - 0x012145 04:8135: C9 80
+	BNE CODE_098079				;C - - - - - 0x012147 04:8137: D0 06 (orig: BNE CODE_09813F)
+		JSR BubbleEmergingUpdate				;C - - - - - 0x012149 04:8139: 20 9C 8B
+		JMP CODE_09815D				;C - - - - - 0x01214C 04:813C: 4C 5D 81
+CODE_098079:
+	CMP #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x012089 04:8079: C9 04
+	BNE CODE_098119				;C - - - - - 0x01208B 04:807B: D0 38 (orig: BNE CODE_0980B5)
+		INC bubbleProgress,X				;C - - - - - 0x01208D 04:807D: FE D5 04
+		LDA bubbleProgress,X				;C - - - - - 0x012090 04:8080: BD D5 04
+		CMP #$80					;C - - - - - 0x012093 04:8083: C9 80
+		BCC CODE_0980B2				;C - - - - - 0x012095 04:8085: 90 2B
+			STX scratch1				;C - - - - - 0x012097 04:8087: 86 01
+			LDA bubbleTrappedSlot,X				;C - - - - - 0x012099 04:8089: BD FF 04
+			TAX							;C - - - - - 0x01209C 04:808C: AA
+			TAY							;C - - - - - 0x01209D 04:808D: A8
+
+			LDA #$01					;C - - - - - 0x01209E 04:808E: A9 01
+			STA objState+OSLOT_ENEMY,X				;C - - - - - 0x0120A0 04:8090: 9D 6C 05
+			STA enemyMad,X				;C - - - - - 0x0120A3 04:8093: 95 63
+
+			LDX scratch1				;C - - - - - 0x0120A5 04:8095: A6 01
+			LDA objY+OSLOT_BUBBLE,X				;C - - - - - 0x0120A7 04:8097: BD 9F 05
+			STA objY+OSLOT_ENEMY,Y				;C - - - - - 0x0120AA 04:809A: 99 94 05
+			LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x0120AD 04:809D: BD C7 05
+			STA objX+OSLOT_ENEMY,Y				;C - - - - - 0x0120B0 04:80A0: 99 BC 05
+
+			LDA #3					;C - - - - - 0x0120B3 04:80A3: A9 03
+			STA objAttr+OSLOT_ENEMY,Y				;C - - - - - 0x0120B5 04:80A5: 99 FC 06
+			LDA #BUBBLE_EXPIRED					;C - - - - - 0x0120B8 04:80A8: A9 19
+			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x0120BA 04:80AA: 9D 77 05
+
+			LDA #$00					;C - - - - - 0x0120BD 04:80AD: A9 00
+			STA bubbleTrappedSlot,X				;C - - - - - 0x0120BF 04:80AF: 9D FF 04
+	CODE_0980B2:
+		JMP CODE_098149				;C - - - - - 0x0120C2 04:80B2: 4C 49 81
+CODE_098119:
+	CMP #BUBBLE_POPPED					;C - - - - - 0x012129 04:8119: C9 23
+	BNE CODE_0980BC				;C - - - - - 0x01212B 04:811B: D0 18 (orig: BNE CODE_098135)
+		INC bubbleProgress,X				;C - - - - - 0x01212D 04:811D: FE D5 04
+		LDA bubbleProgress,X				;C - - - - - 0x012130 04:8120: BD D5 04
+		CMP #$04					;C - - - - - 0x012133 04:8123: C9 04
+		BCC CODE_09815D				;C - - - - - 0x012135 04:8125: 90 36
+			LDA #$00					;C - - - - - 0x012137 04:8127: A9 00
+			STA scratch0				;C - - - - - 0x012139 04:8129: 85 00
+			STA scratch1				;C - - - - - 0x01213B 04:812B: 85 01
+			STA scratch2				;C - - - - - 0x01213D 04:812D: 85 02
+			JSR ReplaceBubble				;C - - - - - 0x01213F 04:812F: 20 CE 8A
+			JMP CODE_09815D				;C - - - - - 0x012142 04:8132: 4C 5D 81
+CODE_0980BC:
+	CMP #BUBBLE_POWER_POPPED					;C - - - - - 0x0120CC 04:80BC: C9 06
+	BNE CODE_0980DC				;C - - - - - 0x0120CE 04:80BE: D0 06 (orig: BNE CODE_0980C6)
+		JSR CODE_098339				;C - - - - - 0x0120D0 04:80C0: 20 39 83
+		JMP CODE_09815D				;C - - - - - 0x0120D3 04:80C3: 4C 5D 81
+CODE_0980DC:
+	CMP #BUBBLE_EXPIRED_POP					;C - - - - - 0x0120EC 04:80DC: C9 20
+	BNE CODE_0980C6				;C - - - - - 0x0120EE 04:80DE: D0 18 (orig: BNE CODE_0980F8)
+
+	INC bubbleProgress,X				;C - - - - - 0x0120F0 04:80E0: FE D5 04
+	LDA bubbleProgress,X				;C - - - - - 0x0120F3 04:80E3: BD D5 04
+	CMP #$04					;C - - - - - 0x0120F6 04:80E6: C9 04
+	BCC CODE_09815D				;C - - - - - 0x0120F8 04:80E8: 90 73
+
+	LDA #$00					;C - - - - - 0x0120FA 04:80EA: A9 00
+	STA scratch0				;C - - - - - 0x0120FC 04:80EC: 85 00
+	STA scratch1				;C - - - - - 0x0120FE 04:80EE: 85 01
+	STA scratch2				;C - - - - - 0x012100 04:80F0: 85 02
+	JSR ReplaceBubble				;C - - - - - 0x012102 04:80F2: 20 CE 8A
+	JMP CODE_09815D				;C - - - - - 0x012105 04:80F5: 4C 5D 81
+CODE_0980C6:
+	CMP #BUBBLE_EXPIRED					;C - - - - - 0x0120D6 04:80C6: C9 19
+	BNE CODE_09813F				;C - - - - - 0x0120D8 04:80C8: D0 12 (orig: BNE CODE_0980DC)
+		LDA #$20					;C - - - - - 0x0120DA 04:80CA: A9 20
+		STA scratch0				;C - - - - - 0x0120DC 04:80CC: 85 00
+		LDA #.LOBYTE(anBubblePop_ID)					;C - - - - - 0x0120DE 04:80CE: A9 2E
+		STA scratch1				;C - - - - - 0x0120E0 04:80D0: 85 01
+		LDA #.HIBYTE(anBubblePop_ID)					;C - - - - - 0x0120E2 04:80D2: A9 00
+		STA scratch2				;C - - - - - 0x0120E4 04:80D4: 85 02
+		JSR ReplaceBubble				;C - - - - - 0x0120E6 04:80D6: 20 CE 8A
+		JMP CODE_09815D				;C - - - - - 0x0120E9 04:80D9: 4C 5D 81
+.endif
 CODE_09813F:
 .ifndef REGION_JP
 	TXA							;C - - - - - 0x01214F 04:813F: 8A
