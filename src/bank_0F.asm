@@ -5850,11 +5850,28 @@ SwapPrgBankA:
 	STA $8001				;C - - - - - 0x01FF54 07:FF44: 8D 01 80
 	STA prgBankA				;C - - - - - 0x01FF57 07:FF47: 85 54
 
-	LDA #$06					;C - - - - - 0x01FF59 07:FF49: A9 06
-	STA $8000				;C - - - - - 0x01FF5B 07:FF4B: 8D 00 80
-	LDA newPrgBank				;C - - - - - 0x01FF5E 07:FF4E: A5 3B
-	STA $8001				;C - - - - - 0x01FF60 07:FF50: 8D 01 80
-	STA prgBankA				;C - - - - - 0x01FF63 07:FF53: 85 54
+	;(Perf) The original repeated the whole switch to survive a lag NMI (NMIShort) landing
+	;between STA $8000 and STA $8001: NMIShort leaves the selector at 7, so the $8001 write
+	;went to the $A000 slot. The repeat fixed the $8000 window but left $A000 wrong.
+	;NMIShort swaps banks only when nmiProgress == 1 and always makes it 2 first, so if
+	;nmiProgress is still 1 (or 3: outside the logic) no swap can have happened. Otherwise
+	;redo the switch and re-assert the $A000 slot; NMIShort cannot swap again this tick.
+	;AND keeps C and V; the reload of newPrgBank restores A and N/Z.
+	LDA nmiProgress
+	AND #$01
+	BEQ @lagNMI
+	LDA newPrgBank
+	RTS
+@lagNMI:
+	LDA #$06
+	STA $8000
+	LDA newPrgBank
+	STA $8001
+	LDA #$07
+	STA $8000
+	LDA prgBankB
+	STA $8001
+	LDA newPrgBank
 	RTS							;C - - - - - 0x01FF65 07:FF55: 60
 .endif
 
