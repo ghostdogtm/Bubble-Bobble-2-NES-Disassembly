@@ -3100,22 +3100,33 @@ CODE_0FF079:
 		JMP CODE_0FEFBB				;C - - - - - 0x01EF16 07:EF06: 4C BB EF
 CODE_0FEF09:
 	;Even frame, draw all objects
-	LDA #$00					;C - - - - - 0x01EF19 07:EF09: A9 00
-	STA oamBufferPos				;C - - - - - 0x01EF1B 07:EF0B: 8D 5E 05
-	LDA #$00					;C - - - - - 0x01EF1E 07:EF0E: A9 00
-	STA scratch4				;C - - - - - 0x01EF20 07:EF10: 85 04
-CODE_0FEF12:
-	LDY scratch4				;C - - - - - 0x01EF22 07:EF12: A4 04
-	LDA ram_0475				;C - - - - - 0x01EF24 07:EF14: AD 75 04
-	BEQ CODE_0FEF21				;C - - - - - 0x01EF27 07:EF17: F0 08
-		CPY ram_0475				;C - - - - - 0x01EF29 07:EF19: CC 75 04
-		BCC CODE_0FEF21				;C - - - - - 0x01EF2C 07:EF1C: 90 03
-			JMP CODE_0FEFAA				;C - - - - - 0x01EF2E 07:EF1E: 4C AA EF
-CODE_0FEF21:
-	LDA objState,Y				;C - - - - - 0x01EF31 07:EF21: B9 63 05
-	BNE CODE_0FEF29				;C - - - - - 0x01EF34 07:EF24: D0 03
-		JMP CODE_0FEFAA				;C - - - - - 0x01EF36 07:EF26: 4C AA EF
+	;(Perf) The slot loop keeps the slot number in Y. The original reloaded it from scratch4
+	;and tested ram_0475 before objState for every slot (34 cycles per empty slot, now 13).
+	;Both tests only decide "skip or draw", so their order does not matter. scratch4 is
+	;still written with the slot before an object is drawn, and the exits leave scratch4 =
+	;40 and Y as the original did.
+	LDA #$00
+	STA oamBufferPos
+	TAY
+DrawObjects_EvenScan:
+	LDA objState,Y
+	BNE DrawObjects_EvenUsed
+DrawObjects_EvenNext:
+	INY
+	CPY #40
+	BNE DrawObjects_EvenScan
+	;Slot 39 was not drawn: the original exits with Y = 39 (LDY scratch4)
+	STY scratch4
+	DEY
+	JMP CODE_0FF064
+DrawObjects_EvenUsed:
+	;Slots >= ram_0475 are skipped when ram_0475 != 0
+	LDA ram_0475
+	BEQ CODE_0FEF29
+	CPY ram_0475
+	BCS DrawObjects_EvenNext
 CODE_0FEF29:
+	STY scratch4
 	LDA objAttr,Y				;C - - - - - 0x01EF39 07:EF29: B9 F3 06
 	STA sprAttr				;C - - - - - 0x01EF3C 07:EF2C: 8D 60 05
 	LDA objY,Y				;C - - - - - 0x01EF3F 07:EF2F: B9 8B 05
@@ -3200,40 +3211,45 @@ CODE_0FEF9E:
 	BNE CODE_0FEF70				;C - - - - - 0x01EFB1 07:EFA1: D0 CD
 
 	STX oamBufferPos				;C - - - - - 0x01EFB3 07:EFA3: 8E 5E 05
-	CPX #$00					;C - - - - - 0x01EFB6 07:EFA6: E0 00
-	BEQ CODE_0FEFB8				;C - - - - - 0x01EFB8 07:EFA8: F0 0E
+	;(Perf) The original `CPX #$00 / BEQ CODE_0FEFB8` here was never taken: X != 0, because
+	;the loop above leaves through the wrap check when X becomes 0. INC/LDA/CMP scratch4
+	;became LDY/INY/CPY (the next slot test needs the slot in Y anyway).
 CODE_0FEFAA:
-	INC scratch4				;C - - - - - 0x01EFBA 07:EFAA: E6 04
-	LDA scratch4				;C - - - - - 0x01EFBC 07:EFAC: A5 04
-	CMP #40					;C - - - - - 0x01EFBE 07:EFAE: C9 28
-	BEQ CODE_0FEFB5				;C - - - - - 0x01EFC0 07:EFB0: F0 03
-		JMP CODE_0FEF12				;C - - - - - 0x01EFC2 07:EFB2: 4C 12 EF
-CODE_0FEFB5:
-	JMP CODE_0FF064				;C - - - - - 0x01EFC5 07:EFB5: 4C 64 F0
-
-CODE_0FEFB8:
-	;Unreached
-	;OAM buffer completely full
-	JMP CODE_0FF064				;- - - - - - 0x01EFC8 07:EFB8: 4C
-
+	LDY scratch4
+	INY
+	CPY #40
+	BEQ DrawObjects_EvenLast
+	JMP DrawObjects_EvenScan
+DrawObjects_EvenLast:
+	;Slot 39 was drawn: the original exits with Y = scratch1 (end of its sprite loop)
+	STY scratch4
+	LDY scratch1
+	JMP CODE_0FF064
 CODE_0FEFBB:
-	;Uneven frame,
-	LDA #$00					;C - - - - - 0x01EFCB 07:EFBB: A9 00
-	STA oamBufferPos				;C - - - - - 0x01EFCD 07:EFBD: 8D 5E 05
-	LDA #$27					;C - - - - - 0x01EFD0 07:EFC0: A9 27
-	STA scratch4				;C - - - - - 0x01EFD2 07:EFC2: 85 04
-CODE_0FEFC4:
-	LDY scratch4				;C - - - - - 0x01EFD4 07:EFC4: A4 04
-	LDA ram_0475				;C - - - - - 0x01EFD6 07:EFC6: AD 75 04
-	BEQ CODE_0FEFD3				;C - - - - - 0x01EFD9 07:EFC9: F0 08
-		CPY ram_0475				;C - - - - - 0x01EFDB 07:EFCB: CC 75 04
-		BCC CODE_0FEFD3				;C - - - - - 0x01EFDE 07:EFCE: 90 03
-			JMP CODE_0FF059				;C - - - - - 0x01EFE0 07:EFD0: 4C 59 F0
-CODE_0FEFD3:
-	LDA objState,Y				;C - - - - - 0x01EFE3 07:EFD3: B9 63 05
-	BNE CODE_0FEFDB				;C - - - - - 0x01EFE6 07:EFD6: D0 03
-		JMP CODE_0FF059				;C - - - - - 0x01EFE8 07:EFD8: 4C 59 F0
+	;Uneven frame, draw all objects in reverse order
+	;(Perf) Same slot loop as the even path, counting down. The slots >= ram_0475 (skipped
+	;when ram_0475 != 0) all come first in this order, so the loop starts below them
+	;instead of testing ram_0475 per slot. ram_0475 is not written during DrawObjects.
+	LDA #$00
+	STA oamBufferPos
+	LDY #$27
+	LDA ram_0475
+	BEQ DrawObjects_OddScan
+	CMP #$28
+	BCS DrawObjects_OddScan
+	TAY
+	DEY
+DrawObjects_OddScan:
+	LDA objState,Y
+	BNE CODE_0FEFDB
+	DEY
+	BPL DrawObjects_OddScan
+	;Slot 0 was not drawn: the original exits with Y = 0 (LDY scratch4)
+	STY scratch4
+	INY
+	JMP CODE_0FF064
 CODE_0FEFDB:
+	STY scratch4
 	LDA objAttr,Y				;C - - - - - 0x01EFEB 07:EFDB: B9 F3 06
 	STA sprAttr				;C - - - - - 0x01EFEE 07:EFDE: 8D 60 05
 	LDA objY,Y				;C - - - - - 0x01EFF1 07:EFE1: B9 8B 05
@@ -3311,14 +3327,16 @@ CODE_0FF022:
 	BNE CODE_0FF022				;C - - - - - 0x01F060 07:F050: D0 D0
 
 	STX oamBufferPos				;C - - - - - 0x01F062 07:F052: 8E 5E 05
-	CPX #$00					;C - - - - - 0x01F065 07:F055: E0 00
-	BEQ CODE_0FF079				;C - - - - - 0x01F067 07:F057: F0 20
+	;(Perf) `CPX #$00 / BEQ CODE_0FF079` was never taken here (X != 0, see the even path).
 CODE_0FF059:
-	DEC scratch4				;C - - - - - 0x01F069 07:F059: C6 04
-	LDA scratch4				;C - - - - - 0x01F06B 07:F05B: A5 04
-	CMP #$FF					;C - - - - - 0x01F06D 07:F05D: C9 FF
-	BEQ CODE_0FF064				;C - - - - - 0x01F06F 07:F05F: F0 03
-		JMP CODE_0FEFC4				;C - - - - - 0x01F071 07:F061: 4C C4 EF
+	LDY scratch4
+	DEY
+	BMI DrawObjects_OddLast
+	JMP DrawObjects_OddScan
+DrawObjects_OddLast:
+	;Slot 0 was drawn: the original exits with Y = scratch1 (end of its sprite loop)
+	STY scratch4
+	LDY scratch1
 CODE_0FF064:
 	;(Perf) Hide the unused OAM entries (Y = $F0, tile = 1), as the original loop
 	;`LDA #$F0 / STA OAMBuffer,X / LDA #$01 / STA OAMBuffer+1,X / INX x4 / CPX #0 / BNE`
