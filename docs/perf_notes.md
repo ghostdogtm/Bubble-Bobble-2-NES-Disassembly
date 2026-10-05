@@ -508,3 +508,159 @@ NMI leave the selector at 7. If SwapPrgBankA restored the selector to 7 (+6 cycl
 every $A000 switch could drop its `LDA #7 / STA $8000` (-6 per switch, about 0.95M switches).
 That would be a net gain of about 4.7M cycles. It is a new global invariant (every future
 $8000 writer must restore 7), so it needs the owner's approval.
+
+## Phase 4: UpdateBubbles state dispatch (F4)
+
+**Status: committed** as two commits: an inline loop step for empty slots, then a
+frequency-ordered ladder. **The plan's jump table was measured and rejected** because it is
+slower than the existing ladder on the real state distribution. Final build: `p4` (= HEAD
+before this notes commit). Profile runs are in `tmp/runs/p4`. Both edits are US-only. The JP
+branch keeps the original code, and the JP build is byte-identical
+(md5 8d2855ea5505bf094b7a40155caa92b4).
+
+### Ladder map (p3 addresses)
+The ladder starts after `LDA objState+OSLOT_BUBBLE,X / BNE CODE_098015`. An empty slot (0)
+takes `JMP CODE_09815D`. Each state is a `CMP #state / BNE next` pair with its handler inline
+after it. The CMPs only dispatch: there are no side effects between them.
+
+| pos | state | label | handler | exit |
+|---|---|---|---|---|
+| 1 | RISING $01 | CODE_098015 $8015 | progress++ every 16 ticks; at lifespan ReplaceBubble(EXPIRING) | JMP CODE_098149 |
+| 2 | EXPIRING $02 | CODE_09803C | progress++; at $FF state = EXPIRED | JMP CODE_098149 |
+| 3 | ENEMY $03 | CODE_098052 | progress++ every 16 ticks; at lifespan state = ENEMY_EXPIRING | JMP CODE_098149 |
+| 4 | ENEMY_EXPIRING $04 | CODE_098079 | progress++; at $80 the enemy is released (mad), state = EXPIRED | JMP CODE_098149 |
+| 5 | POWER $05 | CODE_0980B5 | none | JMP CODE_098149 |
+| 6 | POWER_POPPED $06 | CODE_0980BC | JSR CODE_098339 | JMP CODE_09815D |
+| 7 | EXPIRED $19 | CODE_0980C6 | ReplaceBubble($20, pop anim) | JMP CODE_09815D |
+| 8 | EXPIRED_POP $20 | CODE_0980DC | progress++; `BCC CODE_09815D` below 4, else ReplaceBubble(0) | CODE_09815D |
+| 9 | POPPING $22 | CODE_0980F8 | JSR CODE_0981F8 while animHI != 0, else ReplaceBubble(POPPED) | JMP CODE_09815D |
+| 10 | POPPED $23 | CODE_098119 | progress++; `BCC CODE_09815D` below 4, else ReplaceBubble(0) | CODE_09815D |
+| 11 | EMERGING $80 | CODE_098135 | JSR BubbleEmergingUpdate | JMP CODE_09815D |
+| - | default | CODE_09813F | US: `TXA/PHA/JSR CODE_0FFAB9/PLA/TAX` (that routine handles states $88 and $89 and ignores the rest). JP: `BNE CODE_09815D` (nothing) | JMP CODE_09815D |
+
+### Measured distribution (`cover p3`, 12 scenarios)
+285,900 slot visits: 206,056 empty (72%) and 79,844 dispatches.
+
+| state | dispatches | share | ladder cost (cyc) |
+|---|---|---|---|
+| RISING | 46,906 | 58.7% | 4 |
+| POWER | 12,539 | 15.7% | 24 |
+| POPPING | 6,474 | 8.1% | 44 |
+| EMERGING | 4,380 | 5.5% | 54 |
+| POPPED | 3,613 | 4.5% | 49 |
+| ENEMY | 3,145 | 3.9% | 14 |
+| POWER_POPPED | 1,813 | 2.3% | 29 |
+| EXPIRING | 765 | 1.0% (camp03 only) | 9 |
+| ENEMY_EXPIRING | 128 | 0.2% (camp03 only) | 19 |
+| EXPIRED_POP | 44 | | 39 |
+| EXPIRED | 11 | | 34 |
+| default | 26 | | 55 |
+
+Cost model: a failed `CMP/BNE` costs 5 cycles and a matching one costs 4. No ladder BNE
+crosses a page. **Current dispatch: 1,296k cycles, 16.2 per dispatch.** The whole ladder is
+about 0.2% of the 600M busy cycles. The per-scenario mix varies a lot: POWER appears only in
+r08/r17/r40/r50/r64, and ENEMY/EXPIRING mostly in camp03.
+
+### Designs compared (same cost model)
+* **Plan design** (`BMI` for $80, `CMP #$24 / BCS default`, `TAY`, push hi/lo, `RTS`): 28 cycles
+  for every state from 1 to $23, plus `SEC`/`TYA` if a handler needed C or A. $80 costs 7
+  (`BMI` taken, then `CMP #$80 / BNE default`, because `BMI` also catches $81-$FF such as the US
+  default states $88/$89). Total about 2.14M, **+0.85M (65% slower)**. RISING alone would go
+  from 4 to 28 cycles.
+* **Hybrid** (RISING compare first, then `BMI` and the table): about 1.18M (-0.12M). It still
+  needs the full flag/register audit and 72 bytes of table.
+* **Frequency-ordered ladder** (chosen): same blocks, new order. The best order on total
+  cycles (RISING, POWER, POPPING, EMERGING, ENEMY, ...) gives 785k, but camp03 gets +35k
+  slower. The order chosen is the best one that slows no scenario down:
+  **RISING, ENEMY, EXPIRING, POWER, POPPING, EMERGING, ENEMY_EXPIRING, POPPED, POWER_POPPED,
+  EXPIRED_POP, EXPIRED, default.** Model cost 976k (-320k, -25%). It also keeps the
+  trapped-enemy states early. A human player, who traps enemies on purpose, probably
+  produces them more often than the random input (not measured).
+  Placement constraint: POPPED and EXPIRED_POP each have a `BCC CODE_09815D` that has to
+  reach the loop tail, so at most 63 bytes of blocks may follow them (here 60 and 22).
+* **Empty-slot step** (the "state 0" branch, the most frequent case): the empty path was
+  `BNE` not taken, `JMP CODE_09815D`, `INX / CPX #20 / BEQ` not taken, `JMP CODE_098008`.
+  That is 24 cycles from CODE_098008 back to CODE_098008. US now: `INX / CPX #20 / BNE
+  CODE_098008 / JMP CODE_098165` right after the state test. That is 19 cycles (21 vs 22 for
+  the last slot), so -5 × 206,056 = -1.03M. +5 bytes in bank 9 (free 307 -> 302). The
+  reorder does not change the size.
+
+### Equivalence audit
+* **Reorder:** each handler is still entered from its own `CMP #state / BNE`. So A = state,
+  Z = 1, C = 1, N = 0, and X, Y and V are unchanged (CMP does not touch V). This is the same
+  as before, whatever the order. Handler bodies are verbatim copies of the original lines;
+  only the 10 inter-block `BNE` targets changed, and they are annotated `(orig: BNE ...)`.
+  The default path now sees the flags of `CMP #BUBBLE_EXPIRED` instead of
+  `CMP #BUBBLE_EMERGING`. It does not use them: US `TXA` redefines A/N/Z, and CODE_0FFAB9
+  starts with `LDA objState / CMP #$88`, which redefines A/N/Z/C before any use. V is
+  untouched along the whole path. JP's default branch is in the unchanged JP ladder.
+* **Empty-slot step:** at CODE_098008 the next iteration starts with `LDA #$00`, and X is the
+  same. At CODE_098165, A = 0, X = 20, and the flags come from `CPX #20` (Z = 1, C = 1,
+  N = 0), the same as the old `BEQ CODE_098165` path. The `STA terrainResult` per slot is
+  kept.
+* No zero page, no stack and no table bytes are used. The only timing effects are cycle
+  counts. The POPPED `BCC CODE_09815D` (taken ~2.7k times) now crosses a page (+1 cycle). The
+  EXPIRED_POP one no longer does.
+
+### Coverage (`cover p4`, 12 scenarios)
+Dispatch: state test 285,900; empty step 206,056 (`JMP CODE_098165` 13,116, i.e. the last
+slot was empty in 13,116 of 14,295 calls). Every compare and handler entry runs: RISING
+46,906, ENEMY 3,145, EXPIRING 765, POWER 12,539, POPPING 6,474, EMERGING 4,380,
+ENEMY_EXPIRING 128, POPPED 3,613, POWER_POPPED 1,813, EXPIRED_POP 44, EXPIRED 11, default
+26. These counts are identical to p3 (same behavior). No handler is uncovered.
+
+### Regression
+```
+p4a (empty-slot step)            REGRESSION PASS (12/12)
+p4b = p4 (+ reordered ladder)    REGRESSION PASS (12/12)
+```
+In p4, r20, r70 and camp03 are identical on every tick. The others pass with lag-pattern
+changes (r40 now also has one, from tick 2336). r01/r17 have the same 11/17 ignored
+scratch-byte diffs as p3.
+
+Step deltas (play-mean sum): empty step -504 (vs p3); reorder -150 (vs p4a; no scenario
+slower; camp03 -0).
+
+### Measured delta (`stats p4 --vs p3`)
+```
+scen      ticks    mean    play     p95     max lagNMI |  d_play d_play%   d_p95  d_lag
+natural    6000   10366   10987   21013   37351     12 |     -35  -0.31%     -22      0
+r01        3000   14773   19609   35487   46895    221 |     -58  -0.30%    -310     -8
+r08        3000   15025   19402   31124   42870    118 |     -66  -0.34%    -181     -4
+r17        3000   16035   21564   37571   49593    312 |     -48  -0.22%     -44     -3
+r20        3000   13001   15804   22010   30301      1 |     -68  -0.43%    -181      0
+r33        3000   15012   19713   26235   32808     12 |     -55  -0.28%    -179     -1
+r40        3000   12640   15583   21007   32549      3 |     -52  -0.33%     -10     -1
+r50        3000   18783   25642   39484   54164    393 |     -71  -0.28%    -249     -8
+r64        3000   16158   21285   27092   36697     29 |     -65  -0.30%     -67     -2
+r69        3000   14514   18749   25016   28744      0 |     -55  -0.29%       1      0
+r70        3000   10232   13004   18332   24591      0 |     -39  -0.30%    -121      0
+camp03     6000   13647   15232   18564   20097      0 |     -42  -0.27%       0      0
+TOTAL    play-mean sum delta -654 cycles (-0.30%)
+```
+
+### Measured delta (`stats p4 --vs base`, Phases 1-4)
+```
+scen      ticks    mean    play     p95     max lagNMI |  d_play d_play%   d_p95  d_lag
+natural    6000   10366   10987   21013   37351     12 |    -428  -3.75%    -681     -1
+r01        3000   14773   19609   35487   46895    221 |    -830  -4.06%    -853    -24
+r08        3000   15025   19402   31124   42870    118 |    -868  -4.28%   -1100    -32
+r17        3000   16035   21564   37571   49593    312 |   -1012  -4.48%   -1770    -41
+r20        3000   13001   15804   22010   30301      1 |    -584  -3.57%    -602      0
+r33        3000   15012   19713   26235   32808     12 |    -930  -4.50%    -891    -12
+r40        3000   12640   15583   21007   32549      3 |    -811  -4.95%   -1437     -1
+r50        3000   18783   25642   39484   54164    393 |   -1209  -4.50%   -1467    -75
+r64        3000   16158   21285   27092   36697     29 |   -1175  -5.23%   -1890    -31
+r69        3000   14514   18749   25016   28744      0 |    -997  -5.05%   -1800     -1
+r70        3000   10232   13004   18332   24591      0 |    -500  -3.70%    -584      0
+camp03     6000   13647   15232   18564   20097      0 |    -652  -4.10%   -1092      0
+TOTAL    play-mean sum delta -9997 cycles (-4.41%)
+```
+Lag frames vs base: -218 over all scenarios (vs p3: -27).
+
+Profile busy cycles, all 12 scenarios: p3 600.39M, p4 598.95M (**-1.43M, -0.24%**). The model
+predicted -1.35M (-1.03M empty step, -0.32M reorder). The per-routine `--vs p3` table shows
+large +/- swings between `09:UpdateBubbles`, `09:0x8290`, `09:0x812a`, `09:CODE_098258` and
+also bank 05/0B `0x....` names. This is the same naming artifact as in Phase 3: bank 9 code
+moved by 5 bytes, so some JSR-target names now land on other addresses. Only the totals are
+meaningful.
