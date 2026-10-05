@@ -2570,6 +2570,7 @@ AnimateObjects:
 	LDA objAnimTimer,X				;C - - - - - 0x01ED51 07:ED41: BD A3 06
 	BNE @waiting				;C - - - - - 0x01ED54 07:ED44: D0 54
 
+.ifdef REGION_JP
 	LDA objAnim,X				;C - - - - - 0x01ED56 07:ED46: BD 7B 06
 	STA scratch0				;C - - - - - 0x01ED59 07:ED49: 85 00
 	LDA objAnimHI,X				;C - - - - - 0x01ED5B 07:ED4B: BD 1B 07
@@ -2583,6 +2584,24 @@ AnimateObjects:
 	LDA scratch1				;C - - - - - 0x01ED6B 07:ED5B: A5 01
 	ADC #.HIBYTE(AnimTable)					;C - - - - - 0x01ED6D 07:ED5D: 69 A0
 	STA scratch7				;C - - - - - 0x01ED6F 07:ED5F: 85 07
+.else
+	;(Perf) scratch0/1 = objAnim*2 and scratch6/7 = AnimTable + objAnim*2, as the original
+	;`LDA/STA/LDA/STA / ASL scratch0 / ROL scratch1 / LDA scratch0 / CLC / ADC #<AnimTable /
+	;STA scratch6 / LDA scratch1 / ADC #>AnimTable / STA scratch7` (42 -> 28 cycles).
+	;The low-byte add was a no-op because AnimTable is page aligned (asserted below).
+	;Same memory, A and flags (the last ADC has the same inputs).
+	.assert <AnimTable = 0, error, "AnimateObjects assumes AnimTable is page aligned"
+	LDA objAnim,X
+	ASL
+	STA scratch0
+	STA scratch6
+	LDA objAnimHI,X
+	ROL
+	STA scratch1
+	CLC
+	ADC #.HIBYTE(AnimTable)
+	STA scratch7
+.endif
 	LDY #$00					;C - - - - - 0x01ED71 07:ED61: A0 00
 	LDA (scratch6),Y			;C - - - - - 0x01ED73 07:ED63: B1 06
 	STA scratch8				;C - - - - - 0x01ED75 07:ED65: 85 08
@@ -2779,6 +2798,7 @@ AnimateNonBubbles:
 	LDA objAnimTimer,X				;C - - - - - 0x01EE8F 07:EE7F: BD A3 06
 	BNE @waiting				;C - - - - - 0x01EE92 07:EE82: D0 55
 
+.ifdef REGION_JP
 	LDA objAnim,X				;C - - - - - 0x01EE94 07:EE84: BD 7B 06
 	STA scratch0				;C - - - - - 0x01EE97 07:EE87: 85 00
 	LDA objAnimHI,X				;C - - - - - 0x01EE99 07:EE89: BD 1B 07
@@ -2793,6 +2813,20 @@ AnimateNonBubbles:
 	LDA scratch1				;C - - - - - 0x01EEAA 07:EE9A: A5 01
 	ADC #$A0					;C - - - - - 0x01EEAC 07:EE9C: 69 A0
 	STA scratch7				;C - - - - - 0x01EEAE 07:EE9E: 85 07
+.else
+	;(Perf) Same as in AnimateObjects (the `ADC #$00` was a no-op with C = 0 and the CLC
+	;before ASL was dead: ASL sets C). 44 -> 28 cycles, same memory, A and flags.
+	LDA objAnim,X
+	ASL
+	STA scratch0
+	STA scratch6
+	LDA objAnimHI,X
+	ROL
+	STA scratch1
+	CLC
+	ADC #$A0
+	STA scratch7
+.endif
 	LDY #$00					;C - - - - - 0x01EEB0 07:EEA0: A0 00
 	LDA (scratch6),Y			;C - - - - - 0x01EEB2 07:EEA2: B1 06
 	STA scratch8				;C - - - - - 0x01EEB4 07:EEA4: 85 08
