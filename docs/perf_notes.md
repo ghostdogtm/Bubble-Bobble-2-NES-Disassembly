@@ -125,3 +125,138 @@ cycles; the idle spin is excluded. A routine = a named label or an executed JSR 
   BubblesTravelUpdate.
 * The baseline **already lags** in dense rounds (r50: 468 lag frames per 3000 ticks). Lag count is
   the most player-visible metric and is tracked per phase.
+
+## Phase 1: F2 (`LDA #0 / ORA #7`) + F1 (doubled $A000 switches)
+
+**Status: committed** as two commits, F2 then F1. Both pass `regress` once the harness
+handles lag-frame dependent state (see "Regression result" below).
+
+### Sites
+F2: all 40 `LDA #$00` / `ORA #$07` pairs (US branches only) became `LDA #$07`. Each pair was
+adjacent with no label on the `ORA` line. No other `LDA #$00` / `ORA #imm` pairs exist. Saves
+2 cycles and 2 bytes per pair. All 40 pairs sit inside the 20 doubled blocks below, so F1
+supersedes F2 at every site.
+
+F1: 21 doubled MMC3 command-7 blocks became one race-free copy:
+`LDA #7 / STA $8000 / LDA bank / STA prgBankB / STA $8001`.
+Before: `(LDA #0 / ORA #7 / STA $8000 / LDA bank / STA $8001 / STA prgBankB) x2`. SwapPrgBankB had
+the same block without the ORA. Cycles saved per execution: immediate bank 19, absolute
+(`sprPrgBank`, `terrainBank`) 21, zero page (`newPrgBank`) 20. Exec counts are summed over the
+12 scenarios (`cover p1`).
+
+| bank | label (base addr) | bank operand | saved cyc | execs |
+|---|---|---|---|---|
+| 07 | CODE_078916 ($8916) | #.BANK(DATA_04BE45) | 19 | 14294 |
+| 08 | CODE_089D6A ($9D6A) | #.BANK(RoundMaps) | 19 | **0** |
+| 09 | in CODE_0986AB ($86BE) | #.BANK(DATA_04BF88) | 19 | **0** |
+| 09 | CODE_099CB7 ($9CB7) | #.BANK(DATA_06B8B6) | 19 | **0** |
+| 09 | CODE_099EA5 ($9EA5) | #.BANK(DATA_04BF6D) | 19 | 12728 |
+| 0B | CODE_0B81E3 ($81E9) | #.BANK(AnimTable) | 19 | 14275 |
+| 0B | after JSR CODE_0FF088 ($8225) | #.BANK(AnimTable) | 19 | 39529 |
+| 0F | AnimateObjects ($ED1E) | #.BANK(AnimTable) | 19 | 14295 |
+| 0F | CODE_0FEDA3 ($EDA7), `;Unreached` | #.BANK(ImageTable1) | 19 | **0** |
+| 0F | AnimateNonBubbles ($EE5C) | #.BANK(AnimTable) | 19 | 18826 |
+| 0F | DrawObjects ($EEE2) | sprPrgBank | 21 | 35705 |
+| 0F | GetTile ($F4DA) | #.BANK(RoundsFlowTable) | 19 | 89436 |
+| 0F | GetTile/CODE_0FF50A ($F50A), `;Unreached` (irqEffect 2) | #.BANK(RoundsFlowTable) | 19 | **0** |
+| 0F | GetTile terrain ($F577) | terrainBank | 21 | 270595 |
+| 0F | CODE_0FF5E6 ($F5EE) | #.BANK(RoundsFlowTable) | 19 | 32439 |
+| 0F | CheckWall ($F7E2) | terrainBank | 21 | 44575 |
+| 0F | CheckFloor ($F81A) | terrainBank | 21 | 45004 |
+| 0F | CODE_0FF852 ($F852) | terrainBank | 21 | 144696 |
+| 0F | CODE_0FF8F3 ($F8F3) | terrainBank | 21 | 2172 |
+| 0F | CODE_0FF986 ($F986) | #.BANK(RoundsFlowTable) | 19 | 63483 |
+| 0F | SwapPrgBankB ($FF56) | newPrgBank | 20 | 103536 |
+
+Coverage: 16 of 21 sites run in the scenarios. The 5 sites with 0 executions are justified by
+analysis only: CODE_089D6A, the bank-09 sites at $86BE and $9CB7, and the two `;Unreached` blocks.
+Bytes freed vs base (F2+F1): bank 7 +16, bank 8 +16, bank 9 +48, bank B +32, bank F +226
+(16 per immediate block, 17 per absolute block, 12 in SwapPrgBankB).
+
+### Race analysis
+* End state without an interrupt: A = bank, N/Z from `LDA bank` (STA does not change flags),
+  X/Y/C/V untouched, $8000 = 7, $8001 = bank, prgBankB = bank. This is the same as the doubled
+  form. The bank operands (`sprPrgBank`, `terrainBank`, `newPrgBank`) are not written by any
+  interrupt handler, so reading them once instead of twice is equivalent.
+* NMIShort (lag NMI, `nmiProgress==1 && irqEffect==0`) leaves $8000 = 7 and $8001 = prgBankB.
+  If it lands before `STA prgBankB`, it restores the old bank and the following `STA $8001`
+  writes the new one. If it lands after, it restores the new bank. Either way the end state is
+  correct, and the selector register is 7 again before the `STA $8001`.
+* A full NMI (nmiProgress 0) never interrupts these blocks. After reset, NMI is enabled only
+  when the main thread enters its `JMP *` spin. The reset-time SwapPrgBankB call runs with NMI
+  disabled. Inside the NMI, nested NMIs always take NMIShort because nmiProgress is not 0.
+* The raster IRQ handlers do not touch $8000/$8001/prgBankB.
+* The single `C D 0` (code read as data) flag in the whole disassembly, on SwapPrgBankB's second
+  `LDA newPrgBank` ($FF67), is not a data dependency. A Mesen read-watch on $FF3D-$FF6E over all
+  12 scenarios on `base` (`tmp/p1_scripts/readwatch.py`) logs only reads where PC == the read
+  address. These are the 6502's dummy reads on interrupt entry, so an interrupt landed on that
+  instruction. The same watch shows interrupts landing inside both switch helpers, including
+  between `STA $8001` and `STA prgBankB` ($FF60). The race windows are real.
+* **Deliberately left alone:**
+  * **SwapPrgBankA** (command 6, 158684 execs, would save 16 cycles each). For a command-6
+    switch, an NMIShort between `STA $8000 (=6)` and `STA $8001` redirects the `$8001` write
+    into the $A000 slot. With the doubled form, the second copy still maps the $8000 window
+    correctly and only $A000 is wrong until the next command-7 switch. With a single copy, both
+    windows are wrong, and RunBankedSub then jumps into the wrong $8000 bank. So the double copy
+    does partly protect command 6, and collapsing it is not behavior-neutral under the race. No
+    single-copy order is race-free for command 6, because NMIShort clobbers the selector.
+  * **SetRoundIRQ** (single copy in the unsafe order `STA $8001 / STA prgBankB`, 13 execs). It
+    has a latent race but saves no cycles, so it is out of scope. Reordering it would be a bug
+    fix, not an optimization.
+  * NMI handler (CHR/PRG reloads, NMIShort), IRQ handlers, ReadPad, bank 0E, and all
+    `.ifdef REGION_JP` code.
+* The JP build assembles and is byte-identical to the JP build of the base commit
+  (md5 8d2855ea5505bf094b7a40155caa92b4).
+
+### Regression result
+The first regress run failed in 8 of 12 scenarios, each time at the first tick where `base` had
+a lag NMI during the logic and the faster build did not. At that tick the only differing bytes
+were:
+* `nmiProgress` ($15): 2 vs 1 (2 = "a lag NMI arrived"). Only the NMI code reads it.
+* Audio-engine RAM ($E0-$F1, $0790-$07F5), in irqEffect 0 rounds. NMIShort runs `AudioUpdate`
+  on lag frames, so the audio advances once per *frame*. After a lag frame disappears, the audio
+  stays one update behind relative to the logic ticks.
+
+The comparator used to stop at the first mismatch, so everything after these ticks was
+unverified. The shift control build in Phase 0 could not expose this, because it barely changes
+cycle counts and so keeps the same lag pattern.
+
+**Harness change (approved by the owner, commit "Perf harness: tolerate lag-frame dependent
+state"):**
+* $15 is ignored on ticks where the two runs disagree about lag.
+* From the first such tick on, the audio-engine-private RAM ($E3-$F1, $0790-$07F5) is ignored.
+* The triggers the logic writes ($E0-$E2) stay compared, with bit 7 masked: the engine sets bit 7
+  ("started") on its own frame-based schedule.
+* Everything else stays strictly compared on every tick.
+
+Outside bank 0E, the logic touches audio RAM in only two places: it writes `$07F5` (bank 0B) and
+`SetRoundMusic` does `CMP musicTrigger`. The second only decides whether to re-send the round
+music trigger, which affects audio only. The `camp03` negative control is still caught after the
+change.
+
+Result with the new comparator:
+* p1a (F2): 12/12 PASS.
+* p1 (F1+F2): 12/12 PASS. In 8 scenarios the lag pattern changes (first at ticks 987-5746); all
+  ticks after that point are verified too.
+
+### Measured delta (`stats p1 --vs base`, F1+F2)
+```
+scen      ticks    mean    play     p95     max lagNMI |  d_play d_play%   d_p95  d_lag
+natural    6000   10472   11109   21222   37686     12 |    -306  -2.68%    -472     -1
+r01        3000   14928   19839   35982   47346    236 |    -600  -2.93%    -358     -9
+r08        3000   15203   19658   31546   43411    130 |    -612  -3.02%    -678    -20
+r17        3000   16186   21788   37937   50262    323 |    -788  -3.49%   -1404    -30
+r20        3000   13139   15997   22286   30646      1 |    -392  -2.39%    -326      0
+r33        3000   15156   19929   26520   33147     14 |    -714  -3.46%    -606    -10
+r40        3000   12763   15760   21261   32822      4 |    -634  -3.87%   -1183      0
+r50        3000   18992   25946   39998   54847    408 |    -905  -3.37%    -953    -60
+r64        3000   16416   21656   27704   37121     32 |    -804  -3.58%   -1278    -28
+r69        3000   14687   18998   25340   28994      0 |    -749  -3.79%   -1476     -1
+r70        3000   10325   13158   18541   24865      0 |    -346  -2.56%    -375      0
+camp03     6000   13784   15394   18779   20334      0 |    -489  -3.08%    -877      0
+TOTAL    play-mean sum delta -7340 cycles (-3.24%)
+```
+F2 alone (`p1a`): -1337 cycles total (-0.59%). The plan estimated 50-150 cycles/frame for
+Phase 1; the measured gain is 300-900 cycles per gameplay tick, because the terrain probes
+(GetTile, CheckWall/Floor, CODE_0FF852) run the doubled switch hundreds of thousands of times.
+Profile runs are in `tmp/runs/p1` (`run p1 --profile`).

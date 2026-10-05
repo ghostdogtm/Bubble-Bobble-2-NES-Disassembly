@@ -319,14 +319,8 @@ CODE_0B81E3:
 	STA $8000				;C - - - - - 0x0161FD 05:81ED: 8D 00 80
 	;(Unsure of actual intended target)
 	LDA #.BANK(AnimTable)					;C - - - - - 0x016200 05:81F0: A9 0C
-	STA $8001				;C - - - - - 0x016202 05:81F2: 8D 01 80
 	STA prgBankB				;C - - - - - 0x016205 05:81F5: 85 53
-
-	LDA #$07					;C - - - - - 0x016207 05:81F7: A9 07
-	STA $8000				;C - - - - - 0x01620B 05:81FB: 8D 00 80
-	LDA #.BANK(AnimTable)					;C - - - - - 0x01620E 05:81FE: A9 0C
-	STA $8001				;C - - - - - 0x016210 05:8200: 8D 01 80
-	STA prgBankB				;C - - - - - 0x016213 05:8203: 85 53
+	STA $8001				;C - - - - - 0x016202 05:81F2: 8D 01 80
 .endif
 CODE_0B8205:
 	LDA enemyType,X				;C - - - - - 0x016215 05:8205: B5 98
@@ -361,14 +355,8 @@ CODE_0B8216:
 	STA $8000				;C - - - - - 0x016239 05:8229: 8D 00 80
 	;(Unsure of actual intended target)
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01623C 05:822C: A9 0C
-	STA $8001				;C - - - - - 0x01623E 05:822E: 8D 01 80
 	STA prgBankB				;C - - - - - 0x016241 05:8231: 85 53
-
-	LDA #$07					;C - - - - - 0x016243 05:8233: A9 07
-	STA $8000				;C - - - - - 0x016247 05:8237: 8D 00 80
-	LDA #.BANK(AnimTable)					;C - - - - - 0x01624A 05:823A: A9 0C
-	STA $8001				;C - - - - - 0x01624C 05:823C: 8D 01 80
-	STA prgBankB				;C - - - - - 0x01624F 05:823F: 85 53
+	STA $8001				;C - - - - - 0x01623E 05:822E: 8D 01 80
 .endif
 
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x016251 05:8241: BD 6C 05
