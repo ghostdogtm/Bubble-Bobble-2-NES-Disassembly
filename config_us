@@ -21,6 +21,7 @@ MEMORY {
     MEM_E:       start = $C000,  size = $2000,   type = ro, file = %O, bank = $0E, fill = yes, fillval = $FF;
     MEM_F:       start = $E000,  size = $2000,   type = ro, file = %O, bank = $0F, fill = yes, fillval = $FF;
     CHR:         start = $0000,  size = $20000,   type = ro, file = %O, fill = yes, fillval = $FF;
+    WRAM:        start = $6000,  size = $2000,   type = rw, file = "";
 }
 
 
@@ -45,10 +46,13 @@ SEGMENTS {
 	PRG_BANK_C:  load = MEM_C, type = ro;
 	PRG_BANK_D:  load = MEM_D, type = ro;
 	PRG_BANK_E:  load = MEM_E, type = ro;
+	COOP_CODE:   load = MEM_E, type = ro, optional = yes;
 	PRG_BANK_E_TRACKS: load = MEM_E, type = ro, start = $D300;
+	COOP_CODE2:  load = MEM_E, type = ro, optional = yes;
 	PRG_BANK_F:  load = MEM_F, type = ro;
     VECTORS:     load = MEM_F, type = ro, start = $FFFA;
     CHR_ROM:     load = CHR, type = ro;
+    COOP_BSS:    load = WRAM, type = bss, define = yes, optional = yes;
 }
 
 FILES {

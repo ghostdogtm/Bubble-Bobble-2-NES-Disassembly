@@ -118,3 +118,36 @@ Round 5 has the most Needlers; round 22 was picked for Snaggers (screenshot show
   held2 was 0 for 100% of ticks with the plain call). Pad 1 (`emu.setInput(inp, 0)` = subport 0) is unchanged.
 - c20 (wide round) shows a lower held2 share (48%): its pad-2 stream (seed 7963) hit two long `idle` stretches
   (held2 is ~0 for ~300 of the 1800 play ticks in 150-tick windows), i.e. the generator's mode mix, not a game effect.
+
+## Phase 1 (PRG-RAM, bank E code segments)
+
+### Changed
+- `header_us.bin`: NES 2.0 (byte 7 = `$08`), byte 10 = `$07` (8 KB volatile PRG-RAM). Result: `4E 45 53 1A 08 10 40 08 00 00 07 00 ...`.
+- `config_us`: MEMORY `WRAM` ($6000, $2000, not in the file); segment `COOP_BSS` (load = WRAM, bss, define = yes, optional);
+  `COOP_CODE` after `PRG_BANK_E` (before the explicit-start `PRG_BANK_E_TRACKS`), `COOP_CODE2` after `PRG_BANK_E_TRACKS`.
+  ld65 places segments in config order, so a `COOP_CODE` that runs past `$D300` makes `PRG_BANK_E_TRACKS` start too low and
+  the link fails (checked by appending `.res 1000`: "start address is too low ... memory area overflow"). Not silenced.
+- `src/bank_0E.asm` (US branches only): both filler `.incbin`s removed (labels `DATA_0ECF40`, `FixedBankTracks` kept).
+- New: `src/coop/coop.inc` (constants), `src/coop/coop_ram.asm` (`COOP_BSS`: `coopMode`, `coopResident`, `coopCanary[4]`,
+  `ctxOther[64]` placeholder), `src/coop/coop_engine.asm` (`COOP_CODE`: `CoopReset`). `src/main.asm` includes `coop.inc`
+  after `defines.inc` and the two `.asm` files at the end, all inside `.ifndef REGION_JP`.
+- `src/bank_0F.asm` `Begin` (US branch): `JSR CoopReset` right after `JSR SwapPrgBankB` that follows `JSR MemInit`.
+- `CoopReset`: `$A001 = $80`, clears `COOP_BSS` through a page loop on `scratch0/1` (works up to 8 KB; the scratch bytes
+  are zeroed again afterwards), writes the canary "COOP", and with `-D COOP_FORCE` sets `coopMode = 1`.
+
+### Map (build c1)
+- `COOP_BSS` `$6000-$6045` (70 B: coopMode `$6000`, coopResident `$6001`, coopCanary `$6002`, ctxOther after it).
+- `PRG_BANK_E` `$C000-$CF3F`; `COOP_CODE` `$CF40-$CF80` (65 B, `CoopReset` at `$CF40`); `PRG_BANK_E_TRACKS` `$D300-$D902`;
+  `COOP_CODE2` empty (not in the map). `PRG_BANK_F` ends at `$FF14`: 235 B free.
+- Capacity: `COOP_CODE` 960 B (`$CF40-$D2FF`), `COOP_CODE2` 1789 B (`$D903-$DFFF`), minus what is used.
+
+### Verification
+- JP build md5 unchanged (`8d2855ea5505bf094b7a40155caa92b4`).
+- `regress base c1 --reuse-base` and `regress base c1f --reuse-base` (c1f = `--define COOP_FORCE`): both `REGRESSION PASS`, 12/12 scenarios (co-op is inert even with `coopMode` = 1 because nothing reads it yet).
+- Headless Mesen (`tmp/coop_scripts/check_c1.lua`, `check_c1f.lua`), 600 frames: c1 reads canary "COOP", coopMode 0;
+  c1f reads "COOP", coopMode 1. So Mesen maps the 8 KB PRG-RAM from the NES 2.0 header and `$A001` enable works.
+- `run c1 --scen c01` completes, no "no coopMode symbol" NOTE; the poke address is 24576 (`$6000`).
+
+### Hardware note
+Real hardware needs an MMC3 board with PRG-RAM (TSROM/TKROM class) and the emulator/flash cart must honor the NES 2.0
+PRG-RAM size. Mesen does. The game itself never used `$6000-$7FFF` before.

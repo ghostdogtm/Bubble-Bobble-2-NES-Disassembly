@@ -2960,8 +2960,7 @@ DATA_0ECF40:
 	;- - - - - - 0x01CF50 07:CF40: 03
 	.incbin "filler/fill0E_Engine_JP.bin"
 .else
-	;- - - - - - 0x01CF50 07:CF40: 07
-	.incbin "filler/fill0E_Engine.bin"
+	;Filler removed: $CF40-$D2FF is the COOP_CODE segment (see config_us)
 .endif
 
 .segment "PRG_BANK_E_TRACKS"
@@ -4505,6 +4504,5 @@ trGameOver_TRI:
 	;- - - - - - 0x01D913 07:D903: 00
 	.incbin "filler/fill0E_Tracks_JP.bin"
 .else
-	;- - - - - - 0x01D913 07:D903: 33
-	.incbin "filler/fill0E_Tracks.bin"
+	;Filler removed: $D903-$DFFF is the COOP_CODE2 segment (see config_us)
 .endif

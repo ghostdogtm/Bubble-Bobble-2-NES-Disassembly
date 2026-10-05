@@ -57,6 +57,7 @@ CODE_0FE026:
 .else
 	STA newPrgBank				;C - - - - - 0x01E050 07:E040: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x01E052 07:E042: 20 56 FF
+	JSR CoopReset				;Co-op: enable PRG-RAM, clear COOP_BSS
 .endif
 
 	JSR AudioInit				;C - - - - - 0x01E055 07:E045: 20 06 C0
