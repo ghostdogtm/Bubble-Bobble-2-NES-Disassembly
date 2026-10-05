@@ -3836,7 +3836,11 @@ CODE_0FF4D2:
 	TAY							;C - - - - - 0x01F50A 07:F4FA: A8
 	LDA (ram_0027),Y			;C - - - - - 0x01F50B 07:F4FB: B1 27
 	STA ram_0080				;C - - - - - 0x01F50D 07:F4FD: 85 80
+.ifdef REGION_JP
 	BEQ CODE_0FF563				;C - - - - - 0x01F50F 07:F4FF: F0 62
+.else
+	BEQ CODE_0FF563f
+.endif
 
 	TAY							;C - - - - - 0x01F511 07:F501: A8
 	LDA ram_0760,Y				;C - - - - - 0x01F512 07:F502: B9 60 07
@@ -3877,7 +3881,35 @@ CODE_0FF535:
 	ADC ram_00D2				;C - - - - - 0x01F551 07:F541: 65 D2
 	STA ram_001F				;C - - - - - 0x01F553 07:F543: 85 1F
 	CLC							;C - - - - - 0x01F555 07:F545: 18
+.ifdef REGION_JP
 	JMP CODE_0FF56D				;C - - - - - 0x01F556 07:F546: 4C 6D F5
+.else
+	;(Perf) Flow path (irqEffect 1/3/4): bank 6 (RoundsFlowTable) was just mapped, so the
+	;terrainBank switch below is never redundant here (measured 0%), and the selector is
+	;still 7 (no other $8000 write since; NMIShort also leaves 7), so the switch needs no
+	;STA $8000. The other paths take the guarded switch at CODE_0FF56E. Same code as
+	;CODE_0FF563/CODE_0FF56D up to the switch.
+	JMP CODE_0FF56Df
+CODE_0FF563f:
+	LDA scratch0
+	AND #$F0
+	STA scratch2
+	LDA scratch1
+	STA ram_001F
+CODE_0FF56Df:
+	LSR
+	LSR
+	LSR
+	LSR
+	CLC
+	ADC scratch2
+	STA ram_0046
+	TAY
+	LDA terrainBank
+	STA prgBankB
+	STA $8001
+	JMP CODE_0FF595
+.endif
 CODE_0FF549:
 	LDA scratch0				;C - - - - - 0x01F559 07:F549: A5 00
 	AND #$F0					;C - - - - - 0x01F55B 07:F54B: 29 F0
@@ -3916,13 +3948,18 @@ CODE_0FF56E:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA terrainBank				;C - - - - - 0x01F58E 07:F57E: AD 5B 07
+	CMP prgBankB
+	BEQ CODE_0FF595
+	STA prgBankB				;C - - - - - 0x01F594 07:F584: 85 53
 	LDA #$07					;C - - - - - 0x01F587 07:F577: A9 07
 	STA $8000				;C - - - - - 0x01F58B 07:F57B: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F58E 07:F57E: AD 5B 07
-	STA prgBankB				;C - - - - - 0x01F594 07:F584: 85 53
+	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F591 07:F581: 8D 01 80
 .endif
-
+CODE_0FF595:
 	;Get 16x16 tile number
 	LDA (terrainAdr),Y			;C - - - - - 0x01F5A5 07:F595: B1 42
 	STA scratch3				;C - - - - - 0x01F5A7 07:F597: 85 03
