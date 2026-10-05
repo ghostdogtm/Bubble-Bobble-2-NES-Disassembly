@@ -2552,15 +2552,13 @@ AnimateObjects:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01ED2E 07:ED1E: A9 00
-	ORA #$07					;C - - - - - 0x01ED30 07:ED20: 09 07
+	LDA #$07					;C - - - - - 0x01ED2E 07:ED1E: A9 07
 	STA $8000				;C - - - - - 0x01ED32 07:ED22: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01ED35 07:ED25: A9 0C
 	STA $8001				;C - - - - - 0x01ED37 07:ED27: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01ED3A 07:ED2A: 85 53
 
-	LDA #$00					;C - - - - - 0x01ED3C 07:ED2C: A9 00
-	ORA #$07					;C - - - - - 0x01ED3E 07:ED2E: 09 07
+	LDA #$07					;C - - - - - 0x01ED3C 07:ED2C: A9 07
 	STA $8000				;C - - - - - 0x01ED40 07:ED30: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01ED43 07:ED33: A9 0C
 	STA $8001				;C - - - - - 0x01ED45 07:ED35: 8D 01 80
@@ -2652,15 +2650,13 @@ CODE_0FEDA3:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;- - - - - - 0x01EDB7 07:EDA7: A9
-	ORA #$07					;- - - - - - 0x01EDB9 07:EDA9: 09
+	LDA #$07					;- - - - - - 0x01EDB7 07:EDA7: A9
 	STA $8000					;- - - - - - 0x01EDBB 07:EDAB: 8D
 	LDA #.BANK(ImageTable1)					;- - - - - - 0x01EDBE 07:EDAE: A9
 	STA $8001					;- - - - - - 0x01EDC0 07:EDB0: 8D
 	STA prgBankB				;- - - - - - 0x01EDC3 07:EDB3: 85
 
-	LDA #$00					;- - - - - - 0x01EDC5 07:EDB5: A9
-	ORA #$07					;- - - - - - 0x01EDC7 07:EDB7: 09
+	LDA #$07					;- - - - - - 0x01EDC5 07:EDB5: A9
 	STA $8000					;- - - - - - 0x01EDC9 07:EDB9: 8D
 	LDA #.BANK(ImageTable1)					;- - - - - - 0x01EDCC 07:EDBC: A9
 	STA $8001					;- - - - - - 0x01EDCE 07:EDBE: 8D
@@ -2777,15 +2773,13 @@ AnimateNonBubbles:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01EE6C 07:EE5C: A9 00
-	ORA #$07					;C - - - - - 0x01EE6E 07:EE5E: 09 07
+	LDA #$07					;C - - - - - 0x01EE6C 07:EE5C: A9 07
 	STA $8000				;C - - - - - 0x01EE70 07:EE60: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01EE73 07:EE63: A9 0C
 	STA $8001				;C - - - - - 0x01EE75 07:EE65: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01EE78 07:EE68: 85 53
 
-	LDA #$00					;C - - - - - 0x01EE7A 07:EE6A: A9 00
-	ORA #$07					;C - - - - - 0x01EE7C 07:EE6C: 09 07
+	LDA #$07					;C - - - - - 0x01EE7A 07:EE6A: A9 07
 	STA $8000				;C - - - - - 0x01EE7E 07:EE6E: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01EE81 07:EE71: A9 0C
 	STA $8001				;C - - - - - 0x01EE83 07:EE73: 8D 01 80
@@ -2864,15 +2858,13 @@ DrawObjects:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01EEF2 07:EEE2: A9 00
-	ORA #$07					;C - - - - - 0x01EEF4 07:EEE4: 09 07
+	LDA #$07					;C - - - - - 0x01EEF2 07:EEE2: A9 07
 	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80
 	LDA sprPrgBank				;C - - - - - 0x01EEF9 07:EEE9: AD 61 05
 	STA $8001				;C - - - - - 0x01EEFC 07:EEEC: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01EEFF 07:EEEF: 85 53
 
-	LDA #$00					;C - - - - - 0x01EF01 07:EEF1: A9 00
-	ORA #$07					;C - - - - - 0x01EF03 07:EEF3: 09 07
+	LDA #$07					;C - - - - - 0x01EF01 07:EEF1: A9 07
 	STA $8000				;C - - - - - 0x01EF05 07:EEF5: 8D 00 80
 	LDA sprPrgBank				;C - - - - - 0x01EF08 07:EEF8: AD 61 05
 	STA $8001				;C - - - - - 0x01EF0B 07:EEFB: 8D 01 80
@@ -3853,15 +3845,13 @@ CODE_0FF4D2:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F4EA 07:F4DA: A9 00
-	ORA #$07					;C - - - - - 0x01F4EC 07:F4DC: 09 07
+	LDA #$07					;C - - - - - 0x01F4EA 07:F4DA: A9 07
 	STA $8000				;C - - - - - 0x01F4EE 07:F4DE: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F4F1 07:F4E1: A9 06
 	STA $8001				;C - - - - - 0x01F4F3 07:F4E3: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F4F6 07:F4E6: 85 53
 
-	LDA #$00					;C - - - - - 0x01F4F8 07:F4E8: A9 00
-	ORA #$07					;C - - - - - 0x01F4FA 07:F4EA: 09 07
+	LDA #$07					;C - - - - - 0x01F4F8 07:F4E8: A9 07
 	STA $8000				;C - - - - - 0x01F4FC 07:F4EC: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F4FF 07:F4EF: A9 06
 	STA $8001				;C - - - - - 0x01F501 07:F4F1: 8D 01 80
@@ -3887,15 +3877,13 @@ CODE_0FF50A:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;- - - - - - 0x01F51A 07:F50A: A9
-	ORA #$07					;- - - - - - 0x01F51C 07:F50C: 09
+	LDA #$07					;- - - - - - 0x01F51A 07:F50A: A9
 	STA $8000					;- - - - - - 0x01F51E 07:F50E: 8D
 	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F521 07:F511: A9
 	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
 	STA prgBankB				;- - - - - - 0x01F526 07:F516: 85
 
-	LDA #$00					;- - - - - - 0x01F528 07:F518: A9
-	ORA #$07					;- - - - - - 0x01F52A 07:F51A: 09
+	LDA #$07					;- - - - - - 0x01F528 07:F518: A9
 	STA $8000					;- - - - - - 0x01F52C 07:F51C: 8D
 	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F52F 07:F51F: A9
 	STA $8001					;- - - - - - 0x01F531 07:F521: 8D
@@ -3961,15 +3949,13 @@ CODE_0FF56E:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F587 07:F577: A9 00
-	ORA #$07					;C - - - - - 0x01F589 07:F579: 09 07
+	LDA #$07					;C - - - - - 0x01F587 07:F577: A9 07
 	STA $8000				;C - - - - - 0x01F58B 07:F57B: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F58E 07:F57E: AD 5B 07
 	STA $8001				;C - - - - - 0x01F591 07:F581: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F594 07:F584: 85 53
 
-	LDA #$00					;C - - - - - 0x01F596 07:F586: A9 00
-	ORA #$07					;C - - - - - 0x01F598 07:F588: 09 07
+	LDA #$07					;C - - - - - 0x01F596 07:F586: A9 07
 	STA $8000				;C - - - - - 0x01F59A 07:F58A: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F59D 07:F58D: AD 5B 07
 	STA $8001				;C - - - - - 0x01F5A0 07:F590: 8D 01 80
@@ -4043,15 +4029,13 @@ CODE_0FF5E6:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F5FE 07:F5EE: A9 00
-	ORA #$07					;C - - - - - 0x01F600 07:F5F0: 09 07
+	LDA #$07					;C - - - - - 0x01F5FE 07:F5EE: A9 07
 	STA $8000				;C - - - - - 0x01F602 07:F5F2: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F605 07:F5F5: A9 06
 	STA $8001				;C - - - - - 0x01F607 07:F5F7: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F60A 07:F5FA: 85 53
 
-	LDA #$00					;C - - - - - 0x01F60C 07:F5FC: A9 00
-	ORA #$07					;C - - - - - 0x01F60E 07:F5FE: 09 07
+	LDA #$07					;C - - - - - 0x01F60C 07:F5FC: A9 07
 	STA $8000				;C - - - - - 0x01F610 07:F600: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F613 07:F603: A9 06
 	STA $8001				;C - - - - - 0x01F615 07:F605: 8D 01 80
@@ -4395,15 +4379,13 @@ CheckWall:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F7F2 07:F7E2: A9 00
-	ORA #$07					;C - - - - - 0x01F7F4 07:F7E4: 09 07
+	LDA #$07					;C - - - - - 0x01F7F2 07:F7E2: A9 07
 	STA $8000				;C - - - - - 0x01F7F6 07:F7E6: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F7F9 07:F7E9: AD 5B 07
 	STA $8001				;C - - - - - 0x01F7FC 07:F7EC: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F7FF 07:F7EF: 85 53
 
-	LDA #$00					;C - - - - - 0x01F801 07:F7F1: A9 00
-	ORA #$07					;C - - - - - 0x01F803 07:F7F3: 09 07
+	LDA #$07					;C - - - - - 0x01F801 07:F7F1: A9 07
 	STA $8000				;C - - - - - 0x01F805 07:F7F5: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F808 07:F7F8: AD 5B 07
 	STA $8001				;C - - - - - 0x01F80B 07:F7FB: 8D 01 80
@@ -4436,15 +4418,13 @@ CheckFloor:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F82A 07:F81A: A9 00
-	ORA #$07					;C - - - - - 0x01F82C 07:F81C: 09 07
+	LDA #$07					;C - - - - - 0x01F82A 07:F81A: A9 07
 	STA $8000				;C - - - - - 0x01F82E 07:F81E: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F831 07:F821: AD 5B 07
 	STA $8001				;C - - - - - 0x01F834 07:F824: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F837 07:F827: 85 53
 
-	LDA #$00					;C - - - - - 0x01F839 07:F829: A9 00
-	ORA #$07					;C - - - - - 0x01F83B 07:F82B: 09 07
+	LDA #$07					;C - - - - - 0x01F839 07:F829: A9 07
 	STA $8000				;C - - - - - 0x01F83D 07:F82D: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F840 07:F830: AD 5B 07
 	STA $8001				;C - - - - - 0x01F843 07:F833: 8D 01 80
@@ -4477,14 +4457,12 @@ CODE_0FF852:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F862 07:F852: A9 00
-	ORA #$07					;C - - - - - 0x01F864 07:F854: 09 07
+	LDA #$07					;C - - - - - 0x01F862 07:F852: A9 07
 	STA $8000				;C - - - - - 0x01F866 07:F856: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F869 07:F859: AD 5B 07
 	STA $8001				;C - - - - - 0x01F86C 07:F85C: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F86F 07:F85F: 85 53
-	LDA #$00					;C - - - - - 0x01F871 07:F861: A9 00
-	ORA #$07					;C - - - - - 0x01F873 07:F863: 09 07
+	LDA #$07					;C - - - - - 0x01F871 07:F861: A9 07
 	STA $8000				;C - - - - - 0x01F875 07:F865: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F878 07:F868: AD 5B 07
 	STA $8001				;C - - - - - 0x01F87B 07:F86B: 8D 01 80
@@ -4575,14 +4553,12 @@ CODE_0FF8F3:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F903 07:F8F3: A9 00
-	ORA #$07					;C - - - - - 0x01F905 07:F8F5: 09 07
+	LDA #$07					;C - - - - - 0x01F903 07:F8F3: A9 07
 	STA $8000				;C - - - - - 0x01F907 07:F8F7: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F90A 07:F8FA: AD 5B 07
 	STA $8001				;C - - - - - 0x01F90D 07:F8FD: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F910 07:F900: 85 53
-	LDA #$00					;C - - - - - 0x01F912 07:F902: A9 00
-	ORA #$07					;C - - - - - 0x01F914 07:F904: 09 07
+	LDA #$07					;C - - - - - 0x01F912 07:F902: A9 07
 	STA $8000				;C - - - - - 0x01F916 07:F906: 8D 00 80
 	LDA terrainBank				;C - - - - - 0x01F919 07:F909: AD 5B 07
 	STA $8001				;C - - - - - 0x01F91C 07:F90C: 8D 01 80
@@ -4665,14 +4641,12 @@ CODE_0FF986:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x01F996 07:F986: A9 00
-	ORA #$07					;C - - - - - 0x01F998 07:F988: 09 07
+	LDA #$07					;C - - - - - 0x01F996 07:F986: A9 07
 	STA $8000				;C - - - - - 0x01F99A 07:F98A: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F99D 07:F98D: A9 06
 	STA $8001				;C - - - - - 0x01F99F 07:F98F: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01F9A2 07:F992: 85 53
-	LDA #$00					;C - - - - - 0x01F9A4 07:F994: A9 00
-	ORA #$07					;C - - - - - 0x01F9A6 07:F996: 09 07
+	LDA #$07					;C - - - - - 0x01F9A4 07:F994: A9 07
 	STA $8000				;C - - - - - 0x01F9A8 07:F998: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F9AB 07:F99B: A9 06
 	STA $8001				;C - - - - - 0x01F9AD 07:F99D: 8D 01 80

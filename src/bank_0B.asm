@@ -315,16 +315,14 @@ CODE_0B81E3:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x0161F9 05:81E9: A9 00
-	ORA #$07					;C - - - - - 0x0161FB 05:81EB: 09 07
+	LDA #$07					;C - - - - - 0x0161F9 05:81E9: A9 07
 	STA $8000				;C - - - - - 0x0161FD 05:81ED: 8D 00 80
 	;(Unsure of actual intended target)
 	LDA #.BANK(AnimTable)					;C - - - - - 0x016200 05:81F0: A9 0C
 	STA $8001				;C - - - - - 0x016202 05:81F2: 8D 01 80
 	STA prgBankB				;C - - - - - 0x016205 05:81F5: 85 53
 
-	LDA #$00					;C - - - - - 0x016207 05:81F7: A9 00
-	ORA #$07					;C - - - - - 0x016209 05:81F9: 09 07
+	LDA #$07					;C - - - - - 0x016207 05:81F7: A9 07
 	STA $8000				;C - - - - - 0x01620B 05:81FB: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01620E 05:81FE: A9 0C
 	STA $8001				;C - - - - - 0x016210 05:8200: 8D 01 80
@@ -359,16 +357,14 @@ CODE_0B8216:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x016235 05:8225: A9 00
-	ORA #$07					;C - - - - - 0x016237 05:8227: 09 07
+	LDA #$07					;C - - - - - 0x016235 05:8225: A9 07
 	STA $8000				;C - - - - - 0x016239 05:8229: 8D 00 80
 	;(Unsure of actual intended target)
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01623C 05:822C: A9 0C
 	STA $8001				;C - - - - - 0x01623E 05:822E: 8D 01 80
 	STA prgBankB				;C - - - - - 0x016241 05:8231: 85 53
 
-	LDA #$00					;C - - - - - 0x016243 05:8233: A9 00
-	ORA #$07					;C - - - - - 0x016245 05:8235: 09 07
+	LDA #$07					;C - - - - - 0x016243 05:8233: A9 07
 	STA $8000				;C - - - - - 0x016247 05:8237: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01624A 05:823A: A9 0C
 	STA $8001				;C - - - - - 0x01624C 05:823C: 8D 01 80

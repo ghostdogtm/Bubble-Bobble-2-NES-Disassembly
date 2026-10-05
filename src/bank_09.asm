@@ -955,15 +955,13 @@ CODE_0986AB:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x0126CE 04:86BE: A9 00
-	ORA #$07					;C - - - - - 0x0126D0 04:86C0: 09 07
+	LDA #$07					;C - - - - - 0x0126CE 04:86BE: A9 07
 	STA $8000				;C - - - - - 0x0126D2 04:86C2: 8D 00 80
 	LDA #.BANK(DATA_04BF88)					;C - - - - - 0x0126D5 04:86C5: A9 04
 	STA $8001				;C - - - - - 0x0126D7 04:86C7: 8D 01 80
 	STA prgBankB				;C - - - - - 0x0126DA 04:86CA: 85 53
 
-	LDA #$00					;C - - - - - 0x0126DC 04:86CC: A9 00
-	ORA #$07					;C - - - - - 0x0126DE 04:86CE: 09 07
+	LDA #$07					;C - - - - - 0x0126DC 04:86CC: A9 07
 	STA $8000				;C - - - - - 0x0126E0 04:86D0: 8D 00 80
 	LDA #.BANK(DATA_04BF88)					;C - - - - - 0x0126E3 04:86D3: A9 04
 	STA $8001				;C - - - - - 0x0126E5 04:86D5: 8D 01 80
@@ -4411,15 +4409,13 @@ CODE_099CB7:
 	STA prgBankB
 	STA $8001
 .else
-	LDA #$00					;C - - - - - 0x013CC7 04:9CB7: A9 00
-	ORA #$07					;C - - - - - 0x013CC9 04:9CB9: 09 07
+	LDA #$07					;C - - - - - 0x013CC7 04:9CB7: A9 07
 	STA $8000				;C - - - - - 0x013CCB 04:9CBB: 8D 00 80
 	LDA #.BANK(DATA_06B8B6)					;C - - - - - 0x013CCE 04:9CBE: A9 06
 	STA $8001				;C - - - - - 0x013CD0 04:9CC0: 8D 01 80
 	STA prgBankB				;C - - - - - 0x013CD3 04:9CC3: 85 53
 
-	LDA #$00					;C - - - - - 0x013CD5 04:9CC5: A9 00
-	ORA #$07					;C - - - - - 0x013CD7 04:9CC7: 09 07
+	LDA #$07					;C - - - - - 0x013CD5 04:9CC5: A9 07
 	STA $8000				;C - - - - - 0x013CD9 04:9CC9: 8D 00 80
 	LDA #.BANK(DATA_06B8B6)					;C - - - - - 0x013CDC 04:9CCC: A9 06
 	STA $8001				;C - - - - - 0x013CDE 04:9CCE: 8D 01 80
@@ -5014,15 +5010,13 @@ CODE_099E97:
 		STA ram_0549				;C - - - - - 0x013EAF 04:9E9F: 8D 49 05
 		JMP CODE_099EF8				;C - - - - - 0x013EB2 04:9EA2: 4C F8 9E
 CODE_099EA5:
-	LDA #$00					;C - - - - - 0x013EB5 04:9EA5: A9 00
-	ORA #$07					;C - - - - - 0x013EB7 04:9EA7: 09 07
+	LDA #$07					;C - - - - - 0x013EB5 04:9EA5: A9 07
 	STA $8000				;C - - - - - 0x013EB9 04:9EA9: 8D 00 80
 	LDA #.BANK(DATA_04BF6D)					;C - - - - - 0x013EBC 04:9EAC: A9 04
 	STA $8001				;C - - - - - 0x013EBE 04:9EAE: 8D 01 80
 	STA prgBankB				;C - - - - - 0x013EC1 04:9EB1: 85 53
 
-	LDA #$00					;C - - - - - 0x013EC3 04:9EB3: A9 00
-	ORA #$07					;C - - - - - 0x013EC5 04:9EB5: 09 07
+	LDA #$07					;C - - - - - 0x013EC3 04:9EB3: A9 07
 	STA $8000				;C - - - - - 0x013EC7 04:9EB7: 8D 00 80
 	LDA #.BANK(DATA_04BF6D)					;C - - - - - 0x013ECA 04:9EBA: A9 04
 	STA $8001				;C - - - - - 0x013ECC 04:9EBC: 8D 01 80
