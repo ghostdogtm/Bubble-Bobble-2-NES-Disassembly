@@ -11,6 +11,20 @@
 --   profile      (bool) write PRG-ROM exec counters to <out>.prof at the end
 --   style        (optional) "camper": stand still, shoot every 240 ticks
 --   shots        (optional) list of tick numbers to screenshot (<out>_tNNNNN.png)
+--   pad2         (bool, default false) drive pad 2 from a second, independent generator once the
+--                game has started (idle before that); always the normal (non-camper) play style
+--                (delivered with emu.setInput(inp, 0, 1): the Mesen config uses the 4-player adapter, so
+--                pad 2 is subport 1 of port 0; emu.setInput(inp, 1) would not reach the game)
+--   seed2        seed of the pad-2 generator (default seed + 7919)
+--   pokes        (optional) list of {tick=N, addr=A, val=V}: at the start of tick N (where the
+--                deferred round warp is applied) write V to CPU address A (emu.memType.nesMemory,
+--                so $6000-$7FFF reaches cartridge PRG-RAM if the mapper provides it)
+--   lives_addrs  (optional) list of CPU addresses topped up to 3 when < 2 if inf_lives is set
+--                (default {0x0479} = playerLives)
+--
+-- CSV columns (perf.py reads columns 3 and 5, so new columns are only ever appended):
+--   tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2
+--   held2 = heldP2 ($0F) at tick end: proves pad 2 input reached the game
 --
 -- A "tick" is one full run of the game's NMI-driven logic: the game runs all its logic inside
 -- the NMI handler, guarded by nmiProgress ($15):  0 -> 1 (full NMI entered, vblank work)
@@ -26,6 +40,7 @@ if not CFG then dofile("harness_cfg.lua") end
 local NMI_PROGRESS = 0x15
 local CUR_ROUND    = 0xD8
 local PLAYER_LIVES = 0x0479
+local HELD_P2      = 0x0F
 
 local MT_CPU  = emu.memType.nesMemory
 local MT_RAM  = emu.memType.nesInternalRam
@@ -33,7 +48,7 @@ local MT_NT   = emu.memType.nesNametableRam
 local MT_PAL  = emu.memType.nesPaletteRam
 
 local csv = io.open(CFG.out .. ".csv", "w")
-csv:write("tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide\n")
+csv:write("tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2\n")
 local dump = nil
 if CFG.dump then dump = io.open(CFG.out .. ".dump", "wb") end
 
@@ -44,72 +59,86 @@ end
 ------------------------------------------------------------------------------------------
 -- deterministic input generator (pure function of tick sequence)
 ------------------------------------------------------------------------------------------
-local rng = (CFG.seed or 1) % 2147483647
-if rng == 0 then rng = 1 end
-local function rand(n) -- 0..n-1
-  rng = (rng * 48271) % 2147483647
-  return rng % n
-end
-
 local pendingRound = nil  -- deferred round warp
 local started = false      -- new game has begun (currentRound written with 1)
 local startTick = 0
-local dir, dirLeft = nil, 0
-local jumpLeft = 0
-local shootWait = 0
 local curInput = {}
+local curInput2 = {}
 
 -- play is split into segments with different styles so that slow game paths (bubbles that
--- expire, trapped enemies that escape, idle player) get exercised, not just constant shooting
-local mode, modeLeft = "aggressive", 0
-local function genInput(tick)
-  local inp = {}
-  if not started then
-    -- title / menus: tap Start every 50 ticks
-    if tick % 50 >= 20 and tick % 50 < 24 then inp.start = true end
+-- expire, trapped enemies that escape, idle player) get exercised, not just constant shooting.
+-- Each generator owns its RNG and state; isP1 enables the pad-1-only parts (title-screen Start
+-- taps, "camper" style, start_taps).
+local function makeGen(seed, isP1)
+  local rng = (seed or 1) % 2147483647
+  if rng == 0 then rng = 1 end
+  local function rand(n) -- 0..n-1
+    rng = (rng * 48271) % 2147483647
+    return rng % n
+  end
+  local dir, dirLeft = nil, 0
+  local jumpLeft = 0
+  local shootWait = 0
+  local mode, modeLeft = "aggressive", 0
+  return function(tick)
+    local inp = {}
+    if not started then
+      -- title / menus: tap Start every 50 ticks (pad 1 only)
+      if isP1 and tick % 50 >= 20 and tick % 50 < 24 then inp.start = true end
+      return inp
+    end
+    if isP1 and CFG.style == "camper" then
+      -- stand still and blow a bubble now and then: lets bubbles and trapped enemies time out
+      if (tick - startTick) % 240 < 2 then inp.b = true end
+      if (tick - startTick) % 1200 == 600 then inp.left = true end
+      return inp
+    end
+    if modeLeft <= 0 then
+      local r = rand(8)
+      if r < 4 then mode = "aggressive" elseif r < 7 then mode = "passive" else mode = "idle" end
+      modeLeft = 150 + rand(450)
+    end
+    modeLeft = modeLeft - 1
+    if mode == "idle" then
+      -- stand still, very occasional jump
+      if rand(64) == 0 then inp.a = true end
+      return inp
+    end
+    if dirLeft <= 0 then
+      local r = rand(6)
+      if r == 0 or r == 1 then dir = "left" elseif r == 2 or r == 3 then dir = "right"
+      elseif r == 4 then dir = nil else dir = "down" end
+      dirLeft = 8 + rand(56)
+    end
+    dirLeft = dirLeft - 1
+    if dir then inp[dir] = true end
+    if jumpLeft > 0 then
+      jumpLeft = jumpLeft - 1
+      inp.a = true
+    elseif rand(16) == 0 then
+      jumpLeft = 1 + rand(12)
+      inp.a = true
+    end
+    if shootWait <= 0 then
+      inp.b = true
+      if mode == "aggressive" then shootWait = 2 + rand(9) else shootWait = 40 + rand(160) end
+    end
+    shootWait = shootWait - 1
+    -- after game over the continue screen needs Start; tap it rarely (deterministic)
+    if isP1 and CFG.start_taps and (tick - startTick) % 997 == 500 then inp.start = true end
     return inp
   end
-  if CFG.style == "camper" then
-    -- stand still and blow a bubble now and then: lets bubbles and trapped enemies time out
-    if (tick - startTick) % 240 < 2 then inp.b = true end
-    if (tick - startTick) % 1200 == 600 then inp.left = true end
-    return inp
-  end
-  if modeLeft <= 0 then
-    local r = rand(8)
-    if r < 4 then mode = "aggressive" elseif r < 7 then mode = "passive" else mode = "idle" end
-    modeLeft = 150 + rand(450)
-  end
-  modeLeft = modeLeft - 1
-  if mode == "idle" then
-    -- stand still, very occasional jump
-    if rand(64) == 0 then inp.a = true end
-    return inp
-  end
-  if dirLeft <= 0 then
-    local r = rand(6)
-    if r == 0 or r == 1 then dir = "left" elseif r == 2 or r == 3 then dir = "right"
-    elseif r == 4 then dir = nil else dir = "down" end
-    dirLeft = 8 + rand(56)
-  end
-  dirLeft = dirLeft - 1
-  if dir then inp[dir] = true end
-  if jumpLeft > 0 then
-    jumpLeft = jumpLeft - 1
-    inp.a = true
-  elseif rand(16) == 0 then
-    jumpLeft = 1 + rand(12)
-    inp.a = true
-  end
-  if shootWait <= 0 then
-    inp.b = true
-    if mode == "aggressive" then shootWait = 2 + rand(9) else shootWait = 40 + rand(160) end
-  end
-  shootWait = shootWait - 1
-  -- after game over the continue screen needs Start; tap it rarely (deterministic)
-  if CFG.start_taps and (tick - startTick) % 997 == 500 then inp.start = true end
-  return inp
 end
+
+local genInput = makeGen(CFG.seed, true)
+local genInput2 = CFG.pad2 and makeGen(CFG.seed2 or ((CFG.seed or 1) + 7919), false) or nil
+
+local pokes = {}
+for _, pk in ipairs(CFG.pokes or {}) do
+  pokes[pk.tick] = pokes[pk.tick] or {}
+  table.insert(pokes[pk.tick], pk)
+end
+local livesAddrs = CFG.lives_addrs or { PLAYER_LIVES }
 
 ------------------------------------------------------------------------------------------
 -- tick bookkeeping
@@ -167,9 +196,15 @@ emu.addMemoryCallback(function(addr, value)
       emu.write(CUR_ROUND, pendingRound, MT_CPU)
       pendingRound = nil
     end
+    if pokes[tick] then
+      for _, pk in ipairs(pokes[tick]) do emu.write(pk.addr, pk.val, MT_CPU) end
+    end
     curInput = genInput(tick)
-    if CFG.inf_lives and started and emu.read(PLAYER_LIVES, MT_CPU) < 2 then
-      emu.write(PLAYER_LIVES, 3, MT_CPU)
+    if genInput2 then curInput2 = genInput2(tick) end
+    if CFG.inf_lives and started then
+      for _, a in ipairs(livesAddrs) do
+        if emu.read(a, MT_CPU) < 2 then emu.write(a, 3, MT_CPU) end
+      end
     end
     if dump then
       vramSnap = readBlock(MT_NT, 0, 0x800) .. readBlock(MT_PAL, 0, 0x20)
@@ -186,8 +221,9 @@ emu.addMemoryCallback(function(addr, value)
   elseif value == 0 and inTick then
     inTick = false
     local audio = cycles() - tLogicEnd
-    csv:write(string.format("%d,%d,%d,%d,%d,%d,%d,%d,%d\n", tick, frame, tStart - tNmi, logicCyc, audio,
-      lagNmis, emu.read(CUR_ROUND, MT_CPU), emu.read(0x1D, MT_CPU), emu.read(0x03B0, MT_CPU)))
+    csv:write(string.format("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", tick, frame, tStart - tNmi, logicCyc, audio,
+      lagNmis, emu.read(CUR_ROUND, MT_CPU), emu.read(0x1D, MT_CPU), emu.read(0x03B0, MT_CPU),
+      emu.read(HELD_P2, MT_CPU)))
     if shots[tick] then
       local png = emu.takeScreenshot()
       local g = io.open(string.format("%s_t%05d.png", CFG.out, tick), "wb")
@@ -209,6 +245,9 @@ end, emu.callbackType.write, CUR_ROUND, CUR_ROUND, emu.cpuType.nes, MT_CPU)
 
 emu.addEventCallback(function()
   emu.setInput(curInput, 0)
+  -- the Mesen config here uses the 4-player adapter on the expansion port: pads are subports of
+  -- port 0 (pad 2 = port 0, subport 1; a plain emu.setInput(inp, 1) does not reach the game)
+  if genInput2 then emu.setInput(curInput2, 0, 1) end
 end, emu.eventType.inputPolled)
 
 emu.addEventCallback(function()

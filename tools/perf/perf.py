@@ -13,6 +13,16 @@ Commands (run from the repo root):
                                       estimated exclusive cycles per routine from exec counters
   perf.py cover  NAME LABEL...        per-instruction exec counts (needs runs made with --profile)
 
+Scenario tuples are (ticks, seed, start_round, inf_lives, start_taps[, style][, opts]) where opts is an
+optional dict as the LAST element (the first five fields and an optional style string are unchanged):
+  pad2   bool   drive pad 2 with a second generator (CFG.pad2, seed2 = seed + 7919 unless "seed2" given)
+  seed2  int    explicit pad-2 seed
+  coop   bool   co-op scenario: poke 1 into the symbol coopMode at tick 1 (looked up in the build's
+                labels.txt; if the symbol is missing prints a NOTE and runs anyway, co-op inert) and
+                top up the symbol coopP2Lives too (if defined) via CFG.lives_addrs
+  pokes  list   extra {tick=N, addr=A, val=V} CPU-bus writes at the start of tick N (CFG.pokes)
+The co-op scenarios (c01 c05 c17 c20 c22 c50 c64) are NOT part of DEFAULT_SCENS; name them with --scen.
+
 The regression check compares, for every logic tick, the 2 KB of CPU RAM (snapshot when the
 banked game logic finishes) plus nametable RAM and palette (snapshot at the start of the tick).
 Excluded: the hardware stack ($010A-$01FF), the IRQ-handler-private bytes $20/$24/$25, and
@@ -58,7 +68,22 @@ SCENARIOS = {
     "r70": (3000, 30, 70, True, False),         # special round (low load)
     "camp03": (6000, 31, 3, True, False, "camper"),  # bubbles/trapped enemies expire, enemies get mad
 }
-DEFAULT_SCENS = list(SCENARIOS)
+DEFAULT_SCENS = list(SCENARIOS)   # frozen before the co-op scenarios are added below
+
+# Co-op scenarios (2 players, pad 2 driven by an independent generator). Not in DEFAULT_SCENS.
+# Needler (ENEMY_NEEDLER) and Snagger (ENEMY_SNAGGER) rounds were found in src/bank_0C.asm
+# (RoundsEnemyTable is indexed by round number): round 5 has 6 Needlers, round 22 has 2 Snaggers.
+_COOP = {"pad2": True, "coop": True}
+COOP_SCENS = {
+    "c01": (3000, 41, 1, True, False, _COOP),     # enemy-dense, lags often
+    "c05": (3000, 42, 5, True, False, _COOP),     # Needler round (6 Needlers)
+    "c17": (3000, 43, 17, True, False, _COOP),    # heaviest lag in sweep
+    "c20": (3000, 44, 20, True, False, _COOP),    # wide round, irqEffect 5
+    "c22": (3000, 45, 22, True, False, _COOP),    # Snagger round
+    "c50": (3000, 46, 50, True, False, _COOP),    # heavy
+    "c64": (3000, 47, 64, True, False, _COOP),    # heaviest non-IRQ round
+}
+SCENARIOS.update(COOP_SCENS)
 
 # RAM words (lo address) that may hold code/data pointers into PRG ROM: every ($indirect) /
 # ($indirect),Y / ($indirect,X) base listed in src/ram.inc (except scratch), plus updateSub.
@@ -120,6 +145,9 @@ def cmd_build(a):
     for seg, (start, size, bank) in sorted(syms.segs.items(), key=lambda x: x[1][2] if x[1][2] is not None else 99):
         if seg.startswith("PRG_BANK"):
             print(f"  {seg:18s} size=${size:04X} free={0x2000 - size if seg != 'PRG_BANK_E' else 0x1300 - size}")
+    for seg, (start, size, bank) in sorted(syms.segs.items()):
+        if seg.startswith("COOP"):
+            print(f"  {seg:18s} size=${size:04X}")
 
 
 # ---------------------------------------------------------------------------------------- symbols
@@ -188,17 +216,49 @@ class Symbols:
 
 
 # ---------------------------------------------------------------------------------------- run
+def build_symbol(build, name):
+    """CPU address of symbol NAME from tmp/builds/BUILD/labels.txt (ld65 -Ln lines: 'al 006000 .name'), or None"""
+    p = os.path.join(BUILDS, build, "labels.txt")
+    if not os.path.exists(p):
+        return None
+    for line in open(p):
+        f = line.split()
+        if len(f) == 3 and f[0] == "al" and f[2] == "." + name:
+            return int(f[1], 16)
+    return None
+
+
 def run_scen(build, scen, dump=False, profile=False, shots=None):
-    ticks, seed, rnd, inf, taps = SCENARIOS[scen][:5]
-    style = SCENARIOS[scen][5] if len(SCENARIOS[scen]) > 5 else None
+    sc = SCENARIOS[scen]
+    opts = sc[-1] if isinstance(sc[-1], dict) else {}
+    ticks, seed, rnd, inf, taps = sc[:5]
+    style = sc[5] if len(sc) > 5 and isinstance(sc[5], str) else None
     rom = os.path.join(BUILDS, build, "rom.nes")
     od = os.path.join(RUNS, build)
     os.makedirs(od, exist_ok=True)
     out = os.path.join(od, scen)
     lua = lambda v: "true" if v else "false"
+    extra = ""
+    pokes = list(opts.get("pokes", []))
+    lives = []
+    if opts.get("coop"):
+        a = build_symbol(build, "coopMode")
+        if a is None:
+            print(f"NOTE: {build} has no coopMode symbol - co-op inert")
+        else:
+            pokes.append(dict(tick=1, addr=a, val=1))
+        a = build_symbol(build, "coopP2Lives")
+        if a is not None:
+            lives = [0x0479, a]
+    if opts.get("pad2"):
+        extra += f', pad2 = true, seed2 = {opts.get("seed2", seed + 7919)}'
+    if pokes:
+        extra += ", pokes = {" + ",".join(f"{{tick={p['tick']},addr={p['addr']},val={p['val']}}}" for p in pokes) + "}"
+    if lives:
+        extra += ", lives_addrs = {" + ",".join(map(str, lives)) + "}"
     cfg = (f'CFG = {{ out = [[{out}]], ticks = {ticks}, seed = {seed}, '
            f'start_round = {rnd if rnd else "nil"}, inf_lives = {lua(inf)}, start_taps = {lua(taps)}, '
-           f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}} }}\n')
+           f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}}{extra} }}\n')
     script = out + "_harness.lua"
     open(script, "w").write(cfg + open(HARNESS).read())
     r = subprocess.run([os.path.join(MESEN_DIR, "Mesen.exe"), "--testrunner", rom, script],
