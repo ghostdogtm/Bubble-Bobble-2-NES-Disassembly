@@ -4027,11 +4027,17 @@ CODE_0FF5E6:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when the bank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F605 07:F5F5: A9 06
+	CMP prgBankB
+	BEQ @mapped
+	STA prgBankB				;C - - - - - 0x01F60A 07:F5FA: 85 53
 	LDA #$07					;C - - - - - 0x01F5FE 07:F5EE: A9 07
 	STA $8000				;C - - - - - 0x01F602 07:F5F2: 8D 00 80
-	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F605 07:F5F5: A9 06
-	STA prgBankB				;C - - - - - 0x01F60A 07:F5FA: 85 53
+	LDA #.BANK(RoundsFlowTable)
 	STA $8001				;C - - - - - 0x01F607 07:F5F7: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch0				;C - - - - - 0x01F61A 07:F60A: A5 00
@@ -4371,11 +4377,17 @@ CheckWall:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA terrainBank				;C - - - - - 0x01F7F9 07:F7E9: AD 5B 07
+	CMP prgBankB
+	BEQ @mapped
+	STA prgBankB				;C - - - - - 0x01F7FF 07:F7EF: 85 53
 	LDA #$07					;C - - - - - 0x01F7F2 07:F7E2: A9 07
 	STA $8000				;C - - - - - 0x01F7F6 07:F7E6: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F7F9 07:F7E9: AD 5B 07
-	STA prgBankB				;C - - - - - 0x01F7FF 07:F7EF: 85 53
+	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F7FC 07:F7EC: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F810 07:F800: A5 04
@@ -4404,11 +4416,17 @@ CheckFloor:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA terrainBank				;C - - - - - 0x01F831 07:F821: AD 5B 07
+	CMP prgBankB
+	BEQ @mapped
+	STA prgBankB				;C - - - - - 0x01F837 07:F827: 85 53
 	LDA #$07					;C - - - - - 0x01F82A 07:F81A: A9 07
 	STA $8000				;C - - - - - 0x01F82E 07:F81E: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F831 07:F821: AD 5B 07
-	STA prgBankB				;C - - - - - 0x01F837 07:F827: 85 53
+	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F834 07:F824: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F848 07:F838: A5 04
@@ -4437,11 +4455,17 @@ CODE_0FF852:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA terrainBank				;C - - - - - 0x01F869 07:F859: AD 5B 07
+	CMP prgBankB
+	BEQ @mapped
+	STA prgBankB				;C - - - - - 0x01F86F 07:F85F: 85 53
 	LDA #$07					;C - - - - - 0x01F862 07:F852: A9 07
 	STA $8000				;C - - - - - 0x01F866 07:F856: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F869 07:F859: AD 5B 07
-	STA prgBankB				;C - - - - - 0x01F86F 07:F85F: 85 53
+	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F86C 07:F85C: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F880 07:F870: A5 04
@@ -4528,11 +4552,17 @@ CODE_0FF8F3:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA terrainBank				;C - - - - - 0x01F90A 07:F8FA: AD 5B 07
+	CMP prgBankB
+	BEQ @mapped
+	STA prgBankB				;C - - - - - 0x01F910 07:F900: 85 53
 	LDA #$07					;C - - - - - 0x01F903 07:F8F3: A9 07
 	STA $8000				;C - - - - - 0x01F907 07:F8F7: 8D 00 80
-	LDA terrainBank				;C - - - - - 0x01F90A 07:F8FA: AD 5B 07
-	STA prgBankB				;C - - - - - 0x01F910 07:F900: 85 53
+	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F90D 07:F8FD: 8D 01 80
+@mapped:
 .endif
 
 	LDA scratch4				;C - - - - - 0x01F921 07:F911: A5 04
@@ -4611,11 +4641,17 @@ CODE_0FF986:
 	STA prgBankB
 	STA $8001
 .else
+	;(Perf) Guard: skip the switch when the bank is already mapped (prgBankB mirrors the
+	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
+	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F99D 07:F98D: A9 06
+	CMP prgBankB
+	BEQ @mapped
+	STA prgBankB				;C - - - - - 0x01F9A2 07:F992: 85 53
 	LDA #$07					;C - - - - - 0x01F996 07:F986: A9 07
 	STA $8000				;C - - - - - 0x01F99A 07:F98A: 8D 00 80
-	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F99D 07:F98D: A9 06
-	STA prgBankB				;C - - - - - 0x01F9A2 07:F992: 85 53
+	LDA #.BANK(RoundsFlowTable)
 	STA $8001				;C - - - - - 0x01F99F 07:F98F: 8D 01 80
+@mapped:
 .endif
 
 	LDA ram_0046				;C - - - - - 0x01F9B2 07:F9A2: A5 46
