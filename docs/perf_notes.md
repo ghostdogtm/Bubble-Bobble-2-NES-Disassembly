@@ -193,14 +193,15 @@ Bytes freed vs base (F2+F1): bank 7 +16, bank 8 +16, bank 9 +48, bank B +32, ban
   instruction. The same watch shows interrupts landing inside both switch helpers, including
   between `STA $8001` and `STA prgBankB` ($FF60). The race windows are real.
 * **Deliberately left alone:**
-  * **SwapPrgBankA** (command 6, 158684 execs, would save 16 cycles each). For a command-6
+  * **SwapPrgBankA** (command 6, 158684 execs, would save 16 cycles each). *(Superseded in
+    Phase 2+3: single copy + nmiProgress check, which also fixes the race.)* For a command-6
     switch, an NMIShort between `STA $8000 (=6)` and `STA $8001` redirects the `$8001` write
     into the $A000 slot. With the doubled form, the second copy still maps the $8000 window
     correctly and only $A000 is wrong until the next command-7 switch. With a single copy, both
     windows are wrong, and RunBankedSub then jumps into the wrong $8000 bank. So the double copy
     does partly protect command 6, and collapsing it is not behavior-neutral under the race. No
     single-copy order is race-free for command 6, because NMIShort clobbers the selector.
-  * **SetRoundIRQ** (single copy in the unsafe order `STA $8001 / STA prgBankB`, 13 execs). It
+  * **SetRoundIRQ** *(fixed in Phase 2+3)* (single copy in the unsafe order `STA $8001 / STA prgBankB`, 13 execs). It
     has a latent race but saves no cycles, so it is out of scope. Reordering it would be a bug
     fix, not an optimization.
   * NMI handler (CHR/PRG reloads, NMIShort), IRQ handlers, ReadPad, bank 0E, and all
@@ -260,3 +261,250 @@ F2 alone (`p1a`): -1337 cycles total (-0.59%). The plan estimated 50-150 cycles/
 Phase 1; the measured gain is 300-900 cycles per gameplay tick, because the terrain probes
 (GetTile, CheckWall/Floor, CODE_0FF852) run the doubled switch hundreds of thousands of times.
 Profile runs are in `tmp/runs/p1` (`run p1 --profile`).
+
+## Phase 2+3: race fixes and bank-switch guards
+
+**Status: committed** as five commits: two race fixes, then three guard commits. Each one passes
+`regress base <build> --reuse-base` 12/12. The final build is `p3` (= HEAD); its profile runs
+are in `tmp/runs/p3`. Tools are in `tmp/p2_scripts/` (`inv.py`, `invsum.py`, `invtot.py`,
+`race.py`). They use their own Mesen copy in `tmp/p2_scripts/mesen`.
+
+### Invariant I and why guards need it
+A guard `LDA bank / CMP prgBankB / BEQ skip` is only correct if, whenever logic code runs
+between switch sequences, **the $A000 slot holds prgBankB** (invariant I). In the original
+game, any break of I is healed by the next unconditional switch. A guard would skip that
+switch and leave the wrong bank mapped. So every source that can break I must be closed
+before any guard is added.
+
+**Static inventory** of US-effective writes to $8000/$8001 and prgBankB (JP-only branches
+excluded; `tmp/p2_scripts/usfilter.py`):
+
+| writer | context | cmd | can it break I? |
+|---|---|---|---|
+| 21 Phase-1 sites (`LDA #7 / STA $8000 / LDA bank / STA prgBankB / STA $8001`): CODE_078916, CODE_089D6A, CODE_0986AB+19, CODE_099CB7, CODE_099EA5, CODE_0B81E3, CODE_0B8216, AnimateObjects, CODE_0FEDA3, AnimateNonBubbles, DrawObjects, GetTile (3), CODE_0FF5E6, CheckWall, CheckFloor, CODE_0FF852, CODE_0FF8F3, CODE_0FF986, SwapPrgBankB | logic | 7 | no (race-free order; selector written in the same sequence) |
+| SetRoundIRQ | logic, round setup | 7 | **yes**: `STA $8001 / STA prgBankB` (race b) -> fixed |
+| SwapPrgBankA (doubled) | logic (RunBankedSub, SpawnProj, ...) | 6 | **yes**: NMIShort between `STA $8000` and `STA $8001` (race a) -> fixed |
+| full NMI tick start (`CODE_0FE1B6`) | NMI, nmiProgress 1 | 0-7 | no: it starts the tick with $A000 = prgBankB = nmiPrgBankB. Its unsafe cmd-7 order could only be hit by a second NMI during vblank work (one frame later) |
+| post-logic `JSR SwapPrgBankB` ($0D) | NMI, nmiProgress 3 | 7 | no: NMIShort does not swap banks at nmiProgress 3 |
+| NMIShort | lag NMI, nmiProgress 1 -> 2 | 7 | restores $A000 from prgBankB, at most once per tick, and leaves the selector at 7 |
+| MemInit (zero-fills prgBankB) | reset, NMI off | - | no: the reset SwapPrgBankB follows |
+| raster IRQ handlers, bank 0E audio | - | - | no $8000/$8001/prgBankB writes |
+
+No logic code writes CHR commands 0-5 (in the US build only the full NMI writes them, from
+the chrBankA-F shadows). No `STA $8001` relies on a selector value left by earlier code:
+every logic writer sets $8000 in the same sequence. So a guard skip path, which leaves the
+selector at whatever it was (6 after SwapPrgBankA), is safe.
+
+**Runtime inventory** (`inv.py --stores`, all 12 scenarios on p1). Every executed store to
+$8000-$9FFF and $53 is hooked:
+* All 1,599,647 even-address writes and all odd-address writes come from the sites above.
+  The totals from the write callback equal the per-site sums.
+* The selector seen by each `STA $8001` is always the intended one. SwapPrgBankA's two
+  $8001 writes always saw selector 6, so race (a) never happened.
+* prgBankB: 987,678 of 987,690 writes come from the sites above. The other 12 are MemInit,
+  once per scenario at reset.
+* On `base`, 3 of the 12 store-inventory runs (natural, r17, camp03) were cut off by the
+  Mesen test runner's ~100 s CPU limit (see below). The 37,756 ticks they did cover are also
+  fully attributed.
+
+### Measurement: does the race actually happen?
+`inv.py` checks I (`$A000` bank vs prgBankB) at every tick end, every GetTile entry, the start
+of every $A000 switch site, and every SwapPrgBankA/B entry. The mapped bank comes from a Lua
+shadow of the MMC3 registers fed by a write callback. That shadow is validated against
+`emu.convertAddress(0xA000)` at every tick end: 0 mismatches in 42,002 ticks. At each NMI
+entry the interrupted PC is read from the stack. (The state PC in an `eventType.nmi` callback
+is already the handler address $E148, so it cannot be used.)
+
+| build | I checks | violations | bank-swapping NMIShorts during logic | ... in vulnerable windows |
+|---|---|---|---|---|
+| base | 1,478,833 | 0 | 319 (natural 13, r01 245, r64 60, r69 1) | 0 |
+| p1   | 1,478,429 | 0 | 280 (natural 12, r01 236, r64 32) | 0 |
+| p3   | 1,416,945 | 0 | 272 (natural 12, r01 229, r64 31) | 0 |
+
+Vulnerable windows: interrupted PC = SwapPrgBankA's `LDA newPrgBank` or `STA $8001` (either
+copy), or SetRoundIRQ's second store. Lag NMIs in irqEffect rounds (r08/r17/r33/r50: the
+heaviest lag) do not swap banks. The swapping ones land mostly in DrawObjects (CODE_0FF022,
+CODE_0FEFF5, ...). SwapPrgBankA is always entered with nmiProgress 1. **The races are real
+but did not occur in any test run.**
+
+**Fault injection** (`race.py BUILD r01 A|I`): just before the vulnerable instruction, do
+exactly what NMIShort does via `emu.write` (nmiProgress=2, $8000=7, $8001=$0D, $8000=7,
+$8001=prgBankB).
+* SwapPrgBankA, 177 injections. On base and p1, 227 SwapPrgBankA returns have
+  $A000 != prgBankB (the $8000 window is always right), plus 1 bad GetTile entry. On p3:
+  0 and 0.
+* SetRoundIRQ, 1 injection at the round-1 start. On base and p1, `LDA IRQRounds,X` reads the
+  wrong bank and round 1 runs with **irqEffect 5** instead of 0. On p3: irqEffect 0, as
+  normal.
+
+### Race fixes (commits 1-2)
+* **SwapPrgBankA**: one copy of the cmd-6 switch, then `LDA nmiProgress / AND #1 / BEQ
+  @lagNMI / LDA newPrgBank / RTS`. NMIShort swaps banks only at nmiProgress 1 and bumps it to
+  2 first, and nothing lowers it during the logic. So "still odd" (1, or 3 outside the logic)
+  means no swap can have happened. Otherwise `@lagNMI` redoes the cmd-6 switch and re-asserts
+  $A000 from prgBankB; NMIShort cannot swap again in that tick. AND does not touch C/V, and
+  the final `LDA newPrgBank` restores A and N/Z, so the outputs are identical to the doubled
+  form. Cost: 26 instead of 32 cycles (-6 per call, 158,684 calls); @lagNMI costs about +31
+  extra. **Race outcome changes from "$A000 wrong until the next switch" to "correct".**
+  @lagNMI ran 0 times in the scenarios: no lag NMI came before a later SwapPrgBankA call in
+  the same tick. It is covered by the fault injection above.
+* **SetRoundIRQ**: `STA prgBankB / STA $8001` (race-free order). 13 executions.
+  **Race outcome changes from "wrong IRQ-effect table read, I broken" to "correct".**
+
+### Guards (commits 3-5)
+Redundancy = the target bank already equals prgBankB when the site runs. It is measured per
+site over the 12 scenarios with `inv.py` (identical on base and p1). Costs per execution:
+* immediate bank (`LDA #b / CMP / BEQ` + the old 15-cycle switch): skip -7, needed +7;
+* terrainBank (abs): skip -7 (10 vs 17), needed +8 (25 vs 17). The needed path is
+  `STA prgBankB / LDA #7 / STA $8000 / LDA prgBankB / STA $8001`, which is race-free and
+  gives the same A and N/Z;
+* caller-side `CMP prgBankB / BEQ` around `JSR SwapPrgBankB`: skip -22 (JSR, RTS and the
+  helper body), needed +5.
+
+| site (p3 addr) | redundant | execs | needed | est. cycles saved (12 scen) |
+|---|---|---|---|---|
+| GetTile terrain switch, irqEffect 0/5 paths (CODE_0FF56E, $F535) | 82.9% | 181,174 | 31,033 | 1,051k - 248k = **803k** |
+| GetTile flow path (irqEffect 1/3/4): own copy of the tail, unguarded switch without `STA $8000` (selector still 7 from the RoundsFlowTable switch), +1 JMP | 0% (so not guarded) | 89,436 | all | 6 - 3 = 3 per call: **268k** |
+| CODE_0FF852 ($F7E5) | 100% | 144,696 | 0 | **1,013k** |
+| CheckFloor ($F7B8) | 100% | 45,004 | 0 | **315k** |
+| CheckWall ($F78B) | 100% | 44,575 | 0 | **312k** |
+| CODE_0FF8F3 ($F87B) | 100% | 2,172 | 0 | 15k |
+| CODE_0FF986 ($F903), RoundsFlowTable | 85.6% | 63,483 | 9,137 | **316k** |
+| CODE_0FF5E6 ($F5A1), RoundsFlowTable | 81.9% | 32,439 | 5,863 | **145k** |
+| UpdateProjectiles_ReadOp ($8DC6, bank 9) `JSR SwapPrgBankB` | 83.6% | 30,155 | 4,938 | 555k - 25k = **530k** |
+
+Plus SwapPrgBankA -6 × 158,684 = 952k. Sum of estimates: about 4.67M cycles over all 12
+scenarios. The profile's busy-cycle total falls from 605.59M to 600.39M (-5.2M). The profile
+counts base opcode cycles only, so each taken guard branch looks 1 cycle cheaper than it is.
+All guard branches stay on their page (checked).
+
+**Not guarded (measured):** GetTile's RoundsFlowTable switch (2.7%), DrawObjects (0%),
+AnimateObjects (0%), AnimateNonBubbles (0.1%), CODE_0B8216 (5.0%), CODE_0B81E3 / CODE_078916 /
+CODE_099EA5 (0%), cold or unexecuted sites. **SwapPrgBankB in-helper guard: not done.** Only
+24.4% of all calls are redundant (41% of logic-time calls; the post-logic $0D switch, 42,010
+calls, never is), and an in-helper guard saves only 7 and costs 8. The per-caller measurement
+found a single hot redundant caller (UpdateProjectiles_ReadOp above). The other callers with
+more than 1000 calls are all 0% redundant: UpdateProjectiles+4, @active+16, CODE_0B9ED1 (x2),
+CODE_05894D, CODE_078731, RuckusUpdate.
+
+**Plan item 2.4 (hoisting the switch out of probe bursts): not done.** GetTile is still 8.8%
+of busy cycles, but that is about 195 cycles per call of real lookup work. After the guard the
+switch costs 10 cycles on the common path, so a hoist could save at most about 10 per call
+(1.8M upper bound, about 0.3%). It would also need a proof for each of the 40 call sites.
+
+**Flag/register audit.** On the skip path the guard leaves C=1, Z=1, N=0, A=bank, and
+$8000 unwritten. The original left C unchanged and N/Z from `LDA bank`. Every guarded
+continuation reloads A and redefines N/Z/C before any use:
+* CheckWall/CheckFloor/CODE_0FF852/CODE_0FF8F3: `LDA scratch4 / CMP`;
+* CODE_0FF986: `LDA ram_0046 / LSR`;
+* CODE_0FF5E6: `LDA scratch0 / AND`, then `CLC/ADC`;
+* GetTile: `LDA (terrainAdr),Y`, then `ASL`;
+* UpdateProjectiles_ReadOp: `LDY / LDA / ASL`.
+
+The probe routines redefine all flags after the switch, so callers see the same flags after
+RTS. X/Y are untouched, and newPrgBank is still written at the caller-side guard.
+
+**Coverage (`cover p3`, summed over 12 scenarios):**
+* GetTile: guard 181,159 (needed path 31,032); flow tail 89,436 (CODE_0FF563f 45,215).
+* CODE_0FF986: guard 63,483 (needed 9,137). CODE_0FF5E6: guard 32,439 (needed 5,863).
+* UpdateProjectiles_ReadOp: guard 30,155 (JSR 4,938).
+* SwapPrgBankA: 158,684. SetRoundIRQ: 13.
+* **Never executed:** the needed paths of CheckWall/CheckFloor/CODE_0FF852/CODE_0FF8F3 (they
+  always follow GetTile with terrainBank mapped) and SwapPrgBankA's @lagNMI. These are
+  justified by analysis and, for @lagNMI, by the fault injection.
+
+JP build: assembles, byte-identical to before (md5 8d2855ea5505bf094b7a40155caa92b4). Every
+edit is in a US-only `.else` / `.ifndef REGION_JP` branch; new shared lines are labels only.
+Free bytes: bank 9 311 -> 307, bank F 371 -> 279.
+
+### Regression
+```
+p2r1 (SwapPrgBankA fix)            REGRESSION PASS (12/12)
+p2a  (+ SetRoundIRQ order)         REGRESSION PASS (12/12)
+p2b  (+ GetTile guard/flow split)  REGRESSION PASS (12/12)
+p2c  (+ 6 probe guards)            REGRESSION PASS (12/12)
+p2d = p3 (+ UpdateProjectiles_ReadOp guard)  REGRESSION PASS (12/12)
+```
+p3, per scenario: natural, r01, r08, r17, r33, r50, r64 and r69 pass with the lag pattern
+changing at the same ticks as p1 (5746, 2306, 1216, 1760, 1736, 1276, 987, 1105). r20, r40,
+r70 and camp03 are identical on every tick.
+
+Step deltas (play-mean sum): SwapPrgBankA -402, SetRoundIRQ 0, GetTile -444, probe guards
+-916, UpdateProjectiles_ReadOp -242.
+
+### Measured delta (`stats p3 --vs p1`)
+```
+scen      ticks    mean    play     p95     max lagNMI |  d_play d_play%   d_p95  d_lag
+natural    6000   10396   11022   21035   37584     12 |     -87  -0.78%    -187      0
+r01        3000   14812   19667   35797   47140    229 |    -172  -0.87%    -185     -7
+r08        3000   15069   19468   31305   43153    122 |    -190  -0.97%    -241     -8
+r17        3000   16069   21612   37615   49754    315 |    -176  -0.81%    -322     -8
+r20        3000   13051   15872   22191   30533      1 |    -125  -0.78%     -95      0
+r33        3000   15050   19768   26414   32942     13 |    -161  -0.81%    -106     -1
+r40        3000   12676   15636   21017   32710      4 |    -125  -0.79%    -244      0
+r50        3000   18830   25713   39733   54523    401 |    -234  -0.90%    -265     -7
+r64        3000   16201   21350   27159   37004     31 |    -306  -1.41%    -545     -1
+r69        3000   14551   18804   25015   28859      0 |    -194  -1.02%    -325      0
+r70        3000   10255   13043   18453   24770      0 |    -115  -0.88%     -88      0
+camp03     6000   13682   15273   18564   20098      0 |    -121  -0.79%    -215      0
+TOTAL    play-mean sum delta -2004 cycles (-0.91%)
+```
+
+### Measured delta (`stats p3 --vs base`, Phases 1-3)
+```
+scen      ticks    mean    play     p95     max lagNMI |  d_play d_play%   d_p95  d_lag
+natural    6000   10396   11022   21035   37584     12 |    -393  -3.44%    -659     -1
+r01        3000   14812   19667   35797   47140    229 |    -771  -3.77%    -543    -16
+r08        3000   15069   19468   31305   43153    122 |    -802  -3.96%    -919    -28
+r17        3000   16069   21612   37615   49754    315 |    -964  -4.27%   -1726    -38
+r20        3000   13051   15872   22191   30533      1 |    -517  -3.15%    -421      0
+r33        3000   15050   19768   26414   32942     13 |    -874  -4.24%    -712    -11
+r40        3000   12676   15636   21017   32710      4 |    -759  -4.63%   -1427      0
+r50        3000   18830   25713   39733   54523    401 |   -1138  -4.24%   -1218    -67
+r64        3000   16201   21350   27159   37004     31 |   -1110  -4.94%   -1823    -29
+r69        3000   14551   18804   25015   28859      0 |    -943  -4.77%   -1801     -1
+r70        3000   10255   13043   18453   24770      0 |    -461  -3.42%    -463      0
+camp03     6000   13682   15273   18564   20098      0 |    -610  -3.84%   -1092      0
+TOTAL    play-mean sum delta -9344 cycles (-4.12%)
+```
+Lag frames vs base: -191 over all scenarios (vs p1: -32).
+
+### Profile (`profile p3 --scen r01 r17 r50 r64 --top 15 --vs p1`)
+```
+estimated busy cycles over r01, r17, r50, r64: 202730059 (p1: 204720486)
+  0F:DrawObjects                               62717996  30.94%   delta +0
+  09:BubblesTravelUpdate                       22036924  10.87%   delta -20
+  0F:GetTile                                   17219040   8.49%   delta -345197
+  0F:ReadPad                                    6957092   3.43%   delta +0
+  0F:ColorBufferToVRAM                          5387403   2.66%   delta +0
+  0F:NMISubRet                                  4355384   2.15%   delta +0
+  0F:AnimateNonBubbles                          3432694   1.69%   delta +0
+  0F:AnimateObjects                             3191717   1.57%   delta +0
+  0F:CODE_0FF852                                2992820   1.48%   delta -362264
+  0F:CODE_0FF986                                2827747   1.39%   delta -207614
+  0F:CODE_0FF088                                2526270   1.25%   delta +0
+  0F:CODE_0FF5E6                                2507191   1.24%   delta -106764
+  0F:CODE_0FEADA                                2356087   1.16%   delta -11930
+  0F:Begin                                      2212016   1.09%   delta +0
+  09:0x8290                                     2013285   0.99%   delta +0
+```
+In the all-scenario profile, some bank-9 routine names change (`09:CODE_099E2A` becomes
+`09:0x9e0a`). This is a naming artifact: bank 9 grew by 4 bytes, so a JSR-target entry no
+longer lands on a label. It is not a cost change.
+
+### Tooling notes
+* The Mesen test runner kills a run after about **100 s of CPU time** (rc -1 or 127),
+  whatever `ScriptTimeout` is set to. Plain harness runs take 20-40 s, so the harness is not
+  affected, but heavy Lua instrumentation is. For that reason `inv.py` splits its checks into a
+  "check" pass and a "stores" pass and avoids `emu.getState()` in hot callbacks.
+* `emu.convertAddress(0xA000, emu.memType.nesMemory)` returns `{address, memType}` with
+  memType = nesPrgRom and address = PRG offset (bank = address // 0x2000). Exec callbacks
+  can be registered on `emu.memType.nesPrgRom` offsets, which avoids ambiguous $8000-$BFFF
+  addresses. `emu.write` to $8000/$8001 reaches the MMC3 registers.
+
+### Possible follow-up (not done)
+**Selector invariant.** Logic code writes only commands 6 and 7, and NMIShort and the full
+NMI leave the selector at 7. If SwapPrgBankA restored the selector to 7 (+6 cycles per call),
+every $A000 switch could drop its `LDA #7 / STA $8000` (-6 per switch, about 0.95M switches).
+That would be a net gain of about 4.7M cycles. It is a new global invariant (every future
+$8000 writer must restore 7), so it needs the owner's approval.
