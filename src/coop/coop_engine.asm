@@ -116,8 +116,8 @@ COOP_P2_XMAX = $E8					;cover X < 16 and X >= 240)
 ;   CoopP2WindowOdd   RoundUpdate, odd tick:  after HandleShooting(P1), before UpdateBubbles
 ;   CoopP2WindowEven  RoundUpdate, even tick: after the CODE_078916 banked sub, before AnimateNonBubbles
 ;   CoopP2WindowIntro CODE_0B8196 (round intro, enemies sliding in): after P1's player update
-; Phase 3 content: P2 player update only (CODE_058E83, run exactly as RoundUpdate runs it).
-; Later phases add HandleShooting(P2), bubble touch, enemy collision... inside CoopP2Window.
+; Content: P2 player update (CODE_058E83, run exactly as RoundUpdate runs it); on odd RoundUpdate ticks
+; also P2's shot (CoopP2Shoot, Phase 4). Later phases add bubble touch, enemy collision... inside CoopP2Window.
 ; The window is transparent for the banks: $8000 = the caller's bank again (RunBankedSub restores
 ; bankedSubRetBank) and $A000 = the bank the caller had there (prgBankB is saved on entry and
 ; re-mapped on exit if P2's work changed it, race-free order). Clobbers A/X/Y.
@@ -138,6 +138,15 @@ CoopP2Window:
 	LDA #.BANK(CODE_058E83)
 	STA bankedSubBank
 	JSR RunBankedSub
+	;P2's shot (RoundUpdate odd ticks only: HandleShooting runs there, and the round intro has none)
+	LDA globalTimer
+	LSR
+	BCC @noshoot					;even tick
+	LDA bankedSubRetBank
+	CMP #.BANK(RoundUpdate)
+	BNE @noshoot					;intro window
+	JSR CoopP2Shoot
+@noshoot:
 	JSR CoopSwap					;P1 resident again (coopResident = 0, currentPlayer = 0)
 	PLA
 	CMP prgBankB					;$A000 always holds prgBankB (Rule 9), so equal = nothing to do
@@ -147,6 +156,23 @@ CoopP2Window:
 	STA prgBankB
 	STA $8001
 @banksok:
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopP2Shoot (Phase 4): P2 resident, bank 9 mapped at $8000 (odd RoundUpdate tick, inside the window).
+; HandleShooting consumes P2's shootTrigger (spawns P2's emerging bubble at P2's position, bubble
+; index shootSlot). P2's emerging bubble is then updated here, with P2's globals (shootDir, candy,
+; bubbleVariant, shootQueuedBubbles), exactly as UpdateBubbles does for P1's: X = bubble index.
+; UpdateBubbles skips that slot while P1 is resident. terrainResult needs no pre-clear: the first
+; thing BubbleEmergingUpdate does (BubbleEmergingCheckTerrain) is to store it. Clobbers A/X/Y.
+; ---------------------------------------------------------------------------------------------
+CoopP2Shoot:
+	JSR HandleShooting
+	LDA shooting
+	BEQ @done
+	LDX shootSlot
+	JSR BubbleEmergingUpdate
+@done:
 	RTS
 
 CoopP2WindowIntro:

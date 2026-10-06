@@ -251,6 +251,16 @@ CODE_0980F8:
 CODE_098135:
 	CMP #BUBBLE_EMERGING					;C - - - - - 0x012145 04:8135: C9 80
 	BNE CODE_098079				;C - - - - - 0x012147 04:8137: D0 06 (orig: BNE CODE_09813F)
+		;(co-op) P2's emerging bubble is updated inside the P2 window (P2 resident: its shootDir, candy,
+		;bubbleVariant, shootSlot); with P1 resident it must not be touched here. 1P: BIT/BPL only.
+		BIT coopP2Active
+		BPL @own
+		LDA ctxOther_shooting
+		BEQ @own
+		CPX ctxOther_shootSlot
+		BNE @own
+		JMP CODE_09815D					;P2's bubble: skip
+@own:
 		JSR BubbleEmergingUpdate				;C - - - - - 0x012149 04:8139: 20 9C 8B
 		JMP CODE_09815D				;C - - - - - 0x01214C 04:813C: 4C 5D 81
 CODE_098079:
