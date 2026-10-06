@@ -42,3 +42,10 @@ coopTarget:     .res 1          ; 0 = P1 (slot 0 / native vars), 1 = P2 (slot OS
                                 ; player is targetable. Set per even tick (P2 not active) or per enemy (P2 active).
 coopPos:        .res 2          ; CoopNearest input: X, Y of the enemy / projectile looking for a player
 coopDist:       .res 3          ; CoopNearest temporaries: slot 0's |dx|+|dy| (9 bits: lo, hi), slot OSLOT_P2's |dx|
+
+; Phase 6b: world -> player interactions (see docs/coop_notes.md, Phase 6b).
+coopDrinkElig:  .res 1          ; CoopDrinkGate result: bit 0 = the resident player (P1) may drink, bit 1 = P2 may
+coopItemNoOther: .res 1         ; non-zero while CoopDrinkTouch runs and the other player may not drink: CoopItemOther
+                                ; (tail of CODE_078BC5) then skips its test
+coopPopDir:     .res BUBBLE_SLOTS ; per bubble index: $80 | P2's playerDir when P2's touch pass popped this special
+                                ; bubble; consumed (cleared) by CoopPopDir in the same tick's UpdateBubbles

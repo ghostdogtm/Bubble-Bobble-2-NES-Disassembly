@@ -18,6 +18,8 @@ COOP_CANARY3    = $50           ; 'P'
 ; Macros only: nothing is emitted here.
 ; ---------------------------------------------------------------------------------------------
 ; Per-player scalars (zero-page or absolute, the assembler picks the addressing mode)
+; (shootCounter, $0546, is NOT here since Phase 6b: it is rewardsEaten+7, the shared "bubbles blown" statistic that
+; spawns the candy item, like the other rewardsEaten entries; see docs/coop_notes.md, Phase 6b)
 .macro COOP_CTX_SCALARS M
 	M ram_0062
 	M playerHeld
@@ -48,7 +50,6 @@ COOP_CANARY3    = $50           ; 'P'
 	M shooting
 	M shootInitialSlot
 	M bubbleVariant
-	M shootCounter
 	M ram_077B
 .endmacro
 

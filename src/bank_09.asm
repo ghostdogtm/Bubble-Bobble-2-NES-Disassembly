@@ -478,7 +478,11 @@ CODE_0981F8:
 	TAY							;C - - - - - 0x01220C 04:81FC: A8
 	LDA DATA_0981E5,Y			;C - - - - - 0x01220D 04:81FD: B9 E5 81
 	BEQ CODE_09820D				;C - - - - - 0x012210 04:8200: F0 0B
+.ifdef REGION_JP
 		LDA playerDir				;C - - - - - 0x012212 04:8202: A5 77
+.else
+		JSR CoopPopDir				;(co-op) the popping player's playerDir (P2's if P2 popped it)
+.endif
 		CMP #$01					;C - - - - - 0x012214 04:8204: C9 01
 		BEQ CODE_09820D				;C - - - - - 0x012216 04:8206: F0 05
 			LDA #$80					;C - - - - - 0x012218 04:8208: A9 80

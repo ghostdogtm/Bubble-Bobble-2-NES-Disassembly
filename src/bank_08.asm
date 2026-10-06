@@ -3269,8 +3269,12 @@ CODE_0895F3:
 	LDA objY+OSLOT_ENEMY,X				;C - - - - - 0x01161A 04:960A: BD 94 05
 	CMP #$90					;C - - - - - 0x01161D 04:960D: C9 90
 	BCC CODE_089641				;C - - - - - 0x01161F 04:960F: 90 30
+.ifdef REGION_JP
 		LDA playerState				;C - - - - - 0x011621 04:9611: A5 75
 		CMP #$0A					;C - - - - - 0x011623 04:9613: C9 0A
+.else
+		JSR CoopQuakeReady			;(co-op) Z = 1 while either player is stunned (1P: playerState = $0A)
+.endif
 		BEQ CODE_089641				;C - - - - - 0x011625 04:9615: F0 2A
 			LDA globalTimer				;C - - - - - 0x011627 04:9617: A5 14
 			CMP #$78					;C - - - - - 0x011629 04:9619: C9 78
@@ -3538,6 +3542,9 @@ CODE_08981A:
 		STA ram_00BB				;C - - - - - 0x01183E 04:982E: 85 BB
 		LDA #snBasketFail_ID					;C - - - - - 0x011840 04:9830: A9 1C
 		STA a:soundTrigger				;C - - - - - 0x011842 04:9832: 8D E1 00
+.ifndef REGION_JP
+		JSR CoopQuakeStunP2			;(co-op) the landing quake stuns P2 by the same rule as P1 below
+.endif
 		LDA playerInvFrames				;C - - - - - 0x011845 04:9835: AD 77 04
 		BNE CODE_089848				;C - - - - - 0x011848 04:9838: D0 0E
 			LDA ram_0078				;C - - - - - 0x01184A 04:983A: A5 78

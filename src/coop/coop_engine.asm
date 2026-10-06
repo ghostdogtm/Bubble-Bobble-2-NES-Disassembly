@@ -228,6 +228,22 @@ CoopP2BubbleTouch:
 	LDA objY+OSLOT_BUBBLE,X
 	STA scratch5
 	JSR CODE_098932					;keeps X (PopBubble reloads it from scratch1)
+	;Phase 6b: P2 popped a special bubble whose effect has a direction (thunder, water, wind): record P2's
+	;facing. The same tick's UpdateBubbles reaches this POPPING bubble and CODE_0981F8 (objAnimHI != 0)
+	;reads it through CoopPopDir instead of P1's playerDir (and clears the mark).
+	LDA objState+OSLOT_BUBBLE,X
+	CMP #BUBBLE_POPPING
+	BNE @next
+	LDA objAnimHI+OSLOT_BUBBLE,X
+	BEQ @next						;normal bubble: CODE_0981F8 is not reached
+	LDA roundBubbleVariant
+	AND #$7F
+	TAY
+	LDA DATA_0981E5,Y
+	BEQ @next						;no directed effect: CODE_0981F8 does not read playerDir
+	LDA playerDir					;P2's (resident)
+	ORA #$80
+	STA coopPopDir,X
 @next:
 	INX
 	CPX bubbleSlotEnd
@@ -764,4 +780,186 @@ CoopSetP1X:
 	STA targetX
 	RTS
 :	PLA
+	RTS
+
+; =============================================================================================
+; Phase 6b: world -> player interactions (COOP_CODE2). See docs/coop_notes.md, Phase 6b.
+; =============================================================================================
+
+; ---------------------------------------------------------------------------------------------
+; Items (CODE_078916, bank 7, even tick, P1 resident). Every collect test goes through CODE_078BC5, which
+; tests the resident player (slot 0, playerState) against the item in slot scratch4 (box scratch2/scratch3)
+; and sets bit 7 of the item's objState on a touch; the caller then applies the effect to the resident
+; player's variables (hearts, candy/shoe bits, bubbleVariant, lives; AddScore via currentPlayer) and the
+; shared ones (roundFlags, continues, crystals, the clock...).
+; CoopItemOther is the tail of CODE_078BC5 on a miss: the same test for the other player (slot OSLOT_P2,
+; ctxOther_playerState). On a touch it sets bit 7 and swaps the other player in (CoopSwap), so the caller's
+; unchanged effect code credits the collector. Later tests in the same CODE_078916 run test the (new)
+; resident first, then the other one. CoopItemEnd (CODE_078A67, on every exit of CODE_078916) swaps P1 back.
+; X kept (CODE_078D5C's reward index), scratch0/1 untouched (CODE_078D2D counts in scratch0), Y = item slot.
+; ---------------------------------------------------------------------------------------------
+CoopItemOther:
+	BIT coopP2Active
+	BPL @no							;1P / P2 not in the round
+	LDA coopItemNoOther
+	BEQ CoopItemOtherTest			;(non-zero: drink, the other player may not drink)
+@no:
+	RTS
+CoopItemOtherTest:
+	LDA ctxOther_playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ @rts
+	LDY scratch4
+	LDA objX+OSLOT_P2				;|X - item X| <= scratch2
+	SEC
+	SBC objX,Y
+	BCS :+
+	EOR #$FF
+	ADC #$01						;(C = 0)
+:	CMP scratch2
+	BEQ :+
+	BCS @rts
+:	LDA objY+OSLOT_P2				;|Y - item Y| <= scratch3
+	SEC
+	SBC objY,Y
+	BCS :+
+	EOR #$FF
+	ADC #$01
+:	CMP scratch3
+	BEQ :+
+	BCS @rts
+:	LDA objState,Y
+	ORA #$80
+	STA objState,Y
+	JSR CoopShotRestore				;(every CoopSwap on unexchanged shot bytes; A only)
+	TXA
+	PHA
+	JSR CoopSwap					;the collector is resident for the effect (keeps Y)
+	PLA
+	TAX
+@rts:
+	RTS
+
+CoopItemEnd:						;replaces LDA ram_0550 at CODE_078A67, which every exit of CODE_078916 passes;
+	LDA coopResident				;out: A = ram_0550, N/Z from it. Clobbers X (not live there).
+	BEQ @done
+	JSR CoopSwap					;P1 resident again (before CODE_078EBE's palette, which uses currentPlayer)
+@done:
+	LDA ram_0550
+	RTS
+
+; CoopDrinkGate: replaces "bubbleVariant != 0 or playerLives = 0 -> no drink" (CODE_078982). A player may
+; drink while his bubbleVariant is 0 and he has lives. Out: A = coopDrinkElig (bit 0 the resident P1,
+; bit 1 P2), Z = 1 when nobody may drink (then the drink is neither spawned nor tested, as in 1P).
+CoopDrinkGate:
+	LDA #$00
+	STA coopDrinkElig
+	LDA bubbleVariant
+	BNE @p2
+	LDA playerLives
+	BEQ @p2
+	INC coopDrinkElig
+@p2:
+	BIT coopP2Active
+	BPL @done
+	LDA ctxOther_bubbleVariant
+	BNE @done
+	LDA ctxOther_playerLives
+	BEQ @done
+	LDA coopDrinkElig
+	ORA #$02
+	STA coopDrinkElig
+@done:
+	LDA coopDrinkElig
+	RTS
+
+; CoopDrinkTouch: replaces JSR CODE_078BC5 for the drink: only the players CoopDrinkGate allowed can take it.
+CoopDrinkTouch:
+	LDA coopDrinkElig
+	AND #$02
+	EOR #$02
+	STA coopItemNoOther				;0 = P2 may drink
+	LDA coopDrinkElig
+	LSR A
+	BCC @p2only
+	JSR CODE_078BC5					;P1, then (tail) P2 if allowed
+	JMP @done
+@p2only:
+	JSR CoopItemOtherTest			;only reached in co-op (bit 1 needs coopP2Active)
+@done:
+	LDA #$00
+	STA coopItemNoOther
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; Rising water (CODE_078682 -> CODE_0786B8, bank 7, every tick before the player updates, P1 resident).
+; Tail of P1's test: P2 below the water line gets the same trigger ($F8) in its shadow byte; P2's next
+; player update sees it, as P1's does (P2's touch pass clears it on odd ticks, as UpdateBubbles does P1's).
+; ---------------------------------------------------------------------------------------------
+CoopWaterP2:
+	BIT coopP2Active
+	BPL @rts
+	LDA irqLatch
+	SEC
+	SBC #12							;the US water line, as CODE_0786B8
+	CMP objY+OSLOT_P2
+	BCS @rts
+	LDA #$F8
+	STA ctxOther_playerHazardTrigger
+@rts:
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopPopDir: replaces LDA playerDir in CODE_0981F8 (UpdateBubbles, P1 resident). X = bubble index (kept),
+; Y kept. A = P2's playerDir if P2's touch pass popped this bubble (mark cleared), else P1's playerDir.
+; ---------------------------------------------------------------------------------------------
+CoopPopDir:
+	LDA coopPopDir,X
+	BPL @p1
+	AND #$7F
+	PHA
+	LDA #$00
+	STA coopPopDir,X
+	PLA
+	RTS
+@p1:
+	LDA playerDir
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; SuperRedSkull landing quake (bank 8, enemy AI, P1 resident).
+; CoopQuakeReady replaces LDA playerState / CMP #$0A in CODE_0895F3: no new jump while a player is stunned.
+; Out: Z = 1 if P1 or (P2 in the round) P2 is in state $0A. X/Y kept.
+; CoopQuakeStunP2 (CODE_08981A, landing): P2 gets the stun by P1's rule (no i-frames, ram_0078 bit 7).
+; A only.
+; ---------------------------------------------------------------------------------------------
+COOP_STATE_STUN = PLAYER_STATE_UNKA	;$0A, set by the quake
+
+CoopQuakeReady:
+	LDA playerState
+	CMP #COOP_STATE_STUN
+	BEQ @rts
+	LDA coopP2Active
+	BPL @no
+	LDA ctxOther_playerState
+	CMP #COOP_STATE_STUN
+	RTS
+@no:
+	LDA #$01						;Z = 0
+@rts:
+	RTS
+
+CoopQuakeStunP2:
+	BIT coopP2Active
+	BPL @rts
+	LDA ctxOther_playerInvFrames
+	BNE @rts
+	LDA ctxOther_ram_0078
+	CMP #$80
+	BCC @rts
+	LDA #COOP_STATE_STUN
+	STA ctxOther_playerState
+	LDA #$00
+	STA ctxOther_ram_0076
+@rts:
 	RTS

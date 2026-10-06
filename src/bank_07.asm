@@ -1083,7 +1083,11 @@ CODE_0786B8:
 		LDA #$F8					;C - - - - - 0x00E6D2 03:86C2: A9 F8
 		STA playerHazardTrigger				;C - - - - - 0x00E6D4 03:86C4: 85 7E
 CODE_0786C6:
+.ifdef REGION_JP
 	RTS							;C - - - - - 0x00E6D6 03:86C6: 60
+.else
+	JMP CoopWaterP2				;(co-op) the same water-line test for P2 (1P: BIT/BPL, RTS)
+.endif
 
 DATA_0786C7:
 	.byte $3F					;- D 0 - - - 0x00E6D7 03:86C7: 3F
@@ -1497,10 +1501,15 @@ CODE_078982:
 	LDA roundBubbleVariant				;C - - - - - 0x00E992 03:8982: A5 82
 	CMP #BUBV_DRINK					;C - - - - - 0x00E994 03:8984: C9 80
 	BCC CODE_0789C0				;C - - - - - 0x00E996 03:8986: 90 38
+.ifdef REGION_JP
 		LDA bubbleVariant				;C - - - - - 0x00E998 03:8988: AD 19 05
 		BNE CODE_0789C0				;C - - - - - 0x00E99B 03:898B: D0 33
 			LDA playerLives				;C - - - - - 0x00E99D 03:898D: AD 79 04
 			BEQ CODE_0789C0				;C - - - - - 0x00E9A0 03:8990: F0 2E
+.else
+		JSR CoopDrinkGate			;(co-op) was: bubbleVariant != 0 or playerLives = 0 -> no drink;
+		BEQ CODE_0789C0				;now Z = 1 only when no player may drink (1P: the same test)
+.endif
 				LDA ram_054C				;C - - - - - 0x00E9A2 03:8992: AD 4C 05
 				BNE CODE_07899A				;C - - - - - 0x00E9A5 03:8995: D0 03
 					JSR CODE_078E8B				;C - - - - - 0x00E9A7 03:8997: 20 8B 8E
@@ -1510,7 +1519,11 @@ CODE_078982:
 				STA scratch3				;C - - - - - 0x00E9AE 03:899E: 85 03
 				LDA #$12					;C - - - - - 0x00E9B0 03:89A0: A9 12
 				STA scratch4				;C - - - - - 0x00E9B2 03:89A2: 85 04
+.ifdef REGION_JP
 				JSR CODE_078BC5				;C - - - - - 0x00E9B4 03:89A4: 20 C5 8B
+.else
+				JSR CoopDrinkTouch			;(co-op) CODE_078BC5 limited to the players who may drink
+.endif
 				LDA objState+OSLOT_ENEMY+9				;C - - - - - 0x00E9B7 03:89A7: AD 75 05
 				CMP #$80					;C - - - - - 0x00E9BA 03:89AA: C9 80
 				BCC CODE_0789C0				;C - - - - - 0x00E9BC 03:89AC: 90 12
@@ -1609,7 +1622,12 @@ CODE_078A5E:
 	BCC CODE_078A67				;C - - - - - 0x00EA72 03:8A62: 90 03
 		INC ram_0543				;C - - - - - 0x00EA74 03:8A64: EE 43 05
 CODE_078A67:
+.ifdef REGION_JP
 	LDA ram_0550				;C - - - - - 0x00EA77 03:8A67: AD 50 05
+.else
+	JSR CoopItemEnd				;(co-op) every exit passes here: P1 resident again if P2 collected an item
+								;(before the palette flash below, which reads currentPlayer); A = ram_0550
+.endif
 	BEQ CODE_078A6F				;C - - - - - 0x00EA7A 03:8A6A: F0 03
 		JSR CODE_078EBE				;C - - - - - 0x00EA7C 03:8A6C: 20 BE 8E
 CODE_078A6F:
@@ -1919,8 +1937,14 @@ CODE_078C1B:
 	LDA objState,Y				;C - - - - - 0x00EC2B 03:8C1B: B9 63 05
 	ORA #$80					;C - - - - - 0x00EC2E 03:8C1E: 09 80
 	STA objState,Y				;C - - - - - 0x00EC30 03:8C20: 99 63 05
+.ifdef REGION_JP
 CODE_078C23:
 	RTS							;C - - - - - 0x00EC33 03:8C23: 60
+.else
+	RTS							;the resident player touched the item
+CODE_078C23:
+	JMP CoopItemOther			;(co-op) missed: the same test for the other player (1P: BIT/BPL, RTS)
+.endif
 
 CODE_078C24:
 	LDA ram_054D				;C - - - - - 0x00EC34 03:8C24: AD 4D 05
