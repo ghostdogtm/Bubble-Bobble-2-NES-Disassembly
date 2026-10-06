@@ -687,6 +687,9 @@ DATA_0FE34B:
 	.byte $30					;- - - - - - 0x01E37A 07:E36A: 30
 
 CODE_0FE36B:
+.ifndef REGION_JP
+	JSR CoopP2Deactivate		;(co-op) every despawn of all objects takes P2 out of the round
+.endif
 	LDX #$00					;C - - - - - 0x01E37B 07:E36B: A2 00
 	LDA #240					;C - - - - - 0x01E37D 07:E36D: A9 F0
 CODE_0FE36F:
@@ -2564,6 +2567,8 @@ AnimateObjects:
 .endif
 
 	LDX #20					;C - - - - - 0x01ED4A 07:ED3A: A2 14
+AnimateObjectsFromX:
+	;(Co-op) entry for one slot: CoopAnimateP2 maps AnimTable at $A000 itself and enters with X = 39
 @checkobj:
 	LDA objState,X				;C - - - - - 0x01ED4C 07:ED3C: BD 63 05
 	BEQ @nextobj				;C - - - - - 0x01ED4F 07:ED3F: F0 5C
@@ -5806,6 +5811,15 @@ CODE_0FFDCA:
 CODE_0FFDD9:
 	CPX #$14					;C - - - - - 0x01FDE9 07:FDD9: E0 14
 	BCC CODE_0FFDEE				;C - - - - - 0x01FDEB 07:FDDB: 90 11
+.ifndef REGION_JP
+	;(Co-op) P2's object is shifted with the world like the bubbles but never despawned here
+	;(the camera leash that keeps P2 on screen is Phase 8)
+	CPX #OSLOT_P2
+	BNE :+
+	BIT coopP2Active
+	BMI CODE_0FFE4C
+:
+.endif
 		;Unreached
 		LDA objState,X				;- - - - - - 0x01FDED 07:FDDD: BD
 		CMP #$80					;- - - - - - 0x01FDF0 07:FDE0: C9

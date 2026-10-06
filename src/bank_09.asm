@@ -18,7 +18,7 @@ CODE_098008:
 .else
 		;Empty slot: step to the next slot right here instead of JMP CODE_09815D (perf phase 4)
 		INX
-		CPX #20
+		CPX bubbleSlotEnd			;(co-op) was CPX #20: 19 while P2 owns slot 39
 		BNE CODE_098008
 		JMP CODE_098165
 .endif
@@ -351,7 +351,11 @@ CODE_098149:
 	TAX							;C - - - - - 0x01216C 04:815C: AA
 CODE_09815D:
 	INX							;C - - - - - 0x01216D 04:815D: E8
+.ifdef REGION_JP
 	CPX #20					;C - - - - - 0x01216E 04:815E: E0 14
+.else
+	CPX bubbleSlotEnd			;(co-op) was CPX #20
+.endif
 	BEQ CODE_098165				;C - - - - - 0x012170 04:8160: F0 03
 		JMP CODE_098008				;C - - - - - 0x012172 04:8162: 4C 08 80
 CODE_098165:
@@ -377,7 +381,11 @@ CODE_098182:
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x012194 04:8184: BD 77 05
 	BEQ CODE_098191				;C - - - - - 0x012197 04:8187: F0 08
 		INX							;C - - - - - 0x012199 04:8189: E8
+.ifdef REGION_JP
 		CPX #$14					;C - - - - - 0x01219A 04:818A: E0 14
+.else
+		CPX bubbleSlotEnd			;(co-op) was CPX #$14
+.endif
 		BCS CODE_0981DC				;C - - - - - 0x01219C 04:818C: B0 4E
 		JMP CODE_098182				;C - - - - - 0x01219E 04:818E: 4C 82 81
 CODE_098191:
@@ -1390,7 +1398,11 @@ CODE_0988EE:
 	LDA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x0128FE 04:88EE: B9 77 05
 	BEQ CODE_0988FB				;C - - - - - 0x012901 04:88F1: F0 08
 		INY							;C - - - - - 0x012903 04:88F3: C8
+.ifdef REGION_JP
 		CPY #20					;C - - - - - 0x012904 04:88F4: C0 14
+.else
+		CPY bubbleSlotEnd			;(co-op) was CPY #20
+.endif
 		BNE CODE_0988EE				;C - - - - - 0x012906 04:88F6: D0 F6
 			;Unreached
 			JMP CODE_098931				;- - - - - - 0x012908 04:88F8: 4C
@@ -1774,7 +1786,11 @@ HandleShooting:
 			STX scratch2				;C - - - - - 0x012B23 04:8B13: 86 02
 @nonexpiringchecked:
 	INX							;C - - - - - 0x012B25 04:8B15: E8
+.ifdef REGION_JP
 	CPX #20					;C - - - - - 0x012B26 04:8B16: E0 14
+.else
+	CPX bubbleSlotEnd			;(co-op) was CPX #20
+.endif
 	BNE @findslot				;C - - - - - 0x012B28 04:8B18: D0 E3
 
 	LDX scratch1				;C - - - - - 0x012B2A 04:8B1A: A6 01
@@ -1978,7 +1994,11 @@ SpawnExtraBubbles:
 @findslot:
 	INC shootSlot				;C - - - - - 0x012C4E 04:8C3E: EE 13 05
 	LDA shootSlot				;C - - - - - 0x012C51 04:8C41: AD 13 05
+.ifdef REGION_JP
 	CMP #20					;C - - - - - 0x012C54 04:8C44: C9 14
+.else
+	CMP bubbleSlotEnd			;(co-op) was CMP #20
+.endif
 	BEQ @end				;C - - - - - 0x012C56 04:8C46: F0 71
 
 	LDY shootSlot				;C - - - - - 0x012C58 04:8C48: AC 13 05
@@ -3747,6 +3767,12 @@ CoopSwapTest_mid:
 	BEQ CODE_099750				;C - - - - - 0x01374F 04:973F: F0 0F
 		JSR BubblesTravelUpdate				;C - - - - - 0x013751 04:9741: 20 9A 9D
 		JSR HandleShooting				;C - - - - - 0x013754 04:9744: 20 EF 8A
+.ifndef REGION_JP
+		BIT coopP2Active				;co-op: P2 window (odd tick), only while P2 is in the round
+		BPL :+
+			JSR CoopP2WindowOdd
+	:
+.endif
 		JSR UpdateBubbles				;C - - - - - 0x013757 04:9747: 20 00 80
 		JSR AnimateObjects				;C - - - - - 0x01375A 04:974A: 20 1E ED
 		JMP CODE_099785				;C - - - - - 0x01375D 04:974D: 4C 85 97
@@ -3776,6 +3802,12 @@ CODE_099750:
 	LDA #.BANK(*)					;C - - - - - 0x01378B 04:977B: A9 09
 	STA bankedSubRetBank				;C - - - - - 0x01378D 04:977D: 85 58
 	JSR RunBankedSub				;C - - - - - 0x01378F 04:977F: 20 72 E7
+.ifndef REGION_JP
+	BIT coopP2Active				;co-op: P2 window (even tick), only while P2 is in the round
+	BPL :+
+		JSR CoopP2WindowEven
+:
+.endif
 
 	JSR AnimateNonBubbles				;C - - - - - 0x013792 04:9782: 20 5C EE
 CODE_099785:
@@ -3787,7 +3819,19 @@ CODE_099785:
 		LDA #$00					;C - - - - - 0x0137A1 04:9791: A9 00
 		STA objState				;C - - - - - 0x0137A3 04:9793: 8D 63 05
 CODE_099796:
+.ifndef REGION_JP
+	BIT coopP2Active				;co-op: P2's invincibility blink (slot OSLOT_P2)
+	BPL :+
+		JSR CoopP2BlinkHide
+:
+.endif
 	JSR DrawObjects				;C - - - - - 0x0137A6 04:9796: 20 E2 EE
+.ifndef REGION_JP
+	BIT coopP2Active
+	BPL :+
+		JSR CoopP2BlinkRestore
+:
+.endif
 	LDA scratch6				;C - - - - - 0x0137A9 04:9799: A5 06
 	STA objState				;C - - - - - 0x0137AB 04:979B: 8D 63 05
 	LDA #.HIBYTE(@bganimret-1)					;C - - - - - 0x0137AE 04:979E: A9 97
@@ -5055,7 +5099,7 @@ CODE_099DDF:
 	INX
 	STX scratch1
 	DEX
-	CPX #19
+	CPX bubbleSlotLast			;(co-op) was CPX #19: 18 while P2 owns slot 39
 	BNE CODE_099DBC
 	JMP CODE_099E97
 CODE_099DE2:
@@ -5164,7 +5208,7 @@ CODE_099E6E:
 	STX scratch1
 	CPX scratch0				;C - - - - - 0x013E82 04:9E72: E4 00
 	BEQ CODE_099E88				;C - - - - - 0x013E84 04:9E74: F0 12
-		CPX #20					;C - - - - - 0x013E86 04:9E76: E0 14
+		CPX bubbleSlotEnd			;(co-op) was CPX #20
 		BEQ CODE_099E7D				;C - - - - - 0x013E88 04:9E78: F0 03
 			JMP CODE_099DF1_X				;(Perf) was JMP CODE_099DF1
 	CODE_099E7D:
@@ -5183,7 +5227,7 @@ CODE_099E88:
 	INX
 	STX scratch1
 	DEX
-	CPX #19
+	CPX bubbleSlotLast			;(co-op) was CPX #19: 18 while P2 owns slot 39
 	BEQ CODE_099E97
 		JMP CODE_099DBC
 CODE_099E97:

@@ -898,6 +898,9 @@ CODE_0884CF:
 			STA nmiBankedSub				;C - - - - - 0x010505 04:84F5: 85 16
 			LDA updateSub+1				;C - - - - - 0x010507 04:84F7: A5 1A
 			STA nmiBankedSub+1				;C - - - - - 0x010509 04:84F9: 85 17
+.ifndef REGION_JP
+			JSR CoopRoundStartP2			;co-op: P1 has reached the start position: spawn P2
+.endif
 CODE_0884FB:
 	LDA globalTimer				;C - - - - - 0x01050B 04:84FB: A5 14
 	AND #$01					;C - - - - - 0x01050D 04:84FD: 29 01
@@ -2769,7 +2772,11 @@ CODE_08928E:
 	STA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x01129E 04:928E: 99 77 05
 	STA objAnimHI+OSLOT_BUBBLE,Y				;C - - - - - 0x0112A1 04:9291: 99 2F 07
 	INY							;C - - - - - 0x0112A4 04:9294: C8
+.ifdef REGION_JP
 	CPY #20					;C - - - - - 0x0112A5 04:9295: C0 14
+.else
+	CPY bubbleSlotEnd			;(co-op) was CPY #20: keeps P2 (slot 39)
+.endif
 	BCC CODE_08928E				;C - - - - - 0x0112A7 04:9297: 90 F5
 
 	LDA #$05					;C - - - - - 0x0112A9 04:9299: A9 05

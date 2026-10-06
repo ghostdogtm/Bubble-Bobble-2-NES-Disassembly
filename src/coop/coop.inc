@@ -2,6 +2,8 @@
 ; Included from main.asm after defines.inc, US build only (.ifndef REGION_JP).
 
 OSLOT_P2        = 39            ; object slot reserved for player 2 (see docs/coop_notes.md)
+BUBBLE_SLOTS    = 20            ; bubble slots OSLOT_BUBBLE..39 in the original game (19 while P2 owns slot 39)
+COOP_P2_ACTIVE  = $80           ; coopP2Active value while P2 is in the round (bit 7: BIT/BPL gates)
 
 ; Canary written to coopCanary at reset; proves PRG-RAM ($6000-$7FFF) is mapped and writable
 COOP_CANARY0    = $43           ; 'C'

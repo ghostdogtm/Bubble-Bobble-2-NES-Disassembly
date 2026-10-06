@@ -3,7 +3,7 @@
 
 .segment "COOP_BSS"
 
-coopMode:       .res 1          ; 0 = normal 1-player game, 1 = co-op active (nothing reads it yet)
+coopMode:       .res 1          ; 0 = normal 1-player game, 1 = co-op active
 coopResident:   .res 1          ; which player's state is in the main game variables: 0 = P1, 1 = P2
 coopCanary:     .res 4          ; "COOP" written at reset; shows PRG-RAM is mapped and writable
 
@@ -21,3 +21,10 @@ ctxOther:
 	COOP_CTX_SCALARS COOP_CTX_SHADOW
 ctxOther_powerUps:  .res 1      ; only bits COOP_POWERUP_MASK are used (the shared powerUps bits stay in place)
 CTX_OTHER_SIZE = * - ctxOther   ; = scalar count + 1
+
+; Phase 3: P2 presence and the bubble slot budget.
+coopP2Active:   .res 1          ; $80 = P2 is in the round (object in OSLOT_P2, P2 window runs), 0 = not
+                                ; (bit 7 so that the bank hooks can gate with BIT / BPL and keep A/X/Y)
+bubbleSlotEnd:  .res 1          ; bubble slot loop end (relative to OSLOT_BUBBLE): 20, or 19 while P2 owns slot 39
+bubbleSlotLast: .res 1          ; bubbleSlotEnd - 1: outer-loop end of BubblesTravelUpdate (19, or 18)
+coopP2SavedState: .res 1        ; objState+OSLOT_P2 saved across DrawObjects (invincibility blink)

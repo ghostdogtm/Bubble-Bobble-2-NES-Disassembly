@@ -487,6 +487,9 @@ CODE_0582BE:
 	STA continues				;C - - - - - 0x00A2E7 02:82D7: 85 DC
 	STA ram_00DD				;C - - - - - 0x00A2E9 02:82D9: 85 DD
 	JSR ResetLivesAndScore				;C - - - - - 0x00A2EB 02:82DB: 20 8B 88
+.ifndef REGION_JP
+	JSR CoopNewGame				;co-op: P2 starts with the same lives/hearts
+.endif
 	LDA #$01					;C - - - - - 0x00A2EE 02:82DE: A9 01
 	STA scratch0				;C - - - - - 0x00A2F0 02:82E0: 85 00
 	JSR SplashScreenSprSetup				;C - - - - - 0x00A2F2 02:82E2: 20 62 82

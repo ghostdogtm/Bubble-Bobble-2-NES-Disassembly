@@ -1705,7 +1705,11 @@ CODE_078ACB:
 	TAX							;- - - - - - 0x00EAF2 03:8AE2: AA
 CODE_078AE3:
 	INX							;C - - - - - 0x00EAF3 03:8AE3: E8
+.ifdef REGION_JP
 	CPX #20					;C - - - - - 0x00EAF4 03:8AE4: E0 14
+.else
+	CPX bubbleSlotEnd			;(co-op) was CPX #20
+.endif
 .ifdef REGION_JP
 	BCC CODE_078AC0+2			;- - - - - - 0x00EB03 03:8AF3: 90 Jump back to misaligned code? How even?
 .else

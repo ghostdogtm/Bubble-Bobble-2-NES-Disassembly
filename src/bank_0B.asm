@@ -271,6 +271,12 @@ CODE_0B8196:
 	LDA #.BANK(*)					;C - - - - - 0x0161B2 05:81A2: A9 0B
 	STA bankedSubRetBank				;C - - - - - 0x0161B4 05:81A4: 85 58
 	JSR RunBankedSub				;C - - - - - 0x0161B6 05:81A6: 20 72 E7
+.ifndef REGION_JP
+	BIT coopP2Active				;co-op: P2 window during the round intro
+	BPL :+
+		JSR CoopP2WindowIntro
+:
+.endif
 	LDA globalTimer				;C - - - - - 0x0161B9 05:81A9: A5 14
 	AND #$01					;C - - - - - 0x0161BB 05:81AB: 29 01
 	BNE CODE_0B81B2				;C - - - - - 0x0161BD 05:81AD: D0 03
