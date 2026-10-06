@@ -28,3 +28,9 @@ coopP2Active:   .res 1          ; $80 = P2 is in the round (object in OSLOT_P2, 
 bubbleSlotEnd:  .res 1          ; bubble slot loop end (relative to OSLOT_BUBBLE): 20, or 19 while P2 owns slot 39
 bubbleSlotLast: .res 1          ; bubbleSlotEnd - 1: outer-loop end of BubblesTravelUpdate (19, or 18)
 coopP2SavedState: .res 1        ; objState+OSLOT_P2 saved across DrawObjects (invincibility blink)
+
+; Phase 5: collisions and owner-aware capture.
+coopShotSwapped: .res 1         ; 1 = the shot bytes (shooting, shootInitialSlot, shootQueuedBubbles, shootTrigger,
+                                ; shootSlot) are exchanged with their ctxOther copies: set by CoopCaptureOther when the
+                                ; non-resident player's bubble caught an enemy, undone before any swap (CoopShotRestore)
+coopP2SkipSlot: .res 1          ; bubble index CoopP2Shoot updated this tick ($FF = none): no P2 touch on it this tick

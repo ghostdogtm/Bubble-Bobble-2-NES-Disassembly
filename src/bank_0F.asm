@@ -5119,6 +5119,12 @@ CODE_0FFA49:
 		ORA #$80					;C - - - - - 0x01FA61 07:FA51: 09 80
 		STA ram_00CA				;C - - - - - 0x01FA63 07:FA53: 85 CA
 CODE_0FFA55:
+.ifndef REGION_JP
+	BIT coopP2Active				;co-op: the other player's emerging bubble gets the same test
+	BPL :+							;(it returns at once if this one already flagged the enemy)
+		JMP CoopCaptureOther
+:
+.endif
 	RTS							;C - - - - - 0x01FA65 07:FA55: 60
 
 DATA_0FFA56:

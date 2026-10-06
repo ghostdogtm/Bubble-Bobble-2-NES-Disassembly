@@ -116,8 +116,10 @@ COOP_P2_XMAX = $E8					;cover X < 16 and X >= 240)
 ;   CoopP2WindowOdd   RoundUpdate, odd tick:  after HandleShooting(P1), before UpdateBubbles
 ;   CoopP2WindowEven  RoundUpdate, even tick: after the CODE_078916 banked sub, before AnimateNonBubbles
 ;   CoopP2WindowIntro CODE_0B8196 (round intro, enemies sliding in): after P1's player update
-; Content: P2 player update (CODE_058E83, run exactly as RoundUpdate runs it); on odd RoundUpdate ticks
-; also P2's shot (CoopP2Shoot, Phase 4). Later phases add bubble touch, enemy collision... inside CoopP2Window.
+; Content: P2 player update (CODE_058E83, run exactly as RoundUpdate runs it); then, RoundUpdate windows only:
+;   odd tick:  P2's shot (CoopP2Shoot, Phase 4/5) and P2's bubble touch (CoopP2BubbleTouch, Phase 5)
+;   even tick: P2 vs enemies/food (PlayerCheckEnemyCollision, Phase 5)
+; Before the swap, shot bytes exchanged by an enemy capture (CoopCaptureOther) are put back (CoopShotRestore).
 ; The window is transparent for the banks: $8000 = the caller's bank again (RunBankedSub restores
 ; bankedSubRetBank) and $A000 = the bank the caller had there (prgBankB is saved on entry and
 ; re-mapped on exit if P2's work changed it, race-free order). Clobbers A/X/Y.
@@ -128,6 +130,7 @@ CoopP2WindowEven:
 CoopP2Window:
 	;A = bank that must be mapped at $8000 when control returns to the (banked) caller
 	STA bankedSubRetBank			;CoopSwap does not touch it
+	JSR CoopShotRestore				;shot bytes back with their owners before the swap (Phase 5)
 	LDA prgBankB					;the caller's $A000 bank, restored below
 	PHA
 	JSR CoopSwap					;P2 resident: context, slot 0 <-> OSLOT_P2, currentPlayer = 1
@@ -138,15 +141,19 @@ CoopP2Window:
 	LDA #.BANK(CODE_058E83)
 	STA bankedSubBank
 	JSR RunBankedSub
-	;P2's shot (RoundUpdate odd ticks only: HandleShooting runs there, and the round intro has none)
-	LDA globalTimer
-	LSR
-	BCC @noshoot					;even tick
+	;The round intro runs the player update only (as for P1 there). Bank 9 is at $8000 again here.
 	LDA bankedSubRetBank
 	CMP #.BANK(RoundUpdate)
-	BNE @noshoot					;intro window
-	JSR CoopP2Shoot
-@noshoot:
+	BNE @swapback					;intro window
+	LDA globalTimer
+	LSR
+	BCC @even
+	JSR CoopP2Shoot					;odd: P2's shot (HandleShooting runs on odd ticks), emerging/caught bubble
+	JSR CoopP2BubbleTouch			;odd: P2 touches bubbles (UpdateBubbles' player part)
+	JMP @swapback
+@even:
+	JSR PlayerCheckEnemyCollision	;even: P2 vs enemies/food, exactly as RoundUpdate runs it for P1
+@swapback:
 	JSR CoopSwap					;P1 resident again (coopResident = 0, currentPlayer = 0)
 	PLA
 	CMP prgBankB					;$A000 always holds prgBankB (Rule 9), so equal = nothing to do
@@ -159,20 +166,254 @@ CoopP2Window:
 	RTS
 
 ; ---------------------------------------------------------------------------------------------
-; CoopP2Shoot (Phase 4): P2 resident, bank 9 mapped at $8000 (odd RoundUpdate tick, inside the window).
+; CoopP2Shoot (Phase 4/5): P2 resident, bank 9 mapped at $8000 (odd RoundUpdate tick, inside the window).
 ; HandleShooting consumes P2's shootTrigger (spawns P2's emerging bubble at P2's position, bubble
-; index shootSlot). P2's emerging bubble is then updated here, with P2's globals (shootDir, candy,
-; bubbleVariant, shootQueuedBubbles), exactly as UpdateBubbles does for P1's: X = bubble index.
-; UpdateBubbles skips that slot while P1 is resident. terrainResult needs no pre-clear: the first
-; thing BubbleEmergingUpdate does (BubbleEmergingCheckTerrain) is to store it. Clobbers A/X/Y.
+; index shootSlot). P2's shot bubble is then handled here, with P2's globals, as UpdateBubbles' ladder
+; handles P1's (X = bubble index; while shooting, shootSlot = shootInitialSlot):
+;   $80 emerging      -> BubbleEmergingUpdate (shootDir, candy, bubbleVariant, shootQueuedBubbles)
+;   $88/$89 caught    -> CODE_0FFAB9 (enemy bubble / burst; clears P2's shooting, shootQueuedBubbles)
+; UpdateBubbles skips P2's emerging slot while P1 is resident, and never sees P2's $88/$89 (they are
+; converted here first: captures happen in the enemy AI on even ticks). terrainResult needs no pre-clear:
+; BubbleEmergingCheckTerrain stores it first. The slot handled here is not touched by P2 this tick
+; (coopP2SkipSlot), as UpdateBubbles' $80/$88 handlers skip the touch. Clobbers A/X/Y.
 ; ---------------------------------------------------------------------------------------------
 CoopP2Shoot:
+	LDA #$FF
+	STA coopP2SkipSlot
 	JSR HandleShooting
 	LDA shooting
 	BEQ @done
 	LDX shootSlot
-	JSR BubbleEmergingUpdate
+	LDA objState+OSLOT_BUBBLE,X
+	CMP #BUBBLE_EMERGING
+	BNE @caught
+	STX coopP2SkipSlot
+	JMP BubbleEmergingUpdate
+@caught:
+	LDX shootInitialSlot
+	LDA objState+OSLOT_BUBBLE,X
+	CMP #$88						;the capture states set by CODE_0FFAA3 ($88) / CODE_0FFB0C ($89)
+	BCC @done
+	CMP #$8A
+	BCS @done
+	STX coopP2SkipSlot
+	JMP CODE_0FFAB9					;X = bubble index (it reads objState,X; writes via shootInitialSlot)
 @done:
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopP2BubbleTouch (Phase 5): P2 resident, bank 9 at $8000, odd RoundUpdate tick, after CoopP2Shoot.
+; The player part of UpdateBubbles for P2: clear P2's touch/hazard bytes as UpdateBubbles does at its
+; start, then for every bubble whose state reaches CODE_098149 in UpdateBubbles' (US) ladder
+; (RISING 1, EXPIRING 2, ENEMY 3, ENEMY_EXPIRING 4, POWER 5) set up what CODE_098149 sets up
+; (scratch4/5 = bubble X/Y, X = bubble index) and run the player<->bubble part CODE_098932 (bounce with A
+; held -> ram_007D bit 7, push -> bubbleDir + bit 6, else PopBubble with scratch1 = X). CODE_098258 (the
+; bubble's own drift/movement) is not run: UpdateBubbles does that. Hazard effects of popped special
+; bubbles reach P2 through HazardCheckPlayer (CoopHazardCheckP2). Clobbers A/X/Y, scratch1-7.
+; ---------------------------------------------------------------------------------------------
+CoopP2BubbleTouch:
+	LDX #$00
+	STX playerHazardTrigger
+	STX ram_007D
+	STX playerHazardSlot
+@slot:
+	LDA objState+OSLOT_BUBBLE,X
+	BEQ @next
+	CMP #BUBBLE_POWER+1
+	BCS @next						;states >= 6 (and $80+) do not reach CODE_098149
+	CPX coopP2SkipSlot
+	BEQ @next
+	LDA objX+OSLOT_BUBBLE,X
+	STA scratch4
+	LDA objY+OSLOT_BUBBLE,X
+	STA scratch5
+	JSR CODE_098932					;keeps X (PopBubble reloads it from scratch1)
+@next:
+	INX
+	CPX bubbleSlotEnd
+	BNE @slot
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; Enemy capture by either player's emerging bubble (Phase 5). The enemy AI (even tick, P1 resident)
+; tests "the" shot through CODE_0FF9E8 and then uses shooting / shootInitialSlot / shootQueuedBubbles /
+; shootTrigger directly (CODE_0FFAA3, CODE_0FFB0C, bank B CODE_0B9630 and CODE_0B9AA9, bank 8 boss code).
+; CODE_0FF9E8 tests the shot in the native bytes; its exit jumps here (co-op only): if that did not flag
+; the enemy, the shot in ctxOther gets the same test, and on a hit the five shot bytes are exchanged
+; with their ctxOther copies (coopShotSwapped ^= 1), so the follow-up code works on the catching
+; player's shot. The exchange stays until CoopShotRestore (window start, P2 deactivation); nothing
+; between the enemy AI and the even window reads these bytes. A later enemy in the same tick again
+; tests the native shot first, then the other one (a hit exchanges back).
+; ---------------------------------------------------------------------------------------------
+.macro COOP_SHOT_XCHG name
+	LDA name
+	PHA
+	LDA .ident(.concat("ctxOther_", .string(name)))
+	STA name
+	PLA
+	STA .ident(.concat("ctxOther_", .string(name)))
+.endmacro
+
+CoopShotRestore:					;A only
+	LDA coopShotSwapped
+	BEQ CoopShotDone
+CoopShotExchange:					;A only (X/Y kept)
+	COOP_SHOT_XCHG shooting
+	COOP_SHOT_XCHG shootInitialSlot
+	COOP_SHOT_XCHG shootQueuedBubbles
+	COOP_SHOT_XCHG shootTrigger
+	COOP_SHOT_XCHG shootSlot
+	LDA coopShotSwapped
+	EOR #$01
+	STA coopShotSwapped
+CoopShotDone:
+	RTS
+
+; From CODE_0FFA55 (bank F, end of CODE_0FF9E8), co-op only. X = enemy index, ram_00CA = enemy state.
+; Same test as CODE_0FF9E8 (US) on the ctxOther shot; no scratch bytes used. Keeps X and Y.
+CoopCaptureOther:
+	LDA ram_00CA
+	BEQ @rts						;as CODE_0FF9E8: state 0 is never tested
+	BMI @rts						;already flagged (the native shot hit, or bit 7 was set before)
+	LDA ctxOther_shooting
+	BEQ @rts
+	TYA
+	PHA
+	LDY ctxOther_shootInitialSlot
+	LDA objState+OSLOT_BUBBLE,Y
+	CMP #BUBBLE_EMERGING
+	BNE @done
+	LDY ctxOther_shootQueuedBubbles	;box = DATA_0FFA56[queued] + enemy W/H, as CODE_0FF9E8
+	LDA DATA_0FFA56,Y
+	LDY enemyType,X
+	CLC
+	ADC DATA_0FFA59,Y
+	STA collW
+	LDY ctxOther_shootQueuedBubbles
+	LDA DATA_0FFA56,Y
+	LDY enemyType,X
+	CLC
+	ADC DATA_0FFA7E,Y
+	STA collH
+	LDY ctxOther_shootInitialSlot
+	LDA objX+OSLOT_BUBBLE,Y			;|bubble X - enemy X| <= collW
+	SEC
+	SBC objX+OSLOT_ENEMY,X
+	BCS :+
+	EOR #$FF
+	ADC #$01						;(C = 0)
+:	CMP collW
+	BEQ :+
+	BCS @done
+:	LDA objY+OSLOT_BUBBLE,Y			;|bubble Y - enemy Y| <= collH
+	SEC
+	SBC objY+OSLOT_ENEMY,X
+	BCS :+
+	EOR #$FF
+	ADC #$01
+:	CMP collH
+	BEQ :+
+	BCS @done
+:	LDA ram_00CA
+	ORA #$80
+	STA ram_00CA
+	JSR CoopShotExchange			;the follow-up code now works on the catching player's shot
+@done:
+	PLA
+	TAY
+@rts:
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; Projectiles vs P2 (Phase 5). UpdateProjectiles (even tick, P1 resident) runs PlayerCheckProjCollision
+; (P1) for each projectile, then the projectile's script, whose ops act on "the player" (HurtPlayer and
+; CatchPlayer write playerDmgType; CopyPlayerState reads playerState; PlayerState writes playerState,
+; inflateTime, extraBubbles, ram_0076 and slot 0's animation; Heart writes playerHearts and calls
+; AddScore; the homing/distance/side ops read slot 0's position).
+; CoopProjCheckP2: if P1 was not hit, the same test against P2 (slot OSLOT_P2, ctxOther_playerInvFrames);
+; on a hit P2 is swapped in (coopResident = 1) and PROJ_HIT is set, so the script runs exactly as for P1
+; but on P2's state. CoopProjSwapBack (at the script's end, @trymove) puts P1 back. A swap pair costs
+; ~1.4k cycles but only on a P2 hit (i-frames follow). X = projectile index (kept); collW/collH = size.
+; ---------------------------------------------------------------------------------------------
+CoopProjCheckP2:
+	LDA objState+OSLOT_PROJ,X
+	BMI @done						;PROJ_HIT: P1 was hit (P1 has priority)
+	LDA ctxOther_playerInvFrames
+	BNE @done
+	LDA objX+OSLOT_PROJ,X			;|proj X - P2 X| <= collW
+	SEC
+	SBC objX+OSLOT_P2
+	BCS :+
+	EOR #$FF
+	ADC #$01						;(C = 0)
+:	CMP collW
+	BEQ :+
+	BCS @done
+:	LDA objY+OSLOT_PROJ,X			;|proj Y - P2 Y| <= collH
+	SEC
+	SBC objY+OSLOT_P2
+	BCS :+
+	EOR #$FF
+	ADC #$01
+:	CMP collH
+	BEQ :+
+	BCS @done
+:	JSR CoopShotRestore				;(keeps every CoopSwap on unexchanged shot bytes; A only)
+	TXA
+	PHA
+	JSR CoopSwap					;P2 resident for this projectile's ops
+	PLA
+	TAX
+	LDA objState+OSLOT_PROJ,X
+	ORA #PROJ_HIT
+	STA objState+OSLOT_PROJ,X
+@done:
+	RTS
+
+CoopProjSwapBack:
+	TXA
+	PHA
+	JSR CoopSwap					;P1 resident again
+	PLA
+	TAX
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopHazardCheckP2 (Phase 5): tail of HazardCheckPlayer (bank 9), co-op only. HazardCheckPlayer tests
+; slot 0 (P1, resident in UpdateBubbles) against a popped special bubble's effect box (collW/collH and
+; scratch4/5 = centre, computed there); the same box is tested against P2 (slot OSLOT_P2) and a hit sets
+; P2's shadow playerHazardTrigger / playerHazardSlot. Keeps X and Y.
+; ---------------------------------------------------------------------------------------------
+CoopHazardCheckP2:
+	LDA objX+OSLOT_P2
+	CMP scratch4
+	BCC @xless
+	SBC scratch4
+	JMP @checkwidth
+@xless:
+	LDA scratch4
+	SEC
+	SBC objX+OSLOT_P2
+@checkwidth:
+	CMP collW
+	BCS @end
+	LDA objY+OSLOT_P2
+	CMP scratch5
+	BCC @yless
+	SBC scratch5
+	JMP @checkheight
+@yless:
+	LDA scratch5
+	SEC
+	SBC objY+OSLOT_P2
+@checkheight:
+	CMP collH
+	BCS @end
+	LDA #$F0
+	ORA roundBubbleVariant
+	STA ctxOther_playerHazardTrigger
+	STX ctxOther_playerHazardSlot
+@end:
 	RTS
 
 CoopP2WindowIntro:
@@ -281,9 +522,10 @@ CoopSpawnP2:
 ; all 40 objects: title, new game, continue, ending, every round setup (CODE_088000, also after a
 ; P1 death), bonus round start. Hides slot OSLOT_P2 and gives the slot back to the bubbles. The
 ; caller clears objState of slot 39 right after, so with coopMode = 0 this changes no console RAM.
-; Clobbers A only.
+; Shot bytes still exchanged by a capture are put back first (Phase 5). Clobbers A only.
 ; ---------------------------------------------------------------------------------------------
 CoopP2Deactivate:
+	JSR CoopShotRestore
 	LDA #$00
 	STA coopP2Active
 	STA objState+OSLOT_P2

@@ -1594,6 +1594,12 @@ HazardCheckPlayer:
 			STA playerHazardTrigger				;C - - - - - 0x012A28 04:8A18: 85 7E
 			STX playerHazardSlot				;C - - - - - 0x012A2A 04:8A1A: 86 7F
 @end:
+.ifndef REGION_JP
+	BIT coopP2Active				;co-op: the same hazard box against P2 (slot OSLOT_P2, P2's shadow bytes)
+	BPL :+
+		JMP CoopHazardCheckP2
+:
+.endif
 	RTS							;C - - - - - 0x012A2C 04:8A1C: 60
 
 HazardCheckEnemies:
@@ -2263,6 +2269,12 @@ UpdateProjectiles_CheckProj:
 	LDA EnemyProjSizeTable+1,Y			;C - - - - - 0x012DC7 04:8DB7: B9 EB BE
 	STA collH				;C - - - - - 0x012DCA 04:8DBA: 85 D1
 	JSR PlayerCheckProjCollision				;C - - - - - 0x012DCC 04:8DBC: 20 EF FB
+.ifndef REGION_JP
+	BIT coopP2Active				;co-op: P1 not hit -> test P2 (slot OSLOT_P2); on a hit P2 is swapped in
+	BPL :+							;for this projectile's ops (they write the touched player's state)
+		JSR CoopProjCheckP2
+:
+.endif
 
 	LDA objState+OSLOT_PROJ,X				;C - - - - - 0x012DCF 04:8DBF: BD 64 05
 	AND #PROJ_HIT					;C - - - - - 0x012DD2 04:8DC2: 29 80
@@ -2315,6 +2327,12 @@ UpdateProjectiles_OpRet:
 		STA projScriptOfs				;C - - - - - 0x012E0D 04:8DFD: 85 5D
 		JMP UpdateProjectiles_ReadOp				;C - - - - - 0x012E0F 04:8DFF: 4C D6 8D
 @trymove:
+.ifndef REGION_JP
+	LDA coopResident				;co-op: the ops of this projectile ran with P2 resident (P2 was hit)
+	BEQ :+
+		JSR CoopProjSwapBack		;P1 resident again (keeps X)
+:
+.endif
 	LDA objState+OSLOT_PROJ,X				;C - - - - - 0x012E12 04:8E02: BD 64 05
 	BEQ UpdateProjectiles_NextProj				;C - - - - - 0x012E15 04:8E05: F0 14
 		;Move
