@@ -1086,3 +1086,271 @@ are bank-8 `RemoteEnemyUpdateSubs` and use the per-enemy selection like every ot
   as in 1P.
 - P2's Snagger damage is applied one tick earlier than P1's: in the same tick, during the even window.
 - p5verify's slot-39 `objState == 1` invariant is superseded (see verification 2).
+
+## Phase 6b (world interactions)
+
+Build `c6b` (code commit `9bce47d`). All edits to shared code are US branches (`.ifdef REGION_JP` keeps the original
+lines). New code is in `COOP_CODE2`, now $523 B with 474 B free; `COOP_CODE` is $246 B with 378 B free. New `COOP_BSS`
+bytes: `coopDrinkElig`, `coopItemNoOther`, `coopPopDir[20]`. Free space after the phase: bank 7 28 B (unchanged),
+bank 8 10 B (was 12), bank 9 206 B (was 207).
+
+### 1. Items (`CODE_078916`, bank 7, even tick, P1 resident)
+Every collect test in the routine goes through one touch routine, `CODE_078BC5`. It tests the resident player (slot 0,
+`playerState` != dead) against the item in slot `scratch4` (box `scratch2/scratch3`) and sets bit 7 of the item's
+`objState`. The callers then apply the effect at once, to the resident's variables and to shared ones:
+- the drink (`CODE_078982`, rounds 20/40/60/70/79/80): `bubbleVariant`;
+- round items (`CODE_0789F7` -> `RoundItemCollectHandlers`): hearts, candy/shoe bits, lives (unreached), secret door
+  (`ram_007B`/`playerDmgType` = 0), and shared effects (holy cup, clock, crystals, pencil, tree, parasol); then
+  `AddScore` (via `currentPlayer`) and `CODE_078A70`;
+- the big reward (`CODE_078CCE`: shared `powerUps` bits 2-5, `roundFlags`, `AddScore`);
+- the end-of-round bonus rewards (`CODE_078D5C`, `AddScore`).
+
+Running only "the collect part" in the even window would mean duplicating the routine: in every path the touch and
+the effect are interleaved with the spawn/timer code. So the Phase 5 projectile pattern is used instead:
+- **Tail test.** `CODE_078C23`, the miss exit of `CODE_078BC5`, now jumps to `CoopItemOther`; the hit path got its own
+  `RTS`. `CoopItemOther` (co-op only) runs the same test for the other player (slot `OSLOT_P2`,
+  `ctxOther_playerState`). On a touch it sets bit 7, runs `CoopShotRestore` and swaps the collector in with `CoopSwap`.
+  It keeps X (`CODE_078D5C` loops with X) and leaves scratch0/1 alone (`CODE_078D2D` counts in scratch0).
+
+  The unchanged effect code then credits the collector: its hearts, its candy/shoe bits (exchanged by `CoopSwap`),
+  its `bubbleVariant`, and `AddScore` with `currentPlayer` = 1. Shared effects stay shared. Later tests in the same
+  call check the new resident first, then the other player, so the rule is symmetric.
+- **Swap back.** Every exit passes `CODE_078A67`, which now calls `CoopItemEnd` instead of `LDA ram_0550`. P1 is put
+  back before `CODE_078EBE`, the holy-cup palette flash, because it calls `SetRoundPalette`, which reads
+  `currentPlayer`. The even window and everything after it see P1 resident as before.
+- **Priority.** The resident (P1) is tested first, so P1 wins a simultaneous touch.
+- **Drink eligibility.** The original rule was "skip if `bubbleVariant` != 0 or `playerLives` = 0", for P1 only.
+  - `CoopDrinkGate` computes eligibility per player (bit 0 P1, bit 1 P2). The drink is spawned and tested while at
+    least one player may drink; in 1P this is the same test.
+  - `CoopDrinkTouch` replaces the drink's `JSR CODE_078BC5` and tests only eligible players. `coopItemNoOther` blocks
+    the tail test for an ineligible P2; an ineligible P1 is skipped by calling `CoopItemOtherTest` directly.
+  - Without this, a P2 that had already drunk would take the drink from P1 every even tick (it respawns as soon as
+    `ram_054C` is 0).
+- **`Collect*` handlers.** None assumes P1 beyond the resident's variables.
+  - `CollectSecretDoor` clears only the collector's `ram_007B`/`playerDmgType` (round transition, Phase 7).
+  - `CollectLife`, `CollectStarRod` and `CollectStaff` are unreached.
+
+**Correction to Phase 2: `shootCounter` is shared.** `$0546` is `rewardsEaten+7`, entry 7 of the 13 reward statistics
+at `$053F-$054B`:
+- `CODE_0789C3` compares these statistics with `DATA_078F12` to spawn round item X+1. Entry 7 is the "bubbles blown"
+  count that spawns the candy ($31 = 49 shots).
+- `CODE_078A70` and `CODE_088028` zero the entry of the collected item.
+- While the byte was in the swap list, P2's shots never counted toward the candy. A P2 candy pickup also zeroed P2's
+  copy while P1's copy stayed above the threshold.
+
+It is now out of `COOP_CTX_SCALARS` (the other statistics were never swapped), so both players' shots count, as food
+counts in `rewardsEaten`. `CoopSwap` is now 507 B and 691 cycles. `swapcheck.py c6bt r01 --inject`: 2032 swaps,
+20443952 checks, 0 failures, 691 cycles each.
+
+### 2. Rising water (`CODE_078682` -> `CODE_0786B8`, round 43)
+This runs in `CODE_078247` at the top of every tick, before the player updates. It sets `playerHazardTrigger` = $F8
+while slot 0 is below `irqLatch - 12`. Its `RTS` (`CODE_0786C6`) became `JMP CoopWaterP2`, which runs the same test
+against slot 39 and sets `ctxOther_playerHazardTrigger`. P2's update sees the trigger in its window, as P1's update
+does. P2's touch pass clears it on odd ticks, as `UpdateBubbles` clears P1's.
+
+### 3. Special-bubble effect direction (`CODE_0981F8`, bank 9)
+A special bubble that P2's touch pass (odd window) pops becomes `BUBBLE_POPPING`. The same tick's `UpdateBubbles` (P1
+resident) reaches it, and `CODE_0981F8` takes the effect direction from `playerDir` (thunder, water, wind:
+`DATA_0981E5` != 0). The change:
+- In `CoopP2BubbleTouch`, after `CODE_098932`: if the bubble is now POPPING, `objAnimHI` != 0 (the condition for
+  `CODE_0981F8`) and the round's variant has a direction, then `coopPopDir,X` = $80 | P2's `playerDir`.
+- `CODE_0981F8` calls `JSR CoopPopDir` instead of `LDA playerDir`. It returns the mark if one is set (and clears it),
+  else P1's `playerDir`.
+- P1's pops keep the 1P timing and rule: P1's facing, two ticks later.
+
+Not changed: `CODE_098191` uses P1's `playerDir` only to pick the spawn side of the round's power bubbles when
+`ram_0083` >= 3. That is a spawn rule with no popper, so it stays on P1 (the brief listed it together with
+`CODE_0981F8`).
+
+### 4. SuperRedSkull quake (bank 8, rounds 79/80)
+- **Landing** (`CODE_08981A`, when `ram_00BB` reaches $10). It stuns P1 (`playerState` = $0A, `ram_0076` = 0) if P1 has
+  no i-frames and `ram_0078` bit 7 is set (on the ground). A new `JSR CoopQuakeStunP2` before that applies the same rule
+  to P2's shadow bytes. This is an area effect: one landing can stun both players.
+- **Next jump** (`CODE_0895F3`). The original starts a new jump only while P1 is not stunned (`playerState` != $0A).
+  `CoopQuakeReady` replaces `LDA playerState / CMP #$0A`: there is no new jump while either player is stunned, so
+  neither can be stun-locked.
+
+### 5. Bank-F terrain, conveyor and lift handlers (`ram_0078`, `ram_007B`)
+Verdict: all of them run inside a player update. Nothing to fix.
+- **Static.** The round handlers are `CODE_0FF688`, `CODE_0FF78B`, `CODE_0FF79A`, `CODE_0FF7AC`, `CODE_0FF7CA` and
+  `CODE_0FFCF6` (table at bank 8 `$81BC`).
+  - They are reached only through `JMP (ram_006E)` in `CODE_0FF643`, which is called from bank 5 only, with
+    `scratch5` = 0.
+  - Bank 5 also calls `CODE_0FF7AC` directly with `JSR`.
+  - The enemy path `CODE_0FF661` -> `CODE_0FFCF6` runs with `scratch5` = 1 and writes only `ram_00CD`.
+- **Dynamic.** The natural set includes rounds 22, 30, 31, 33, 40, 50, 57, 73 and 78. "Inside a player update" means
+  from the `CODE_058E83` entry to its `RunBankedSub` return, tracked by stack depth. Writes to `$78/$7B` by bank-F
+  handlers:
+
+  | handler | inside | outside |
+  |---------|--------|---------|
+  | `CODE_0FF6D1` | 16 | 0 |
+  | `CODE_0FF79A` | 830 | 0 |
+  | `CODE_0FF7AC` | 749 | 0 |
+  | `CODE_0FF7CA` | 1796 | 0 |
+  | `CODE_0FFCFB` | 36 | 0 |
+  | `CODE_0FFD39` | 623 | 0 |
+
+### 6. Sweep
+- **Static** (`tmp/coop_scripts/p6b/sweep.py`): every unindexed `objX/objY/objState` access and every access to a
+  context variable in banks 7, 8, 9, B and F. That is 231 instructions in 96 routines.
+- **Dynamic**: the checker records every write to a player variable or to slot 0 outside a player update and outside
+  `CoopSwap`, by routine (natural set, 44 runs).
+
+Rows that were already in the Phase 5 / 6a tables are marked as such.
+
+| bank | routines | verdict |
+|------|----------|---------|
+| 7 | `CODE_078982`/`CODE_07899A` (drink), `CODE_078BC5`/`CODE_078BF4` (touch), `CollectHeart/SecretDoor/Shoe/Candy/Life`, `CODE_078CCE`, `CODE_078D5C` | converted (item 1) |
+| 7 | `CODE_0786B8` | converted (item 2) |
+| 7 | `CODE_078DB0`, `SpawnBonusReward` (`powerUps` big-coin/diamond bits) | leave: shared bits |
+| 7 | `CODE_0788CC` (camera) | Phase 8 |
+| 7 | `CODE_078061`, `CODE_0783AC`, `CODE_078549`, `CODE_07924C`, `CODE_07953E`, `CODE_079BEB`, `CODE_079C1A`, `CODE_079C44`, `CODE_079C8A`, `DisplayBonusGameText` | leave: opening, map screen, bonus games, cutscenes (P2 inactive) |
+| 8 | `CODE_0895F3`, `CODE_08981A` | converted (item 4) |
+| 8 | `CODE_088000` (life lost: hearts, lives), `CODE_08805D` (`powerUps`), `CODE_088664` (boss setup clears P1's candy) | Phase 7 |
+| 8 | `CODE_0880C8`, `CODE_08812A`, `CODE_088169` (per-life init) | done: run for P2 by `CoopRoundStartP2` (Phase 3) |
+| 8 | `CODE_0884AB`..`CODE_0884CF` (walk-in), `StartBonusRound`, `CODE_089F47` | leave: round start (Phase 3/4 rows) |
+| 8 | `CODE_08852C`, `CODE_08856D`, `CODE_0885CE` (`powerUps` bell/triangle/diamond bits) | leave: shared bits |
+| 8 | `CODE_08882A` (Ruckus) | 6a row, Phase 8 |
+| 8 | `CODE_089B59` | Phase 5 row |
+| 9 | `CODE_0981F8` | converted (item 3) |
+| 9 | `CODE_098191` (power-bubble spawn side from P1's facing) | leave: spawn rule, no player interaction |
+| 9 | `UpdateBubbles` clear, `CODE_098932`..`CODE_0989D1`, `HazardCheckPlayer`, shot routines, projectile ops | Phase 4/5 rows (P2 equivalents exist) |
+| 9 | `CODE_099785`/`CODE_099796` (blink) | Phase 3 |
+| 9 | `CODE_0997C6` (game-over test, P1 only), `RefreshLivesDigits`, `CODE_099C6B`/`CODE_099C7E` (hearts HUD), `CODE_099D70` (extra life) | Phase 7 |
+| B | `CODE_0B9630`, `CODE_0B9AA9` | Phase 5 |
+| B | `CODE_0B9CB3`, `CODE_0B9D63` | Phase 7 (6a rows) |
+| B | `CODE_0B9DB8` (RNG) | leave |
+| F | `CODE_0FF643`..`CODE_0FF7CA`, `CODE_0FFCFB`, `CODE_0FFD39` | inside the player update (item 5) |
+| F | `BubbleEmergingCheckTerrain`, `CODE_0FF496`, `CODE_0FF9E8` family, `PlayerCheckEnemyCollision`, `PlayerCheckProjCollision` | Phase 4/5 rows |
+
+Counts:
+- converted: 4 groups (items, water, direction, quake), 22 routines;
+- world -> player sites left unconverted: 0;
+- Phase 7: 10 routines;
+- Phase 8: 2, plus 6a's `CODE_088AA2`;
+- leave: 22 (cutscene/menu/bonus 10, shared bits 6, round start 4, spawn rule 1, RNG 1);
+- the remaining routines are Phase 3/4/5/6a rows.
+
+Dynamic list: the writers outside a player update are exactly the rows above plus round-setup and title code
+(`CODE_0FE0A3`, `CODE_0FE0B3`, `ResetLivesAndScore`, `TaitoLogoUpdate`, `CODE_058136`, `CODE_058999`,
+`AdventureStartSetup`, `SpawnBubble`, `SplashScreenSprSetup`, `TitleScreenUpdateCursor`). All of these run with P2
+inactive or at a round start. No writer is unexplained.
+
+### Verification
+1. `build c6b`, then `regress base c6b --reuse-base`: **REGRESSION PASS, 12/12**, re-run on the final build. JP md5
+   `8d2855ea5505bf094b7a40155caa92b4`.
+2. Checker `tmp/coop_scripts/p6b/p6bverify.py`. It runs the p5verify and p6verify Lua and Python checks, plus the 6b
+   checks listed in its docstring. The ctxOther write whitelist now also allows `CoopWaterP2` and `CoopQuakeStunP2`,
+   at their offsets only.
+
+   Test options (Lua writes only, no ROM change):
+   - `--magnet` puts P2 on a present item at every tick start;
+   - `--magnet2` does the same for both players;
+   - `--skull` turns the round-79/80 RedSkull into SuperRedSkull once after tick 1300, as `CODE_08952D` does (random
+     input never beats the RedSkull).
+
+   Run sets:
+   - natural: 44 runs, the 7 standard scenarios plus 37 extras covering rounds 43, item rounds, boss rounds, special
+     bubbles and terrain;
+   - magnet: 15 runs;
+   - magnet2: 6 runs;
+   - skull: 4 runs, plus 3 with `--seed2 300`.
+
+   | | natural (44) | magnet (15) | magnet2 (6) | skull (4 + 3) |
+   |--|--|--|--|--|
+   | play ticks with P2 active | 95894 | 30859 | 12531 | 24600 |
+   | P2 item touches: drink / candy / shoe | 12 / 5 / 1 | 11 / 10 / 0 | 14 / 0 / 0 | 13 / 0 / 0 |
+   | P1 item touches: drink / candy | 16 / 3 | 6 / 0 | 16 / 3 | 18 / 0 |
+   | effect writes (`bubbleVariant`, `powerUps`) to the collector, P2 / P1 | 18 / 19 | 21 / 6 | 14 / 19 | 13 / 18 |
+   | water: P1 hits / P2 hits (Lua expectation for P2) | 1137 / 1060 (1060) | - | - | - |
+   | effect direction from P2 / from P1 (of P2's: differs from P1's facing) | 70 / 96 (19) | 49 / 46 (29) | 93 / 84 (73) | 13 / 10 (5) |
+   | quake: landings / P1 stunned / P2 stunned / new jump blocked by P2 only | - | - | - | 8 / 1 / 3 / 2 |
+   | `shootCounter` writes with P1 / P2 resident | 8604 / 9717 | 2862 / 2800 | 895 / 1182 | 2224 / 2062 |
+   | **violations (p5 + p6 + p6b)** | **0** | **0** | **0** | **0** |
+
+   What the checks establish:
+   - **Priority (magnet2, both players on the item).** P1 took every round item. P2 took the drink 14 times, each time
+     with P1 already holding a drink ("P2 only" gate mask on 24 ticks).
+   - **Effects.** Every write to a player variable inside `CODE_078916` came after a touch and went to the collector,
+     who was resident at that moment. No `ctxOther` write happened outside the whitelist. `coopResident` was 0 at every
+     window entry and at every tick end.
+   - **Drink.** Drinks were only taken by players with `bubbleVariant` 0 and lives > 0. `CoopDrinkGate`'s mask matched
+     the Lua recompute at every call.
+   - **Water.** `CoopWaterP2` wrote P2's trigger on exactly the 1060 ticks the Lua test expected. P2's update started
+     with $F8 1087 times, P1's 1159 times.
+   - **Direction.** Every `CoopPopDir` result equalled the popper's facing (for P2: `playerDir` at its touch pass). No
+     mark was left at a tick end.
+   - **Quake.** At each of the 8 landings, both players were stunned exactly by the rule: P1 once, P2 3 times. No
+     landing had both players grounded and vulnerable at once. `CoopQuakeReady`'s Z flag matched "P1 or P2 in state
+     $0A" on all 84 calls.
+   - **Phase 5/6a counters** (natural set, P1 / P2), for scale: enemy-body damage 1813 / 1961, lives lost 178 / 166,
+     pops 1686 / 1523, projectile hits 139 / 137.
+3. Screenshots `tmp/coop_scripts/p6b/runs/shots/c6b_k40_t01219.png` to `t01229.png` (round 40, natural run):
+   - tick 1219: the drink stands at (64,200), next to P2 at (57,194);
+   - tick 1225: the checker logs "P2 collects drink", and P2's sprite is over the bottle;
+   - tick 1229: the drink is gone.
+
+   P1 (41,194) is to the left; its tiles are garbled by the Phase 3 CHR-slot conflict. `tmp/runs/c6b/c01_t01806.png`
+   to `c01_t01816.png` show c01, where P2 picks up the candy at (225,76) at tick 1811. It is hard to see for the same CHR
+   reason.
+4. Cost.
+   - 1P, `stats c6b --vs c6` (12 scenarios): +7..+53 cycles per play tick, +0.12 % in total, lag unchanged.
+     - The +45..+53 in r20, r40 and r70 is `CoopDrinkGate`, which runs every even tick in drink rounds.
+     - The rest comes from the 1P gates in `CoopItemEnd` and `CoopItemOther` and the item-tail `JMP`.
+   - Co-op, `stats c6b --scen <7> --vs c6`, total +1.07 %:
+
+     | scen | d_play | d_lag |
+     |------|--------|-------|
+     | c01 | +672 (+3.4 %) | +44 |
+     | c05 | +632 (+2.9 %) | +73 |
+     | c17 | +115 | +1 |
+     | c20 | +363 | 0 |
+     | c22 | -19 | -1 |
+     | c50 | +40 | +5 |
+     | c64 | +11 | +26 |
+
+   - `profile c6b --scen <7> --vs c6`:
+     - `CoopSwap` -0.47M (one scalar fewer);
+     - `CoopP2BubbleTouch` +0.42M (the mark test, about 40 cycles per odd tick);
+     - the item routines together about 0.3M.
+
+     The rest is changed play, mostly in `DrawObjects`: both players' shots now spawn the candy, and P2 collects items.
+5. Coverage. Sources: `run c6b --profile` of the 7 scenarios, plus checker runs with `--profile` (magnet: i02 k40
+   k80; skull: q80 k80 with seed2 300; natural: w43 d13 i27), read with `tmp/coop_scripts/p6/cov.py`.
+
+   Executed:
+   - every instruction of `CoopItemOther` (both exits and the hit path), `CoopItemOtherTest` and `CoopItemEnd` (both
+     paths);
+   - all paths of `CoopDrinkGate`, both paths of `CoopDrinkTouch`;
+   - `CoopWaterP2`, both paths of `CoopPopDir`, the stun path of `CoopQuakeStunP2`;
+   - the mark code in `CoopP2BubbleTouch`;
+   - all edited bank 7/8/9 sites.
+
+   Not executed: `CoopQuakeReady`'s `@no` (`LDA #1 / RTS`). It returns Z = 0 only when P2 is not in the round, which
+   needs a 1P run of round 79/80 with SuperRedSkull. Its outcome is the same as the original `CMP #$0A` with P1 not
+   stunned.
+6. JP unchanged (md5 above).
+
+### Phase 7 list (from this phase)
+- `CollectSecretDoor` clears only the collector's `ram_007B`/`playerDmgType` before the bonus round.
+- `CODE_088664` (boss-round setup) clears only P1's candy.
+- `CODE_088000` / `CODE_08805D` (life lost, round setup).
+- Game-over test `CODE_0997C6` (P1 only).
+- Hearts/lives HUD: `RefreshLivesDigits`, `CODE_099C6B`/`CODE_099C7E`. `CollectHeart`'s `livesCurrentPos` refresh shows
+  P1.
+- Extra life `CODE_099D70` (P1 only).
+- `CODE_0B9CB3` / `CODE_0B9D63` (6a rows).
+
+### Phase 8 list
+- the camera `CODE_0788CC`;
+- Ruckus's wrap `CODE_08882A`;
+- `CODE_088AA2` (from 6a).
+
+### Open issues
+- P1 has priority on every item touch: with both players on an item, P1 always gets it.
+- P2's item touch is tested in `CODE_078916` (even tick) at P2's position from the last odd window. P1's uses P1's
+  position from the same tick.
+- The holy cup, big reward and clock stay shared effects; their score goes to the collector.
+- `CODE_098191`'s power-bubble spawn side still follows P1's facing.
+- The Phase 3 sprite CHR conflict makes the P1/P2 sprites hard to read in screenshots.
