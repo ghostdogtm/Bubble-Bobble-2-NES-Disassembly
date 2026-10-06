@@ -276,3 +276,251 @@ Every address with a PU/HS/EC/BT/PC count in `ctx_summary.txt` that is in neithe
 - Nothing wrong with the list was found. Three entries (`ram_007A`, `playerHazardSlot`, `ram_077B`) have no writes in the
   dynamic traces (rare paths); they were kept on the strength of the static references in the player code.
 - `ram_051A` and the `bubbleSpawn*` bytes are the only shared transient state that could cross a routine boundary.
+
+## Phase 3 (dual player update, P2 spawn, bubble slot budget)
+
+Most of the code was written by an earlier agent that stopped before verifying or committing. This section covers the
+review of that work, the fixes, and the verification (build `c3`; manual-play ROM `c3f`).
+
+### Hooks
+All of these are inside `.ifndef REGION_JP` or in the US `.else` of an existing pair. The JP side is the original code.
+
+| site | bank | what |
+|------|------|------|
+| `RoundUpdate`, odd tick, after `JSR HandleShooting` | 9 | `BIT coopP2Active / BPL / JSR CoopP2WindowOdd` |
+| `RoundUpdate`, even tick, after the `CODE_078916` banked sub | 9 | `BIT coopP2Active / BPL / JSR CoopP2WindowEven` |
+| `CODE_099796` (around `JSR DrawObjects`) | 9 | `CoopP2BlinkHide` before, `CoopP2BlinkRestore` after (both gated) |
+| `CODE_0B8196` (round intro: enemies slide in), after P1's player update | B | gated `JSR CoopP2WindowIntro` |
+| `CODE_0884CF`, in the block that ends P1's walk to the start position | 8 | `JSR CoopRoundStartP2` (does nothing when `coopMode` = 0) |
+| `CODE_0FE36B` (despawns all 40 objects) | F | `JSR CoopP2Deactivate` |
+| `CODE_0582BE` (new game), after `ResetLivesAndScore` | 5 | `JSR CoopNewGame` |
+| `CODE_0FFDD9` (round-20 object shifter) | F | slot `OSLOT_P2` with P2 active skips the despawn (it is still shifted) |
+| `AnimateObjects` | F | new label `AnimateObjectsFromX` after `LDX #20`; same bytes |
+| 11 bubble-slot loop bounds | 7, 8, 9 | see the slot-budget table |
+
+New code is in `COOP_CODE2` (bank E, `$D903`, 284 B). New `COOP_BSS` bytes: `coopP2Active` ($80 = P2 in the round, so
+the hooks can gate with `BIT`/`BPL` and keep A/X/Y), `bubbleSlotEnd` (20 or 19), `bubbleSlotLast` (19 or 18),
+`coopP2SavedState`. `CoopReset` sets the budget to 20/19. Only `CoopSpawnP2` (19/18, `coopP2Active` = $80) and
+`CoopP2Deactivate` (20/19, 0) change these bytes afterwards, so the budget always matches `coopP2Active`.
+
+`CODE_058E83` (the player update) has exactly two callers, `RoundUpdate` and `CODE_0B8196`, and both have a P2 window.
+
+### P2 window (`CoopP2Window`)
+1. `bankedSubRetBank` is set to the caller's bank (9, or B for the intro), and `prgBankB` is pushed.
+2. `CoopSwap` puts P2 in place (context, slot 0 <-> 39, `currentPlayer` = 1).
+3. `CODE_058E83` runs through `RunBankedSub` exactly as `RoundUpdate` runs it, so P2 reads pad 2 through `currentPlayer`.
+4. `CoopSwap` puts P1 back.
+5. If `prgBankB` changed, `$A000` is mapped back in race-free order (`$8000`=7, `prgBankB`, `$8001`).
+
+With these steps the window leaves the banks unchanged. `$8000` is back to the caller's bank because `RunBankedSub`
+restores `bankedSubRetBank`, and `$A000` is back to the caller's bank because of step 5. The intro window also animates
+slot 39 on odd ticks (`CoopAnimateP2`), because `AnimateObjects` does not run during the intro. `DrawObjects`, which
+comes next there, maps its own bank. `CoopAnimateP2` maps `AnimTable` with the same race-free sequence
+`AnimateObjects` uses. That is the Rule 9 order and needs no `nmiProgress` retry, because it is a command-7 switch.
+
+### Spawn and init, and what happens between rounds
+- **New game** (`CoopNewGame`, `coopMode` = 1 only): `ctxOther` is zeroed, then P2 gets P1's starting lives (3) and hearts (1).
+- **Every round start** (`CoopRoundStartP2`): `CODE_0884CF` runs once per round start, on the tick P1 reaches (X=$1F,
+  Y=$C4), because the block then replaces `nmiBankedSub`. Every path into a round goes through it: the normal descent
+  `CODE_088342`, the adventure start, the boss-cave fade `CODE_059D9A` (rounds 20/40), and a continue. The hook:
+  1. pushes `roundFlags` and `wideScrollDir`;
+  2. swaps P2 in and runs P1's own per-life init `CODE_08812A` for P2;
+  3. swaps back and restores those two shared bytes (they are the only shared bytes `CODE_08812A` writes);
+  4. runs `CoopSpawnP2`. P2 keeps its lives and hearts, because `CODE_08812A` does not touch them.
+- **CoopSpawnP2**: Y = P1's Y. X = 256 - P1's X, clamped to [$18,$E8]; P1 always starts at $1F, so P2 always starts at
+  $E1 and the clamp never fires. The rest of slot 39 is set up like `CODE_0880C8` sets up slot 0: `objState` 1, anim
+  `anPlayerL` (facing left, matching `playerDir` = 1 from `CODE_08812A`), `objChrSlot`/`objAttr`/progress/timer 0,
+  `objChrBank`/`objImgOfs` copied from P1, then one animation step for the first frame.
+- **Between rounds**: `CODE_0FE36B` deactivates P2. It runs at every round setup (`CODE_088000`), new game, continue,
+  ending, title, and bonus-round start. So P2 is not in the descent, the walk-in, the bonus games, or the
+  continue/ending screens. The P2 context (lives, hearts) survives in `ctxOther`. Nothing despawns slot 39 between the
+  spawn and the next `CODE_0FE36B`: the slot-39 write trace below shows no other writer. Other mass-despawn loops:
+  `DespawnNonPlayerObjects` (only from `StartBonusRound`, after `CODE_0FE36B`), `CODE_079BE2` (end of a bonus game),
+  `CODE_079F52` (bonus game objAttr). P2 is already inactive at all three.
+
+### P2 visual identity: palette decision and a new CHR finding
+- **Palette: shared palette 0, no change; logged for Phase 9.** Sprite palette RAM over time and the `objAttr & 3`
+  histogram of live objects (`tmp/coop_scripts/p3/paltrace.py`, 7 co-op scenarios) show:
+  - palette 0 holds the player, every normal bubble, and the HUD icon;
+  - palettes 1 and 2 hold enemies in every round;
+  - palette 3 holds enemies, special bubbles or projectiles in rounds 5, 17, 20, 22, 50 and 64 (e.g. r50 "bubble3"
+    7830 samples, r64 "proj3" 7458).
+
+  No palette is free in every round. Palette 0 is `$0F,$0F,$30,PlayerSpecificColor[currentPlayer]` (`$2A` P1, `$21` P2)
+  and the bubbles share it, so changing colour 3 would recolour the bubbles too. P2 therefore looks exactly like P1.
+- **CHR slot sharing (new, Phase 9).** Both players use `objChrSlot` 0. `DrawObjects` stores each drawn object's
+  `objChrBank` into `chrBankC`, and the last one drawn wins. The player frames span 1 KB banks $40-$4F; two different
+  banks share only 23-45 of their 64 tiles. During play ticks the two players' `objChrBank` differed on 24611 of 29876
+  ticks (82 %). Draw order alternates (even ticks: slot 0 then 39; odd ticks: reverse), so on those ticks either player
+  can be drawn with some tiles from the other one's bank. That shows up as a flicker of wrong tiles, alternating between
+  the players. In the screenshots both dragons are always recognisable.
+
+  There is no free sprite CHR slot either. A run over 9 rounds shows slot 0 = player and bubbles, slots 1-3 = enemies,
+  projectiles and the icon, with round-specific banks. A fix needs either a CHR-bank arrangement (for example copying
+  the player banks so that both frames fit in 2 KB) or drawing only one player on conflict ticks. Not fixed here.
+
+### Bubble slot budget: per-site table
+In co-op the bubble slots are 20..38 (index 0..18). The bounds below became `bubbleSlotEnd`/`bubbleSlotLast`, which are
+20/19 when P2 is not active, so 1P behaves as before (`regress` 12/12). Search: every `CPX/CPY/CMP/LDX/LDY` with
+#19/#20/#21/#38/#39/#40/$13/$14/$15/$26/$27/$28/OSLOT_* in all banks (64 hits after round-number compares were
+dropped); every indexed write to `objState` / `objState+OSLOT_BUBBLE`; every `bubbleSpawnSlot` writer. A dynamic
+slot-39 read/write trace confirmed the result (verification 2).
+
+| # | site (US code) | bank | loop | change |
+|---|----------------|------|------|--------|
+| 1 | `UpdateBubbles` empty-slot fast step after `CODE_098008` (perf) | 9 | bubble 0..19 | `CPX bubbleSlotEnd` |
+| 2 | `UpdateBubbles` tail `CODE_09815D` | 9 | same loop, 2nd end | `CPX bubbleSlotEnd` |
+| 3 | `UpdateBubbles` round-bubble generator `CODE_098182` (slots 14..19) | 9 | free-slot search | `CPX bubbleSlotEnd` |
+| 4 | `CODE_0988EC/EE` (water flood bubble) | 9 | free-slot search | `CPY bubbleSlotEnd` |
+| 5 | `HandleShooting` `@findslot` (3-tier) | 9 | free/expiring/risen | `CPX bubbleSlotEnd`; the tiers only pick indexes from this loop |
+| 6 | `SpawnExtraBubbles` `@findslot` | 9 | `shootSlot` cursor | `CMP bubbleSlotEnd` (the cursor starts below the bound) |
+| 7 | `BubblesTravelUpdate` outer step `CODE_099DDF` (perf) | 9 | pairs, self | `CPX bubbleSlotLast` |
+| 8 | `BubblesTravelUpdate` inner wrap `CODE_099E6E` | 9 | pairs, other | `CPX bubbleSlotEnd` |
+| 9 | `BubblesTravelUpdate` outer step `CODE_099E88` (perf) | 9 | pairs, self | `CPX bubbleSlotLast` |
+| 10 | `CollectHolyCup` `CODE_078AE3` | 7 | pop enemy bubbles | `CPX bubbleSlotEnd` |
+| 11 | boss defeat bubble clear `CODE_08928E` | 8 | clear all bubbles | `CPY bubbleSlotEnd` (keeps P2) |
+| 12 | round-20 shifter `CODE_0FFDD9` | F | objects 18,1,20..39 | slot 39 with P2 active: shifted, never despawned |
+
+Notes on the BubblesTravelUpdate rows (7-9): the original outer loop never treats slot 19 as "self" (it exits at 19).
+With 18/19 the co-op loop likewise skips the last bubble slot (18) as self, and X at the exit is not used afterwards.
+
+Decided unchanged:
+- `BubblesTravelUpdate` `@clear` (bubbleDir 0..19): a bubble-indexed array; index 19 is unused in co-op.
+- `ReplaceBubble`, `PopBubble`: the slot comes from the caller's bounded loop.
+- `CODE_0FFAA3`/`CODE_0FFAB9`/`CODE_0FFB0C` and bank B `CODE_0B9630`: they use `shootInitialSlot`, which comes from the
+  bounded `HandleShooting`.
+- `SpawnBubble`/`SpawnBubbleVariant`: the only `bubbleSpawnSlot` writers are `HandleShooting`, `SpawnExtraBubbles`,
+  `SpawnAdventureStartBubble` (title) and `StartBonusRound` (P2 inactive).
+- `AnimateObjects` (20..39) and `DrawObjects` (0..39): kept as decided (D4).
+- `AnimateNonBubbles` (0..19): no change needed.
+- Title, cutscene and continue loops in bank 5, and the pause object copy `StorePauseObj` (slot 1 only): P2 is not
+  involved.
+- `CODE_088AA2` (bank 8: P1 falls below Y $E8 in a boss/wide round, so `wideHScroll` is reset and objY of slots
+  18, 20..39 is cleared): this also sets P2's Y to 0 (teleport to the top), which is not memory corruption. Logged for
+  Phase 8.
+- Freeze effects (`enemyFrozenCycles`): enemies only.
+
+### Review of the earlier work: findings and fixes
+- **Bank leak out of the P2 window (fixed).** The old `CoopP2Window` tail-called `JMP CoopSwap` and left `$A000` at
+  whatever P2's player update mapped last. `UpdateBubbles` (odd tick) and `AnimateNonBubbles` (even tick) then ran with
+  a different `$A000` bank than in 1P. Measured: P2's update changed `prgBankB` in 28246 of 29876 windows. The window
+  now saves `prgBankB` and re-maps it race-free (step 5 above).
+- **P2 deactivate sites incomplete (fixed).** There were two hooks: after `CODE_0FE36B` in `CODE_088033`, and in
+  `DespawnNonPlayerObjects`. Continue, ending, title and new game also despawn everything through `CODE_0FE36B`, but
+  left `coopP2Active` = $80 and the budget at 19. Both bank-8 hooks were replaced by one hook at the top of
+  `CODE_0FE36B`, which frees 6 B in bank 8 (now 12 B free).
+- **Shared side effects of P2's init (made robust).** `CODE_08812A` writes `wideScrollDir` and `roundFlags &= 7`. These
+  were no-ops at the hook point, but nothing guaranteed that. They are now saved and restored around the call.
+- Checked, no change needed:
+  - Flags after the `BIT/BPL` gates: the next instruction is always a `JSR` or reloads A. `CODE_099796` is a branch
+    target, and the gate sits after the label, so both paths go through it.
+  - Shifter `BIT` path: falls into `LDA objState,X`, which sets the flags again.
+  - `AnimateObjectsFromX`: the label is inserted after `LDX #20`. Every cheap local (`@checkobj`, `@waiting`,
+    `@nextobj`, `@read`, `@newimg`) is defined and referenced after the new global label, and nothing between
+    `AnimateObjects` and it references a cheap local. The 1P code bytes are unchanged (`regress` passes).
+  - JP side of every `.ifdef REGION_JP/.else` pair: JP md5 unchanged.
+  - CRLF in all edited files.
+  - `CoopNewGame`: A/X are not live after the hook.
+  - `CoopSpawnP2` mirror/clamp/facing: correct.
+- **P1 death, a correction to the brief.** In the 1P flow (`multiplayer` != 1), losing a life does not restart the
+  round. `PlayerHandlerDead` respawns the player in place at (31,193) with 120 i-frames (`CODE_0595E3`). A round
+  restart only happens through game over and continue (or in alternating 2P, `CODE_05962D`). Both work in co-op:
+  - 47 P1 in-place respawns with P2 staying in the round;
+  - `cgo` went through game over and continue with 3 round setups and 3 P2 spawns.
+- **P2 can die in Phase 3 (new).** P2 has no enemy/projectile collisions yet, but it takes terrain damage inside its
+  own player update, through the round's terrain handler (for example `CODE_0FF7AB` writes `ram_007B` = $80 in round
+  50). P2 then runs the 1P death flow inside its window: lose a life, respawn in place at (31,193), 120 i-frames. That
+  happened 14 times in c22, c40 and c50, and the P2 blink path ran 691 times.
+
+  Shared bytes the death flow writes: `bubblesLifespanLevel` (decremented), `livesCurrentPos |= 3`, `soundTrigger`,
+  `wideHScroll` = 1 in round 20. The other writes go to P2's own context or to slot 0 while P2 is swapped in. No
+  memory corruption.
+
+  At 0 lives P2 stays in the dead state (the round's game-over check only looks at the resident P1). With
+  `multiplayer` = 1 together with co-op (not reachable before the Phase 7 menu), P2's death would run the
+  alternating-2P swap `CODE_05962D` and restart the round. Logged for Phase 7.
+
+### Verification
+1. `build c3` -> `regress base c3 --reuse-base`: **REGRESSION PASS, 12/12** (coopMode = 0).
+2. `run c3 --scen c01 c05 c17 c20 c22 c50 c64 --shots 1300 1800 2400`: all 7 complete, 3000 ticks, no TIMEOUT. The
+   screenshots show two dragons in separate places.
+
+   Checker `tmp/coop_scripts/p3/p3verify.py`, Lua over each co-op run, plus local extras c40 (boss), c70 (special),
+   cnat (natural start, round 1->2) and cgo (natural, finite lives: game over/continue). Totals over the 11 runs:
+   - play ticks 29876; P2 active in slot 39 on 29876 of them; `p2_missing` 0, `p2_hidden` 0;
+   - distinct P2 X per run 50-252 (1723 in total), so P2 moves under pad 2;
+   - P2 `objState` always 01; `ctxOther_playerState` only 0 or 3 (`p2_state_bad` 0);
+   - bubble code on bubble index 19 while P2 is active, or `shootSlot`/`shootInitialSlot` := 19, or
+     `bubbleSpawnSlot` := 39: **0**;
+   - `coopResident` != 0 at a tick end: **0**;
+   - round setups 14, P2 spawns 14, a play tick after a setup without a spawn: **0**.
+
+   Slot-39 writers while P2 is active:
+   - `CoopSwap`;
+   - `AnimateObjectsFromX` (P2's animation);
+   - `CoopP2BlinkRestore`;
+   - the round-20 shifter (objX only, by design);
+   - `bubbleDir[19]` by the `@clear` loop.
+
+   Slot-39 readers: `DrawObjects`, `AnimateObjects`, `CoopSwap`, blink, the shifter. The other reads are 6502 dummy
+   reads of page-crossing indexed enemy accesses (`CODE_0B8012`, `CODE_0B8075`, `CODE_0B9CB3`).
+3. Performance. `stats c3 --vs c2`, 12 default 1P scenarios: play mean +51..+134 cycles per tick (+0.53 % in total),
+   lag +0..+11 frames per scenario.
+
+   Co-op, `stats c3 --scen <7> --vs c2`, where c2 = the 1P baseline with pad 2 inert, re-run here:
+
+   | scen | play mean | d_play | d_play% | d_p95 | lag frames | d_lag |
+   |------|-----------|--------|---------|-------|------------|-------|
+   | c01 | 19102 | +4389 | 29.8 % | +4353 | 30 | +29 |
+   | c05 | 19587 | +4406 | 29.0 % | +4368 | 0 | 0 |
+   | c17 | 30576 | +5295 | 20.9 % | +3640 | 739 | +243 |
+   | c20 | 15234 | +4425 | 40.9 % | +4558 | 0 | 0 |
+   | c22 | 18400 | +4272 | 30.2 % | +4315 | 1 | +1 |
+   | c50 | 24641 | +4406 | 21.8 % | +4591 | 140 | +64 |
+   | c64 | 25665 | +4306 | 20.2 % | +5513 | 331 | +325 |
+
+   Window cost, from the window's first instruction to the instruction after its `JSR`: mean 3668-4329 cycles, max 5023. That is 2 x 707 for the swaps,
+   about 2.2-2.9k for P2's player update, and the bank restore. The rest of the roughly 4.4k per tick is drawing and
+   animating P2's object.
+4. `build c3f --define COOP_FORCE`: builds; `coopMode` = 1 from reset. ROM: `tmp/builds/c3f/rom.nes`.
+5. JP: `8d2855ea5505bf094b7a40155caa92b4`, unchanged.
+6. Coverage (`run c3 --profile` over the 7 co-op scenarios plus natural, r01, r20; `cover`). Executed:
+   - every instruction of `CoopP2Window` (14747), `CoopP2WindowIntro` (377), `CoopAnimateP2` (195),
+     `CoopRoundStartP2` (7 co-op + 4 `coopMode` = 0 early-outs), `CoopSpawnP2`, `CoopP2Deactivate` (31),
+     `CoopNewGame` (7 + 3 early-outs) and its clear loop, both blink routines (hide branch 691);
+   - the gates in `RoundUpdate` and `CODE_0B8196`;
+   - the shifter exemption `BIT` (4);
+   - slot-budget sites 1-5 and 7-9.
+
+   Not executed, argued instead:
+   - the spawn clamp branches: P1 always starts at X=$1F;
+   - sites 6, 10 and 11 (`SpawnExtraBubbles` @findslot, `CollectHolyCup`, boss bubble clear): each is a one-operand
+     change of a compare whose other operand is the same as before, and the loop index starts below the new bound.
+
+### Harness note
+The Mesen test runner stops a script after about 100 s wall time unless `--timeout=N` is passed. It then exits without
+running `finish`. The plain `perf.py` runs finish well within that, but a slow instrumented run (heavy Lua callbacks,
+or several parallel jobs) ends early: the CSV just stops, with no TIMEOUT line. `tmp/coop_scripts/p3/coophelp.py` now
+passes `--timeout=1800`. `tools/perf/perf.py` does not; this was not needed so far, and per the rules it is not
+changed here.
+
+### Known issues for later phases
+- **Phase 4**: P2 shot requests (`shootTrigger`, `shootQueuedBubbles`) stay in P2's context with no consumer. Harmless:
+  only `HandleShooting` reads them, and it only runs with P1 resident.
+- **Phase 5**: P2 has no enemy/projectile/bubble collisions.
+- **Phase 6**: enemies target P1 only.
+- **Phase 7**:
+  - P2 death runs the 1P in-place respawn inside the window, with shared writes to `bubblesLifespanLevel`,
+    `livesCurrentPos` and `wideHScroll` (round 20);
+  - P2 at 0 lives stays dead;
+  - continue does not reset P2's lives or hearts (`CoopNewGame` runs only at a new game);
+  - with `multiplayer` = 1, P2's death would run the alternating swap;
+  - the HUD shows P1 only.
+- **Phase 8**: the camera follows P1 only (`CODE_0788CC` runs before the window, for P1); P2 can be shifted off-screen
+  in round 20 (no despawn); `CODE_088AA2` zeroes P2's Y.
+- **Phase 9**:
+  - shared sprite palette 0 (P2 identical to P1);
+  - CHR slot 0 conflict between the two players (82 % of play ticks, wrong tiles alternating between players);
+  - the pause hides P2, because `DrawObjects` draws only slots < `ram_0475` = 2 while paused.
+- **Performance**: about 4.4k cycles per co-op tick. Heavy rounds lag more (c17 +243, c64 +325 lag frames per 3000
+  ticks). Phases 4/5 add to the same window.
