@@ -2577,12 +2577,17 @@ ProjOp_Set:
 	JMP UpdateProjectiles_OpRet				;- - - - - - 0x012F9D 04:8F8D: 4C
 
 ProjOp_HomingPlayer:
+.ifndef REGION_JP
+	JSR CoopProjTarget			;co-op 6a: Y = slot of the nearest targetable player (1P: 0)
+.endif
 	TXA							;C - - - - - 0x012FA0 04:8F90: 8A
 	PHA							;C - - - - - 0x012FA1 04:8F91: 48
 	CLC							;C - - - - - 0x012FA2 04:8F92: 18
 	ADC #$01					;C - - - - - 0x012FA3 04:8F93: 69 01
 	TAX							;C - - - - - 0x012FA5 04:8F95: AA
+.ifdef REGION_JP
 	LDY #$00					;C - - - - - 0x012FA6 04:8F96: A0 00
+.endif
 	JSR ProjGetNewHomingAngle				;C - - - - - 0x012FA8 04:8F98: 20 C2 93
 
 	PLA							;C - - - - - 0x012FAB 04:8F9B: 68
@@ -2627,9 +2632,16 @@ ProjOp_GetCount:
 	JMP UpdateProjectiles_OpRet				;C - - - - - 0x012FE7 04:8FD7: 4C F6 8D
 
 ProjOp_GetPlayerDist:
+.ifndef REGION_JP
+	JSR CoopProjTarget			;co-op 6a: targetX/Y = nearest targetable player (1P: slot 0)
+.endif
 	LDA objX+OSLOT_PROJ,X				;C - - - - - 0x012FEA 04:8FDA: BD B4 05
 	SEC							;C - - - - - 0x012FED 04:8FDD: 38
+.ifdef REGION_JP
 	SBC objX				;C - - - - - 0x012FEE 04:8FDE: ED B3 05
+.else
+	SBC targetX
+.endif
 	STA scratch0				;C - - - - - 0x012FF1 04:8FE1: 85 00
 	BCS CODE_098FEA				;C - - - - - 0x012FF3 04:8FE3: B0 05
 		LDA #$00					;C - - - - - 0x012FF5 04:8FE5: A9 00
@@ -2640,7 +2652,11 @@ CODE_098FEA:
 
 	LDA objY+OSLOT_PROJ,X				;C - - - - - 0x012FFC 04:8FEC: BD 8C 05
 	SEC							;C - - - - - 0x012FFF 04:8FEF: 38
+.ifdef REGION_JP
 	SBC objY				;C - - - - - 0x013000 04:8FF0: ED 8B 05
+.else
+	SBC targetY
+.endif
 	STA scratch0				;C - - - - - 0x013003 04:8FF3: 85 00
 	BCS CODE_098FFC				;C - - - - - 0x013005 04:8FF5: B0 05
 		LDA #$00					;C - - - - - 0x013007 04:8FF7: A9 00
@@ -3216,9 +3232,16 @@ ProjOp_Parent:
 	JMP UpdateProjectiles_OpRet				;C - - - - - 0x01336E 04:935E: 4C F6 8D
 
 ProjOp_GetPlayerSide:
+.ifndef REGION_JP
+	JSR CoopProjTarget			;co-op 6a: targetX/Y = nearest targetable player (1P: slot 0)
+.endif
 	LDY #$01					;C - - - - - 0x013371 04:9361: A0 01
 	LDA objX+OSLOT_PROJ,X				;C - - - - - 0x013373 04:9363: BD B4 05
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x013376 04:9366: CD B3 05
+.else
+	CMP targetX
+.endif
 	BCC CODE_09936D				;C - - - - - 0x013379 04:9369: 90 02
 		LDY #$00					;C - - - - - 0x01337B 04:936B: A0 00
 CODE_09936D:
@@ -3226,7 +3249,11 @@ CODE_09936D:
 
 	LDY #$01					;C - - - - - 0x01337F 04:936F: A0 01
 	LDA objY+OSLOT_PROJ,X				;C - - - - - 0x013381 04:9371: BD 8C 05
+.ifdef REGION_JP
 	CMP objY				;C - - - - - 0x013384 04:9374: CD 8B 05
+.else
+	CMP targetY
+.endif
 	BCC CODE_09937B				;C - - - - - 0x013387 04:9377: 90 02
 		LDY #$00					;C - - - - - 0x013389 04:9379: A0 00
 CODE_09937B:

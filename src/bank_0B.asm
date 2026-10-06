@@ -311,6 +311,9 @@ CODE_0B81C0:
 	STA bankedSubRetBank				;C - - - - - 0x0161EE 05:81DE: 85 58
 	JSR RunBankedSub				;C - - - - - 0x0161F0 05:81E0: 20 72 E7
 CODE_0B81E3:
+.ifndef REGION_JP
+	JSR CoopTargetTick			;co-op 6a: targetX/Y = P1 once per tick unless P2 is in the round
+.endif
 	LDX #$00					;C - - - - - 0x0161F3 05:81E3: A2 00
 	STX ram_00CB				;C - - - - - 0x0161F5 05:81E5: 86 CB
 	STX untrappedEnemies				;C - - - - - 0x0161F7 05:81E7: 86 CC
@@ -372,6 +375,12 @@ CODE_0B8216:
 	CMP #$0C					;C - - - - - 0x016258 05:8248: C9 0C
 	BEQ CODE_0B82A1				;C - - - - - 0x01625A 05:824A: F0 55
 
+.ifndef REGION_JP
+	BIT coopP2Active			;co-op 6a: P2 in the round -> nearest targetable player for this enemy
+	BPL :+
+		JSR CoopSelectTarget	;(X = enemy index; keeps X/Y)
+:
+.endif
 	LDA enemyType,X				;C - - - - - 0x01625C 05:824C: B5 98
 	ASL							;C - - - - - 0x01625E 05:824E: 0A
 	CMP #ENEMY_RUCKUS*2					;C - - - - - 0x01625F 05:824F: C9 32
@@ -898,7 +907,11 @@ CODE_0B859D:
 	CMP #$04					;C - - - - - 0x0165B2 05:85A2: C9 04
 	BCS CODE_0B85C5				;C - - - - - 0x0165B4 05:85A4: B0 1F
 		LDY enemyType,X				;C - - - - - 0x0165B6 05:85A6: B4 98
+.ifdef REGION_JP
 		LDA objY				;C - - - - - 0x0165B8 05:85A8: AD 8B 05
+.else
+		LDA targetY				;co-op 6a: targeted player
+.endif
 		CLC							;C - - - - - 0x0165BB 05:85AB: 18
 		ADC DATA_0CBD08,Y			;C - - - - - 0x0165BC 05:85AC: 79 08 BD
 		STA scratch0				;C - - - - - 0x0165BF 05:85AF: 85 00
@@ -968,7 +981,11 @@ CODE_0B8611:
 	CMP DATA_0B9874,X			;C - - - - - 0x016623 05:8613: DD 74 98
 	BNE CODE_0B8632				;C - - - - - 0x016626 05:8616: D0 1A
 		LDY #$02					;C - - - - - 0x016628 05:8618: A0 02
+.ifdef REGION_JP
 		LDA objX				;C - - - - - 0x01662A 05:861A: AD B3 05
+.else
+		LDA targetX				;co-op 6a: targeted player
+.endif
 		CMP objX+OSLOT_ENEMY,X				;C - - - - - 0x01662D 05:861D: DD BC 05
 		BCS CODE_0B8624				;C - - - - - 0x016630 05:8620: B0 02
 			LDY #$01					;C - - - - - 0x016632 05:8622: A0 01
@@ -1234,7 +1251,11 @@ CODE_0B87CE:
 	EOR #$FF					;C - - - - - 0x0167E0 05:87D0: 49 FF
 	STA ram_00D5				;C - - - - - 0x0167E2 05:87D2: 85 D5
 	INC ram_00D5				;C - - - - - 0x0167E4 05:87D4: E6 D5
+.ifdef REGION_JP
 	LDA objY				;C - - - - - 0x0167E6 05:87D6: AD 8B 05
+.else
+	LDA targetY				;co-op 6a: targeted player
+.endif
 	CLC							;C - - - - - 0x0167E9 05:87D9: 18
 	ADC #$03					;C - - - - - 0x0167EA 05:87DA: 69 03
 	CMP objY+OSLOT_ENEMY,X				;C - - - - - 0x0167EC 05:87DC: DD 94 05
@@ -1252,13 +1273,21 @@ CODE_0B87CE:
 		STA ram_00CA				;C - - - - - 0x016805 05:87F5: 85 CA
 		JMP CODE_0B8822				;C - - - - - 0x016807 05:87F7: 4C 22 88
 CODE_0B87FA:
+.ifdef REGION_JP
 	LDA objY				;C - - - - - 0x01680A 05:87FA: AD 8B 05
+.else
+	LDA targetY				;co-op 6a: targeted player
+.endif
 	CMP objY+OSLOT_ENEMY,X				;C - - - - - 0x01680D 05:87FD: DD 94 05
 	BNE CODE_0B881E				;C - - - - - 0x016810 05:8800: D0 1C
 		;Unreached
 		LDA ram_00AC,X				;- - - - - - 0x016812 05:8802: B5
 		BNE CODE_0B8822				;- - - - - - 0x016814 05:8804: D0
+.ifdef REGION_JP
 			LDA objX				;- - - - - - 0x016816 05:8806: AD
+.else
+			LDA targetX				;co-op 6a: targeted player
+.endif
 			CMP objX+OSLOT_ENEMY,X				;- - - - - - 0x016819 05:8809: DD
 			BCS CODE_0B8813				;- - - - - - 0x01681C 05:880C: B0
 				LDA #$01					;- - - - - - 0x01681E 05:880E: A9
@@ -1909,13 +1938,21 @@ CODE_0B8C01:
 		JMP CODE_0B8CE2				;C - - - - - 0x016C22 05:8C12: 4C E2 8C
 CODE_0B8C15:
 	LDA objY+OSLOT_ENEMY,X				;C - - - - - 0x016C25 05:8C15: BD 94 05
+.ifdef REGION_JP
 	CMP objY				;C - - - - - 0x016C28 05:8C18: CD 8B 05
+.else
+	CMP targetY				;co-op 6a: targeted player
+.endif
 	BCS CODE_0B8C20				;C - - - - - 0x016C2B 05:8C1B: B0 03
 		JMP CODE_0B8CDA				;C - - - - - 0x016C2D 05:8C1D: 4C DA 8C
 CODE_0B8C20:
 	LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x016C30 05:8C20: BD BC 05
 	SEC							;C - - - - - 0x016C33 05:8C23: 38
+.ifdef REGION_JP
 	SBC objX				;C - - - - - 0x016C34 05:8C24: ED B3 05
+.else
+	SBC targetX				;co-op 6a: targeted player
+.endif
 	BCS CODE_0B8C2E				;C - - - - - 0x016C37 05:8C27: B0 05
 		EOR #$FF					;C - - - - - 0x016C39 05:8C29: 49 FF
 		CLC							;C - - - - - 0x016C3B 05:8C2B: 18
@@ -1964,24 +2001,32 @@ CODE_0B8C74:
 	BNE CODE_0B8CB6				;C - - - - - 0x016C86 05:8C76: D0 3E
 
 .ifndef REGION_JP
-	LDA objY				;C - - - - - 0x016C88 05:8C78: AD 8B 05
+	LDA targetY				;co-op 6a: targeted player
 	CMP #224					;C - - - - - 0x016C8B 05:8C7B: C9 E0
 	BCC CODE_0B8C84				;C - - - - - 0x016C8D 05:8C7D: 90 05
 		;Unreached
 		LDA #0					;- - - - - - 0x016C8F 05:8C7F: A9
-		STA objY				;- - - - - - 0x016C91 05:8C81: 8D
+		JSR CoopSetTargetY			;co-op 6a: targeted player (A = 0)
 .endif
 CODE_0B8C84:
 	LDA #$00					;C - - - - - 0x016C94 05:8C84: A9 00
 	STA objAnimProgress+OSLOT_ENEMY,X				;C - - - - - 0x016C96 05:8C86: 9D D4 06
 	STA objAnimTimer+OSLOT_ENEMY,X				;C - - - - - 0x016C99 05:8C89: 9D AC 06
 	LDA objY+OSLOT_ENEMY,X				;C - - - - - 0x016C9C 05:8C8C: BD 94 05
+.ifdef REGION_JP
 	CMP objY				;C - - - - - 0x016C9F 05:8C8F: CD 8B 05
+.else
+	CMP targetY				;co-op 6a: targeted player
+.endif
 	BCC CODE_0B8CA1				;C - - - - - 0x016CA2 05:8C92: 90 0D
 		SBC #$06					;C - - - - - 0x016CA4 05:8C94: E9 06
 		STA objY+OSLOT_ENEMY,X				;C - - - - - 0x016CA6 05:8C96: 9D 94 05
 		SEC							;C - - - - - 0x016CA9 05:8C99: 38
+.ifdef REGION_JP
 		SBC objY				;C - - - - - 0x016CAA 05:8C9A: ED 8B 05
+.else
+		SBC targetY				;co-op 6a: targeted player
+.endif
 		CMP #$10					;C - - - - - 0x016CAD 05:8C9D: C9 10
 		BCS CODE_0B8CB3				;C - - - - - 0x016CAF 05:8C9F: B0 12
 CODE_0B8CA1:
@@ -2719,7 +2764,11 @@ CODE_0B91A1:
 	CLC							;C - - - - - 0x0171B4 05:91A4: 18
 	ADC #$10					;C - - - - - 0x0171B5 05:91A5: 69 10
 	SEC							;C - - - - - 0x0171B7 05:91A7: 38
+.ifdef REGION_JP
 	SBC objY				;C - - - - - 0x0171B8 05:91A8: ED 8B 05
+.else
+	SBC targetY				;co-op 6a: targeted player
+.endif
 	BCC CODE_0B91E5				;C - - - - - 0x0171BB 05:91AB: 90 38
 	CMP #$18					;C - - - - - 0x0171BD 05:91AD: C9 18
 	BCS CODE_0B91E5				;C - - - - - 0x0171BF 05:91AF: B0 34
@@ -2728,11 +2777,19 @@ CODE_0B91A1:
 		BNE CODE_0B91C3				;C - - - - - 0x0171C5 05:91B5: D0 0C
 			LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x0171C7 05:91B7: BD BC 05
 			SEC							;C - - - - - 0x0171CA 05:91BA: 38
+.ifdef REGION_JP
 			SBC objX				;C - - - - - 0x0171CB 05:91BB: ED B3 05
+.else
+			SBC targetX				;co-op 6a: targeted player
+.endif
 			BCC CODE_0B91E5				;C - - - - - 0x0171CE 05:91BE: 90 25
 			JMP CODE_0B91CC				;C - - - - - 0x0171D0 05:91C0: 4C CC 91
 CODE_0B91C3:
+.ifdef REGION_JP
 	LDA objX				;C - - - - - 0x0171D3 05:91C3: AD B3 05
+.else
+	LDA targetX				;co-op 6a: targeted player
+.endif
 	SEC							;C - - - - - 0x0171D6 05:91C6: 38
 	SBC objX+OSLOT_ENEMY,X				;C - - - - - 0x0171D7 05:91C7: FD BC 05
 	BCC CODE_0B91E5				;C - - - - - 0x0171DA 05:91CA: 90 19
@@ -2770,7 +2827,11 @@ CODE_0B91EC:
 	CLC							;C - - - - - 0x017206 05:91F6: 18
 	ADC #$1C					;C - - - - - 0x017207 05:91F7: 69 1C
 	SEC							;C - - - - - 0x017209 05:91F9: 38
+.ifdef REGION_JP
 	SBC objY				;C - - - - - 0x01720A 05:91FA: ED 8B 05
+.else
+	SBC targetY				;co-op 6a: targeted player
+.endif
 	BCS CODE_0B9203				;C - - - - - 0x01720D 05:91FD: B0 04
 		EOR #$FF					;C - - - - - 0x01720F 05:91FF: 49 FF
 		ADC #$01					;C - - - - - 0x017211 05:9201: 69 01
@@ -2784,29 +2845,53 @@ CODE_0B9203:
 	LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x01721D 05:920D: BD BC 05
 	CLC							;C - - - - - 0x017220 05:9210: 18
 	ADC DATA_0B925C,Y			;C - - - - - 0x017221 05:9211: 79 5C 92
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x017224 05:9214: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCS CODE_0B9258				;C - - - - - 0x017227 05:9217: B0 3F
 
 	LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x017229 05:9219: BD BC 05
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x01722C 05:921C: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCC CODE_0B9258				;C - - - - - 0x01722F 05:921F: 90 37
 
 	LDA #$80					;C - - - - - 0x017231 05:9221: A9 80
+.ifdef REGION_JP
 	STA playerDmgType				;C - - - - - 0x017233 05:9223: 85 7C
+.else
+	JSR CoopDamageTarget			;co-op 6a: targeted player (P1: playerDmgType, P2: its shadow)
+.endif
 	JMP CODE_0B9258				;C - - - - - 0x017235 05:9225: 4C 58 92
 CODE_0B9228:
 	LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x017238 05:9228: BD BC 05
 	CLC							;C - - - - - 0x01723B 05:922B: 18
 	ADC DATA_0B925C,Y			;C - - - - - 0x01723C 05:922C: 79 5C 92
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x01723F 05:922F: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCC CODE_0B9258				;C - - - - - 0x017242 05:9232: 90 24
 
 	LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x017244 05:9234: BD BC 05
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x017247 05:9237: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCS CODE_0B9258				;C - - - - - 0x01724A 05:923A: B0 1C
 
 	LDA #DMG_ENEMY					;C - - - - - 0x01724C 05:923C: A9 80
+.ifdef REGION_JP
 	STA playerDmgType				;C - - - - - 0x01724E 05:923E: 85 7C
+.else
+	JSR CoopDamageTarget			;co-op 6a: targeted player (P1: playerDmgType, P2: its shadow)
+.endif
 	JMP CODE_0B9258				;C - - - - - 0x017250 05:9240: 4C 58 92
 CODE_0B9243:
 	LDA objAnimProgress+OSLOT_ENEMY,X				;C - - - - - 0x017253 05:9243: BD D4 06
@@ -2921,7 +3006,11 @@ CODE_0B92F7:
 	LDY enemyMad,X				;C - - - - - 0x017307 05:92F7: B4 63
 	LDA #$00					;C - - - - - 0x017309 05:92F9: A9 00
 	STA scratch0				;C - - - - - 0x01730B 05:92FB: 85 00
+.ifdef REGION_JP
 	LDA objY				;C - - - - - 0x01730D 05:92FD: AD 8B 05
+.else
+	LDA targetY				;co-op 6a: targeted player
+.endif
 	CMP objY+OSLOT_ENEMY,X				;C - - - - - 0x017310 05:9300: DD 94 05
 	BEQ CODE_0B9314				;C - - - - - 0x017313 05:9303: F0 0F
 	BCC CODE_0B930F				;C - - - - - 0x017315 05:9305: 90 08
@@ -2934,7 +3023,11 @@ CODE_0B930F:
 CODE_0B9314:
 	LDA #$00					;C - - - - - 0x017324 05:9314: A9 00
 	STA ram_00D4				;C - - - - - 0x017326 05:9316: 85 D4
+.ifdef REGION_JP
 	LDA objX				;C - - - - - 0x017328 05:9318: AD B3 05
+.else
+	LDA targetX				;co-op 6a: targeted player
+.endif
 	CMP objX+OSLOT_ENEMY,X				;C - - - - - 0x01732B 05:931B: DD BC 05
 	BEQ CODE_0B9337				;C - - - - - 0x01732E 05:931E: F0 17
 	BCC CODE_0B932E				;C - - - - - 0x017330 05:9320: 90 0C
@@ -3264,7 +3357,11 @@ FlutterflyUpdate:
 	BEQ CODE_0B9571				;C - - - - - 0x01757C 05:956C: F0 03
 		JMP CODE_0B959E				;C - - - - - 0x01757E 05:956E: 4C 9E 95
 CODE_0B9571:
+.ifdef REGION_JP
 	LDA objX				;C - - - - - 0x017581 05:9571: AD B3 05
+.else
+	LDA targetX				;co-op 6a: targeted player
+.endif
 	CMP objX+OSLOT_ENEMY,X				;C - - - - - 0x017584 05:9574: DD BC 05
 	BEQ CODE_0B9586				;C - - - - - 0x017587 05:9577: F0 0D
 	BCC CODE_0B9582				;C - - - - - 0x017589 05:9579: 90 07
@@ -3275,7 +3372,11 @@ CODE_0B9582:
 	LDA #$FF					;C - - - - - 0x017592 05:9582: A9 FF
 	STA ram_00D4				;C - - - - - 0x017594 05:9584: 85 D4
 CODE_0B9586:
+.ifdef REGION_JP
 	LDA objY				;C - - - - - 0x017596 05:9586: AD 8B 05
+.else
+	LDA targetY				;co-op 6a: targeted player
+.endif
 	CMP objY+OSLOT_ENEMY,X				;C - - - - - 0x017599 05:9589: DD 94 05
 	BEQ CODE_0B959B				;C - - - - - 0x01759C 05:958C: F0 0D
 	BCC CODE_0B9597				;C - - - - - 0x01759E 05:958E: 90 07
@@ -3477,7 +3578,11 @@ CODE_0B96F3:
 		BCC CODE_0B9712				;C - - - - - 0x017709 05:96F9: 90 17
 		LDA #$00					;C - - - - - 0x01770B 05:96FB: A9 00
 		STA ram_00B6,X				;C - - - - - 0x01770D 05:96FD: 95 B6
+.ifdef REGION_JP
 		LDA objY				;C - - - - - 0x01770F 05:96FF: AD 8B 05
+.else
+		LDA targetY				;co-op 6a: targeted player
+.endif
 		CMP objY+OSLOT_ENEMY,X				;C - - - - - 0x017712 05:9702: DD 94 05
 		BCS CODE_0B9712				;C - - - - - 0x017715 05:9705: B0 0B
 			JSR CODE_0B981F				;C - - - - - 0x017717 05:9707: 20 1F 98
@@ -3652,7 +3757,11 @@ DATA_0B981D:
 	.byte anChuckerL_ID-1					;- D 0 - - - 0x01782E 05:981E: BE
 
 CODE_0B981F:
+.ifdef REGION_JP
 	LDA objY				;C - - - - - 0x01782F 05:981F: AD 8B 05
+.else
+	LDA targetY				;co-op 6a: targeted player
+.endif
 	SEC							;C - - - - - 0x017832 05:9822: 38
 	SBC objY+OSLOT_ENEMY,X				;C - - - - - 0x017833 05:9823: FD 94 05
 	BPL CODE_0B982D				;C - - - - - 0x017836 05:9826: 10 05
@@ -3670,7 +3779,11 @@ DATA_0B982E:
 
 CODE_0B9832:
 	LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x017842 05:9832: BD BC 05
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x017845 05:9835: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCC CODE_0B983E				;C - - - - - 0x017848 05:9838: 90 04
 		LDA #$01					;C - - - - - 0x01784A 05:983A: A9 01
 		BNE CODE_0B9840				;C - - - - - 0x01784C 05:983C: D0 02
@@ -4291,7 +4404,11 @@ CODE_0B9BAF:
 		LDA #$00					;C - - - - - 0x017BE0 05:9BD0: A9 00
 		STA scratch0				;C - - - - - 0x017BE2 05:9BD2: 85 00
 		LDA objY+OSLOT_ENEMY+8				;C - - - - - 0x017BE4 05:9BD4: AD 9C 05
+.ifdef REGION_JP
 		CMP objY				;C - - - - - 0x017BE7 05:9BD7: CD 8B 05
+.else
+		CMP targetY				;co-op 6a: targeted player
+.endif
 		ROR scratch0				;C - - - - - 0x017BEA 05:9BDA: 66 00
 		LDA scratch0				;C - - - - - 0x017BEC 05:9BDC: A5 00
 		ORA #$01					;C - - - - - 0x017BEE 05:9BDE: 09 01
@@ -4304,7 +4421,11 @@ CODE_0B9BE9:
 	LDA #$60					;C - - - - - 0x017BFB 05:9BEB: A9 60
 	STA ram_00B4				;C - - - - - 0x017BFD 05:9BED: 85 B4
 	LDA objX+OSLOT_ENEMY+8				;C - - - - - 0x017BFF 05:9BEF: AD C4 05
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x017C02 05:9BF2: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCS CODE_0B9BF8				;C - - - - - 0x017C05 05:9BF5: B0 01
 		INY							;C - - - - - 0x017C07 05:9BF7: C8
 CODE_0B9BF8:

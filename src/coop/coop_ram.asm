@@ -34,3 +34,11 @@ coopShotSwapped: .res 1         ; 1 = the shot bytes (shooting, shootInitialSlot
                                 ; shootSlot) are exchanged with their ctxOther copies: set by CoopCaptureOther when the
                                 ; non-resident player's bubble caught an enemy, undone before any swap (CoopShotRestore)
 coopP2SkipSlot: .res 1          ; bubble index CoopP2Shoot updated this tick ($FF = none): no P2 touch on it this tick
+
+; Phase 6a: enemy target selection (see docs/coop_notes.md, Phase 6a).
+targetX:        .res 1          ; X of the player the current enemy aims at (enemy AI reads this instead of objX)
+targetY:        .res 1          ; Y of that player (instead of objY)
+coopTarget:     .res 1          ; 0 = P1 (slot 0 / native vars), 1 = P2 (slot OSLOT_P2 / ctxOther_*); kept when no
+                                ; player is targetable. Set per even tick (P2 not active) or per enemy (P2 active).
+coopPos:        .res 2          ; CoopNearest input: X, Y of the enemy / projectile looking for a player
+coopDist:       .res 3          ; CoopNearest temporaries: slot 0's |dx|+|dy| (9 bits: lo, hi), slot OSLOT_P2's |dx|

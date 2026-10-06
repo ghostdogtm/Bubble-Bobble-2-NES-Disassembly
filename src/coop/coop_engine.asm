@@ -573,3 +573,195 @@ CoopP2BlinkRestore:
 	LDA coopP2SavedState
 	STA objState+OSLOT_P2
 	RTS
+
+; =============================================================================================
+; Phase 6a: enemy target selection (COOP_CODE2). The enemy AI (CODE_0B81B6, even tick) always runs
+; with P1 resident: P1 = slot 0 + native player vars, P2 = slot OSLOT_P2 + ctxOther_*. Enemy code reads
+; targetX / targetY instead of slot 0's objX / objY, and routes direct damage through CoopDamageTarget.
+;   P2 not in the round (1P, coopMode = 0): CoopTargetTick copies slot 0 once per even tick (coopTarget = 0),
+;     so every converted read sees exactly the value it read before.
+;   P2 in the round: CoopSelectTarget runs per enemy, before its behaviour, and picks the nearest
+;     targetable player by |dx| + |dy| (ties: P1). Targetable = playerState != PLAYER_STATE_DEAD (the only
+;     death/respawn state: the respawn sets state 0 in place). Neither targetable: coopTarget is kept and
+;     targetX/targetY are refreshed from that player.
+; =============================================================================================
+
+; CoopTargetTick: top of the enemy loop (CODE_0B81E3, bank B). Clobbers A.
+CoopTargetTick:
+	BIT coopP2Active
+	BMI @rts						;P2 in the round: CoopSelectTarget per enemy
+	LDA #$00
+	STA coopTarget
+	LDA objX
+	STA targetX
+	LDA objY
+	STA targetY
+@rts:
+	RTS
+
+; CoopSelectTarget: enemy loop, per live enemy before its behaviour (bank B, gated by coopP2Active).
+; X = enemy index (kept), Y kept.
+CoopSelectTarget:
+	TYA
+	PHA
+	LDA objX+OSLOT_ENEMY,X
+	STA coopPos
+	LDA objY+OSLOT_ENEMY,X
+	STA coopPos+1
+	JSR CoopNearest					;A = 0 / 1 / $FF (flags from A)
+	BPL :+
+	LDA coopTarget					;nobody targetable: keep the previous target
+:	STA coopTarget
+	BNE @p2
+	LDA objX
+	STA targetX
+	LDA objY
+	STA targetY
+	PLA
+	TAY
+	RTS
+@p2:
+	LDA objX+OSLOT_P2
+	STA targetX
+	LDA objY+OSLOT_P2
+	STA targetY
+	PLA
+	TAY
+	RTS
+
+; CoopProjTarget: projectile ops that aim at "the player" (bank 9: HomingPlayer, GetPlayerDist,
+; GetPlayerSide). X = projectile index (kept). Out: Y = slot of the nearest targetable player (0, or
+; OSLOT_P2; neither targetable: 0) and targetX/targetY = its position. Slot 0 is the resident player
+; (P2 while a projectile that touched P2 runs its ops), so the rule is symmetric. P2 not in the round: slot 0.
+CoopProjTarget:
+	LDY #$00
+	BIT coopP2Active
+	BPL @set
+	LDA objX+OSLOT_PROJ,X
+	STA coopPos
+	LDA objY+OSLOT_PROJ,X
+	STA coopPos+1
+	JSR CoopNearest
+	LDY #$00
+	CMP #$01
+	BNE @set
+	LDY #OSLOT_P2
+@set:
+	LDA objX,Y
+	STA targetX
+	LDA objY,Y
+	STA targetY
+	RTS
+
+; CoopNearest: nearest targetable player to (coopPos, coopPos+1). Candidates: slot 0 with the native
+; playerState, slot OSLOT_P2 with ctxOther_playerState (the caller has checked that P2 is in the round).
+; Out: A = 0 (slot 0), 1 (slot OSLOT_P2), $FF (neither targetable); N/Z from A. Keeps X, clobbers Y.
+.macro COOP_ABSDIFF m1, m2			;A = |m1 - m2| (8 bits), C undefined
+	LDA m1
+	SEC
+	SBC m2
+	BCS :+
+	EOR #$FF
+	ADC #$01						;(C = 0 here)
+:
+.endmacro
+
+CoopNearest:
+	LDY #$00						;Y = 1 (slot 0 targetable) + 2 (slot OSLOT_P2 targetable)
+	LDA playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ :+
+	INY
+:	LDA ctxOther_playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ :+
+	INY
+	INY
+:	CPY #$03
+	BEQ @both
+	DEY								;1 -> 0, 2 -> 1, 0 -> $FF
+	TYA
+	RTS
+@both:
+	COOP_ABSDIFF coopPos, objX
+	STA coopDist
+	COOP_ABSDIFF coopPos+1, objY
+	CLC
+	ADC coopDist
+	STA coopDist
+	LDA #$00
+	ROL A
+	STA coopDist+1					;slot 0: 9-bit distance
+	COOP_ABSDIFF coopPos, objX+OSLOT_P2
+	STA coopDist+2
+	COOP_ABSDIFF coopPos+1, objY+OSLOT_P2
+	CLC
+	ADC coopDist+2
+	TAY								;slot OSLOT_P2: lo in Y, hi from C
+	LDA #$00
+	ROL A
+	CMP coopDist+1
+	BCC @other						;hi below
+	BNE @first						;hi above
+	CPY coopDist
+	BCC @other						;lo below (equal: slot 0)
+@first:
+	LDA #$00
+	RTS
+@other:
+	LDA #$01
+	RTS
+
+; CoopDamageTarget: replaces STA playerDmgType in enemy code (Snagger). A = damage (kept, N/Z from A),
+; X/Y kept. P2's damage goes to its shadow byte and is consumed by P2's next player update.
+CoopDamageTarget:
+	PHA
+	LDA coopTarget
+	BNE @p2
+	PLA
+	STA playerDmgType
+	RTS
+@p2:
+	PLA
+	STA ctxOther_playerDmgType
+	RTS
+
+; CoopSetTargetY: replaces STA objY in enemy code that moves the targeted player (Needler, US-only
+; block, never reached in the original). A = new Y (kept), X/Y kept.
+CoopSetTargetY:
+	STA targetY
+	PHA
+	LDA coopTarget
+	BNE @p2
+	PLA
+	STA objY
+	RTS
+@p2:
+	PLA
+	STA objY+OSLOT_P2
+	RTS
+
+; CoopSetP1Y / CoopSetP1X: replace STA objY / STA objX in enemy code that moves P1 itself (Ruckus's
+; round-20 wrap of the player, not aiming): the write stays on slot 0, and targetX/targetY follow it while
+; P1 is the target, so later reads in the same enemy loop see the new position as before. A/X/Y kept.
+CoopSetP1Y:
+	STA objY
+	PHA
+	LDA coopTarget
+	BNE :+
+	PLA
+	STA targetY
+	RTS
+:	PLA
+	RTS
+
+CoopSetP1X:
+	STA objX
+	PHA
+	LDA coopTarget
+	BNE :+
+	PLA
+	STA targetX
+	RTS
+:	PLA
+	RTS

@@ -1181,7 +1181,11 @@ SpikeBallUpdate:
 		STA scratch1				;C - - - - - 0x0106C7 04:86B7: 85 01
 		LDA objY+OSLOT_ENEMY,X				;C - - - - - 0x0106C9 04:86B9: BD 94 05
 		SEC							;C - - - - - 0x0106CC 04:86BC: 38
+.ifdef REGION_JP
 		SBC objY				;C - - - - - 0x0106CD 04:86BD: ED 8B 05
+.else
+		SBC targetY				;co-op 6a: targeted player
+.endif
 		BCS CODE_0886C9				;C - - - - - 0x0106D0 04:86C0: B0 07
 			EOR #$FF					;C - - - - - 0x0106D2 04:86C2: 49 FF
 			CLC							;C - - - - - 0x0106D4 04:86C4: 18
@@ -1199,7 +1203,11 @@ SpikeBallUpdate:
 		STA scratch0				;C - - - - - 0x0106E9 04:86D9: 85 00
 		LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x0106EB 04:86DB: BD BC 05
 		SEC							;C - - - - - 0x0106EE 04:86DE: 38
+.ifdef REGION_JP
 		SBC objX				;C - - - - - 0x0106EF 04:86DF: ED B3 05
+.else
+		SBC targetX				;co-op 6a: targeted player
+.endif
 		BCS CODE_0886EB				;C - - - - - 0x0106F2 04:86E2: B0 07
 			INC scratch0				;C - - - - - 0x0106F4 04:86E4: E6 00
 			EOR #$FF					;C - - - - - 0x0106F6 04:86E6: 49 FF
@@ -1397,14 +1405,26 @@ CODE_08882A:
 	CMP #$08					;C - - - - - 0x010848 04:8838: C9 08
 	BCS CODE_088841				;C - - - - - 0x01084A 04:883A: B0 05
 		LDA #$08					;C - - - - - 0x01084C 04:883C: A9 08
+.ifdef REGION_JP
 		STA objY				;C - - - - - 0x01084E 04:883E: 8D 8B 05
+.else
+		JSR CoopSetP1Y				;co-op 6a: P1 moved, targetX/Y follow
+.endif
 CODE_088841:
 	CMP #$E8					;C - - - - - 0x010851 04:8841: C9 E8
 	BCC CODE_088857				;C - - - - - 0x010853 04:8843: 90 12
 		LDA #$00					;C - - - - - 0x010855 04:8845: A9 00
+.ifdef REGION_JP
 		STA objY				;C - - - - - 0x010857 04:8847: 8D 8B 05
+.else
+		JSR CoopSetP1Y				;co-op 6a: P1 moved, targetX/Y follow
+.endif
 		LDA #$A0					;C - - - - - 0x01085A 04:884A: A9 A0
+.ifdef REGION_JP
 		STA objX				;C - - - - - 0x01085C 04:884C: 8D B3 05
+.else
+		JSR CoopSetP1X				;co-op 6a: P1 moved, targetX/Y follow
+.endif
 		LDA #$FF					;C - - - - - 0x01085F 04:884F: A9 FF
 		STA wideHScroll				;C - - - - - 0x010861 04:8851: 8D 61 07
 		JSR CODE_088AA2				;C - - - - - 0x010864 04:8854: 20 A2 8A
@@ -1730,7 +1750,11 @@ CODE_088A71:
 		CMP #$F8					;C - - - - - 0x010A94 04:8A84: C9 F8
 		BCS CODE_088AA1				;C - - - - - 0x010A96 04:8A86: B0 19
 			LDA objX+OSLOT_ENEMY				;C - - - - - 0x010A98 04:8A88: AD BC 05
+.ifdef REGION_JP
 			CMP objX				;C - - - - - 0x010A9B 04:8A8B: CD B3 05
+.else
+			CMP targetX				;co-op 6a: targeted player
+.endif
 			BCS CODE_088A94				;C - - - - - 0x010A9E 04:8A8E: B0 04
 				LDA #$02					;C - - - - - 0x010AA0 04:8A90: A9 02
 				BNE CODE_088A96				;C - - - - - 0x010AA2 04:8A92: D0 02
@@ -1917,7 +1941,11 @@ CODE_088BCA:
 		LDA #anRounderFall_ID					;C - - - - - 0x010BFA 04:8BEA: A9 E0
 		JSR StartEnemyAnim				;C - - - - - 0x010BFC 04:8BEC: 20 58 99
 		STA objAnimHI+OSLOT_ENEMY,X				;C - - - - - 0x010BFF 04:8BEF: 9D 24 07
+.ifdef REGION_JP
 		LDA objX				;C - - - - - 0x010C02 04:8BF2: AD B3 05
+.else
+		LDA targetX				;co-op 6a: targeted player
+.endif
 		STA objX+OSLOT_ENEMY,X				;C - - - - - 0x010C05 04:8BF5: 9D BC 05
 		LDA #$10					;C - - - - - 0x010C08 04:8BF8: A9 10
 		STA objY+OSLOT_ENEMY,X				;C - - - - - 0x010C0A 04:8BFA: 9D 94 05
@@ -2299,7 +2327,11 @@ CODE_088EEF:
 	STA projVSpeed,Y				;C - - - - - 0x010F01 04:8EF1: 99 35 05
 	LDA objX+OSLOT_PROJ,Y				;C - - - - - 0x010F04 04:8EF4: B9 B4 05
 	SEC							;C - - - - - 0x010F07 04:8EF7: 38
+.ifdef REGION_JP
 	SBC objX				;C - - - - - 0x010F08 04:8EF8: ED B3 05
+.else
+	SBC targetX				;co-op 6a: targeted player
+.endif
 	BCS CODE_088F02				;C - - - - - 0x010F0B 04:8EFB: B0 05
 		EOR #$FF					;C - - - - - 0x010F0D 04:8EFD: 49 FF
 		CLC							;C - - - - - 0x010F0F 04:8EFF: 18
@@ -2315,7 +2347,11 @@ CODE_088F02:
 CODE_088F0C:
 	STA scratch0				;C - - - - - 0x010F1C 04:8F0C: 85 00
 	LDA objX+OSLOT_PROJ,Y				;C - - - - - 0x010F1E 04:8F0E: B9 B4 05
+.ifdef REGION_JP
 	CMP objX				;C - - - - - 0x010F21 04:8F11: CD B3 05
+.else
+	CMP targetX				;co-op 6a: targeted player
+.endif
 	BCC CODE_088F1D				;C - - - - - 0x010F24 04:8F14: 90 07
 		LDA #$00					;C - - - - - 0x010F26 04:8F16: A9 00
 		SEC							;C - - - - - 0x010F28 04:8F18: 38
@@ -3014,9 +3050,17 @@ CODE_089465:
 CODE_08946C:
 	LDA #$03					;C - - - - - 0x01147C 04:946C: A9 03
 	STA objAttr+OSLOT_ENEMY,X				;C - - - - - 0x01147E 04:946E: 9D FC 06
+.ifdef REGION_JP
 	LDA objX				;C - - - - - 0x011481 04:9471: AD B3 05
+.else
+	LDA targetX				;co-op 6a: targeted player
+.endif
 	STA scratch0				;C - - - - - 0x011484 04:9474: 85 00
+.ifdef REGION_JP
 	LDA objY				;C - - - - - 0x011486 04:9476: AD 8B 05
+.else
+	LDA targetY				;co-op 6a: targeted player
+.endif
 	STA scratch1				;C - - - - - 0x011489 04:9479: 85 01
 	LDA objState+OSLOT_ENEMY				;C - - - - - 0x01148B 04:947B: AD 6C 05
 	ORA objState+OSLOT_ENEMY+1				;C - - - - - 0x01148E 04:947E: 0D 6D 05
