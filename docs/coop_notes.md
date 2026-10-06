@@ -655,3 +655,217 @@ handled by `UpdateBubbles` with P1 resident, so a P2-owned `$88` bubble would ne
   state 0, P2 had 2 and 3 (the checker counts P2's at the conversion tick itself as `resolved_other`: 20 and 68). An
   exact 1P-like timing would need a "converted this tick" mark checked in the RISING handler (hot path); not done.
 - P1 popping or riding P2's bubbles is the normal touch rule (P1 resident in `UpdateBubbles`); Phase 5 decides the rest.
+
+## Phase 5 (P2 collisions, owner-aware capture)
+
+Build `c5` (commit `c66eb6c`). All hooks are in US-only code (`.ifndef REGION_JP`) and gated by `coopP2Active` or
+`coopResident`. New code is in `COOP_CODE2`, which is now $2D3 B (was $139), so 1066 B are free. New `COOP_BSS` bytes:
+`coopShotSwapped` and `coopP2SkipSlot`. Bank 9 has 214 B free, bank F 215 B.
+
+### 5.1 Enemy/food collision
+- The even window (P2 resident, after P2's player update) calls `JSR PlayerCheckEnemyCollision`, exactly as
+  `RoundUpdate` calls it for P1. The routine is in bank F and has no bank or register inputs: it reads slot 0 and
+  writes `playerDmgType`, which is P2's byte while P2 is resident. The damage is consumed by P2's next player update,
+  in the odd window. For P1 the collision runs before the enemy AI; for P2 it runs after the AI and projectiles. Both
+  players consume the damage on the following tick.
+- Food: `AddScore` indexes by `currentPlayer`. With `currentPlayer` = 1 it adds to P2's digits `$048A-$0490`
+  (`scoreDigitsP2`) and to P2's extra-life accumulator `$049A-$04A0`. Those bytes are unused in 1P; P1's accumulator is
+  `ram_0491-$0497`, checked by `CODE_099D3B`. Measured: no `AddScore` with `currentPlayer` = 1 changed a P1 byte, and
+  none with `currentPlayer` = 0 changed a P2 byte. The shared bytes touched are `livesCurrentPos` and
+  `scoreAdditionDigits`.
+- Other effects of the routine: the trash can and the `lastRewardType` / `sameRewardStreak` / `rewardsEaten`
+  globals are shared by both players (plan 9.5). The P2 extra-life check and the P2 HUD are Phase 7.
+
+### 5.2 Projectiles: swap only on a P2 hit
+The projectile script ops that act on "the player" are:
+- `HurtPlayer` and `CatchPlayer` write `playerDmgType`;
+- `CopyPlayerState` reads `playerState`;
+- `PlayerState` writes `playerState`, `inflateTime`, `extraBubbles`, `ram_0076` and slot 0's animation;
+- `Heart` writes `playerHearts` and calls `AddScore`;
+- `GetPlayerDist`, `GetPlayerSide` and `HomingPlayer` read slot 0's position;
+- the `Jump*` ops read only `scratch4/5` (checked in all scripts in `bank_0A.asm`).
+
+Rewriting all of these ops was not needed:
+- After `JSR PlayerCheckProjCollision`, a new gate (`BIT coopP2Active`) calls `CoopProjCheckP2`. If P1 was not hit
+  (no `PROJ_HIT`), it runs the same test against slot 39 and `ctxOther_playerInvFrames`. It uses A only and leaves
+  the scratch bytes alone.
+- On a P2 hit, `CoopProjCheckP2` swaps P2 in (`CoopSwap`, X kept) and sets `PROJ_HIT`. The script then runs unchanged,
+  and every op above acts on P2, including `Heart`'s `AddScore` through `currentPlayer` = 1.
+- At `@trymove` (the only exit of the op loop), `LDA coopResident / BEQ` calls `CoopProjSwapBack`.
+- P1 has priority when both players touch the same projectile.
+- The swap pair (~1.4k cycles) runs only on P2 hits: 100 in 34958 ticks.
+- Before swapping, `CoopProjCheckP2` also undoes a pending shot exchange (5.4), so `coopShotSwapped` = 0 at every
+  `CoopSwap`. Measured: 0 violations.
+
+### 5.3 Bubble touch, hazards
+UpdateBubbles' US ladder reaches `CODE_098149` (touch) for states RISING 1, EXPIRING 2, ENEMY 3, ENEMY_EXPIRING 4 and
+POWER 5. All other states, including EMERGING and $88/$89, go to `CODE_09815D` or the default `CODE_09813F` without a
+touch. `CODE_098149` sets `scratch4/5` = bubble X/Y and X = index, then calls:
+- `CODE_098932`, the player part: bounce (`ram_007D` bit 7), push (`bubbleDir` and bit 6), or `PopBubble` with
+  `scratch1` = X;
+- `CODE_098258`, which is **not** player-related: the bubble's own drift and movement, plus the round-dependent
+  despawn.
+
+`CoopP2BubbleTouch` (odd window, after `CoopP2Shoot`, P2 resident) does the following:
+- clears P2's `playerHazardTrigger`, `ram_007D` and `playerHazardSlot`, as `UpdateBubbles` does at its start;
+- calls `CODE_098932` for every index below `bubbleSlotEnd` whose state is 1-5;
+- skips the slot `CoopP2Shoot` updated or converted this tick (`coopP2SkipSlot`), as UpdateBubbles' $80/$88 handlers
+  skip the touch;
+- does not advance any state machine.
+
+Hazards do not go through `CODE_098149`. Popped special bubbles (state 6, `CODE_098339`: thunder, fire, flood, bomb)
+call `HazardCheckPlayer` against slot 0. Its tail now has a gate that jumps to `CoopHazardCheckP2`. That routine tests
+the same box (`collW/collH`, `scratch4/5`) against slot 39 and sets `ctxOther_playerHazardTrigger/Slot`. Clear/set
+cadence matches P1: the flags set at odd tick N are seen by P2's player updates at N+1 (even) and N+2 (odd), and are
+then cleared in N+2's pass.
+
+`ram_051A` is the multi-kill counter. `PopBubble` increments it for every enemy bubble popped, by either player, and
+`BubblesTravelUpdate` awards it at the start of the next odd tick in which no chain pops happen. Both players
+therefore add to one combined count. The bonus (`AddScore`) is credited to `currentPlayer` = P1 at that point. Nothing
+breaks; per-player attribution is logged for Phase 7.
+
+### 5.4 Owner-aware capture
+The Phase 4 sketch proposed a P2 test plus owner-aware follow-up code. The follow-up reads are spread over
+`CODE_0FFAA3`, `CODE_0FFB0C`, bank B `CODE_0B9630` (which also clears `shootTrigger`), `CODE_0B9AA9` (`$9AC0`,
+`shootQueuedBubbles`), bank 8 boss code (`shootQueuedBubbles`) and the `$88/$89` handler `CODE_0FFAB9`. Instead of
+editing all of them:
+- **Second test.** The exit of `CODE_0FF9E8` (`CODE_0FFA55`, bank F) gets a gate that jumps to `CoopCaptureOther`.
+  That routine runs if the enemy is not flagged yet (`ram_00CA` non-zero and bit 7 clear). It applies the same US test
+  to the shot in `ctxOther`: the other player must be shooting, the bubble at its `shootInitialSlot` must be $80, and
+  the box is `DATA_0FFA56[queued]` plus the enemy W/H. It uses no scratch bytes and keeps X/Y.
+- **Exchange on a hit.** It sets bit 7 and exchanges the five shot bytes (`shooting`, `shootInitialSlot`,
+  `shootQueuedBubbles`, `shootTrigger`, `shootSlot`) with their `ctxOther` copies (`coopShotSwapped ^= 1`). The
+  unchanged follow-up code then traps, bursts or converts the **catcher's** bubble and clears the **catcher's** shot
+  state.
+- **Restore.** `CoopShotRestore` runs at the start of every P2 window, before `CoopSwap`, and in `CoopP2Deactivate`.
+  Between the enemy AI and the even window, nothing reads these bytes (`CODE_0FFD89`, `UpdateProjectiles`, bank 7:
+  checked by grep). A later enemy in the same tick again tests the native shot first, then the other one; a hit
+  exchanges back.
+- **Odd window.** `CoopP2Shoot` dispatches P2's shot bubble by state: $80 goes to `BubbleEmergingUpdate`, $88/$89 to
+  `CODE_0FFAB9`, with P2 resident and X = `shootInitialSlot`. P2's $88/$89 bubble is therefore converted before
+  `UpdateBubbles`, which never sees it (checker: every `CODE_0FFAB9` call ran on the resident player's own bubble).
+- **Timing.** P2's emerging bubble is moved in the odd window, and the enemies test it on the next even tick. That is
+  the same as P1, whose bubble is moved in `UpdateBubbles`.
+
+### Changed sites
+| site | bank | change | 1P cost |
+|------|------|--------|---------|
+| `CoopP2Window` | E | `CoopShotRestore` at entry; after the player update: intro -> nothing; odd -> `CoopP2Shoot` + `CoopP2BubbleTouch`; even -> `PlayerCheckEnemyCollision` | 0 |
+| `CoopP2Shoot` | E | `coopP2SkipSlot`; state dispatch $80 / $88-$89 | 0 |
+| new `CoopP2BubbleTouch`, `CoopCaptureOther`, `CoopShotRestore/Exchange`, `CoopProjCheckP2`, `CoopProjSwapBack`, `CoopHazardCheckP2` | E | see above | 0 |
+| `CoopP2Deactivate` | E | `JSR CoopShotRestore` first (A only) | 0 RAM change |
+| `CODE_0FFA55` (end of `CODE_0FF9E8`) | F | `BIT coopP2Active / BPL / JMP CoopCaptureOther` (8 B) | 7 cyc per enemy test |
+| `UpdateProjectiles` after `PlayerCheckProjCollision` | 9 | `BIT coopP2Active / BPL / JSR CoopProjCheckP2` (8 B) | 7 cyc per live projectile |
+| `UpdateProjectiles` `@trymove` | 9 | `LDA coopResident / BEQ / JSR CoopProjSwapBack` (8 B) | 7 cyc per live projectile |
+| `HazardCheckPlayer` `@end` | 9 | `BIT coopP2Active / BPL / JMP CoopHazardCheckP2` (8 B) | 7 cyc per hazard test |
+
+### Verification
+1. `build c5`, then `regress base c5 --reuse-base`: **REGRESSION PASS, 12/12**, re-run on the final build. JP md5
+   `8d2855ea5505bf094b7a40155caa92b4`.
+2. Checker `tmp/coop_scripts/p5/p5verify.py`: Lua exec and write hooks, run over 21 co-op runs.
+   - Runs: the 7 standard scenarios (14060 play ticks), plus x03 x05 x25 x41 x47 x51 x59 x69 x64 x35 (projectile
+     rounds: Needler, Chucker, Invader, Drunk, RoboZen) and c40 c70 cnat cgo (34958 play ticks). P2 was active on
+     every play tick.
+
+   | counter (all 21 runs) | P1 | P2 |
+   |--|--|--|
+   | enemy-body damage (`PlayerCheckEnemyCollision`) | 631 | 478 |
+   | projectile hits (`projTouchingPlayer` set) | 113 | 100 |
+   | `ProjOp_HurtPlayer` / `ProjOp_CatchPlayer` | 19 / 4 | 15 / 0 |
+   | hazard hits (`HazardCheckPlayer` / `CoopHazardCheckP2`) | 25 | 22 |
+   | AI direct damage (Snagger attack `CODE_0B91EC`) | 14 | 0 (Phase 6) |
+   | food pickups / `AddScore` that changed own digits | 12 / 75 | 15 / 15 |
+   | pops / bounces / pushes (`CODE_098932` outcomes) | 831 / 133 / 354 | 729 / 136 / 326 |
+   | enemy-bubble pops (`ram_051A` increments) | 35 | 15 |
+   | captures `CODE_0FFAA3` (of which after a same-tick burst) | 29 (3) | 24 (5) |
+   | bursts `CODE_0FFB0C` ($89) | 14 | 21 |
+   | `CODE_0FFAB9` $88 / $89 conversions | 29 / 11 | 24 / 16 |
+   | lives lost / in-place respawns | 71 / 70 | 60 / 59 |
+
+   Every P1 `AddScore` came from: food (`PlayerCheckEnemyCollision`), the `ram_051A` multi-kill award, `CODE_0B8446`
+   (special-bubble kill), `CODE_0B9B2F`, or the round-end bonus. Every P2 `AddScore` came from food.
+
+   **Violations: 0** over all 21 runs. Checks:
+   - every P2 projectile hit and every op it ran passed through `CoopProjCheckP2` for that same projectile, with P2
+     resident and i-frames 0;
+   - every P1 hurt/catch op ran after P1's own hit on that projectile;
+   - every nonzero `playerDmgType` write went to the resident player. Writers: `PlayerCheckEnemyCollision`, the
+     projectile ops, Snagger (P1 only), and `CoopSwap` itself;
+   - no write to `ctxOther` came from anything other than `CoopSwap`, `CoopShotExchange`, `CoopNewGame`, `CoopReset`
+     and `CoopHazardCheckP2` (hazard bytes only);
+   - `AddScore` never wrote the other player's digits, and `currentPlayer` always equalled `coopResident`;
+   - every capture was by an emerging bubble ($80; $89 only when `CODE_0FFB0C` burst that same slot earlier in the same
+     call, as for Chucker type $17: `CODE_0B9AA9` then `CODE_0FFAA3`, original behaviour, 3 cases for P1, 5 for P2);
+   - the capture owner matched the bubble's tracked owner, and so did the owner in burst and Twizzer cases;
+   - `CODE_0FFAB9` ran on the resident's own `shootInitialSlot`;
+   - `coopShotSwapped` was 0 at every `CoopSwap`, `UpdateBubbles` entry, `HandleShooting` entry and tick end;
+   - no projectile swap was left open at tick end, and `coopResident` was 0 at tick end;
+   - slot 39 was always `objState` 1 (no bubble in slot 39), P2's `playerState` was always <= 13, and the bubble budget
+     was always 19;
+   - every touch pass ran on an odd tick, with P2 resident and bank 9 mapped;
+   - P2's `shooting` was only ever set with its bubble in $80, $88 or $89.
+
+   P2 deaths are now frequent (60). They use the in-place respawn found in Phase 3. P1's lives, hearts and slot 0 were
+   never written from P2's context (`ctxOther` whitelist), and `cgo` went through game over and continue with 0
+   violations.
+
+   Phase 3 checker `p3verify.py c5` (7 scenarios): `p2_missing` 0, `p2_hidden` 0, `p2_state_bad` 0, `resident_bad` 0,
+   `slot19_bubble` 0, `setup_no_spawn` 0, and the same slot-39 writers as before. Phase 4 checker `p4verify.py c5`: 0
+   violations except `v_p2_shooting_not_emerging` 19 (5 with $88, 14 with $89) and the matching
+   `v_p2_slot_not_p2_owned` 19. Those are P2's caught and burst bubbles, which are new in this phase and allowed for P1
+   by the same checker. Shots: P1 371, P2 706.
+3. Screenshots `tmp/runs/c5/c05_t01160.png` and `c05_t01163.png`. At tick 1159 P2 (the dragon at the left wall,
+   (23,75)) catches a Needler with its bubble at (37,77). At 1163 the Needler is visible inside the bubble next to P2,
+   with P1 in the middle at (80,84).
+4. Cost. 1P, `stats c5 --vs c4` over the 12 scenarios: +7..+47 cycles per play tick (+0.10 % in total), lag frames
+   0 / -1. Co-op, `stats c5 --scen <7> --vs c4`:
+
+   | scen | play mean | d_play | d_play% | d_lag |
+   |------|-----------|--------|---------|-------|
+   | c01 | 19400 | -6131 | -24.0 % | -509 |
+   | c05 | 23088 | -2890 | -11.1 % | -321 |
+   | c17 | 26352 | -4912 | -15.7 % | -222 |
+   | c20 | 16062 | +604 | +3.9 % | 0 |
+   | c22 | 21750 | -5198 | -19.3 % | -399 |
+   | c50 | 30763 | -577 | -1.8 % | -89 |
+   | c64 | 30355 | -5898 | -16.3 % | -862 |
+
+   The ticks get cheaper because P2 now pops bubbles: fewer bubbles reach `BubblesTravelUpdate` (quadratic) and
+   `DrawObjects`. `profile c5 --scen <7> --vs c4` (21000 ticks):
+   - `BubblesTravelUpdate` with its unlabelled internal blocks: -15.8M;
+   - `DrawObjects_*`: about -18M;
+   - new work: `CoopP2BubbleTouch` 3.45M (plus 0.65M in `CODE_098932`), P2's `PlayerCheckEnemyCollision` +2.96M,
+     `CoopCaptureOther` 0.82M, `CoopShotRestore` 0.17M, `CoopProjCheckP2` 0.12M, `CoopHazardCheckP2` 5k. That is
+     about 400 cycles per tick: ~330 per odd tick for the touch pass and ~280 per even tick for the collision.
+
+   No routine is unreasonably expensive, so no fallback was applied. Window cost (p3verify, entry to the instruction
+   after the `JSR`): mean 4285-5309 cycles, max 8608 (Phase 4: 3813-4502).
+5. Coverage (`run c5 --profile`, 7 co-op scenarios; `tmp/coop_scripts/p5/cov.py`):
+   - Every new or changed instruction ran except `CoopProjCheckP2`'s hit path ($DA91-$DAA0) and `CoopProjSwapBack`
+     (15 instructions). The 7 standard scenarios had no P2 projectile hit. In the extra runs, p5verify's exec hooks
+     on both show 100 executions with all checks passing.
+   - Hook sites, co-op: `CODE_0FFA55` gate 17341, `UpdateProjectiles` gate 3347, `@trymove` 3347, `HazardCheckPlayer`
+     gate 161.
+   - 1P (`run c5 --scen r01 r50 camp03 --profile`): `CODE_0FFA55` `BIT/BPL` 15814 with the `JMP` never taken; the
+     projectile gates 420 with no `JSR` taken. `HazardCheckPlayer`'s gate did not run in those 1P runs; it is the same
+     4-byte `BIT/BPL` pattern, and regress passes on all 12 scenarios.
+6. JP unchanged (md5 above).
+
+### Open issues
+- **Phase 6 (enemy AI and targeting):**
+  - Snagger's attack (`CODE_0B91EC`, bank B) damages P1 only (`objX/objY` of slot 0, `playerDmgType`);
+  - homing, distance and side projectile ops target P1, except while P2 is swapped in for a projectile it touches.
+- **Phase 7 (scoring and attribution):**
+  - the `ram_051A` multi-kill bonus is shared and credited to P1;
+  - direct kill scores (`CODE_0B8446` for special-bubble kills, `CODE_0B9B2F` for hit-based enemies and bosses) go to
+    P1 even when P2's bubble did it;
+  - P2's extra-life accumulator `$049A-$04A0` is filled but never checked;
+  - special items (`CODE_078916` collectors: holy cup, potions...) are collected by P1 only;
+  - the rising-water hazard `CODE_078682` (`playerHazardTrigger` = $F8) applies to P1 only.
+- **Direction of P2-popped special bubbles.** The `CODE_0981F8` direction comes from P1's `playerDir` (thunder,
+  water, wind) when P2 popped the bubble, because the popping state is handled in `UpdateBubbles` with P1 resident.
+- **Timing differences (no corruption):**
+  - a bubble P2 pops in the odd window is processed by the same tick's `UpdateBubbles`, so its pop animation and a
+    chain reaction start one odd tick earlier than for P1's pops;
+  - P2's caught bubble ($88 -> 3) is likewise processed once more in its conversion tick (same class as the Phase 4
+    finding).
