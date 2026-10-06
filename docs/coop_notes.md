@@ -524,3 +524,134 @@ changed here.
   - the pause hides P2, because `DrawObjects` draws only slots < `ram_0475` = 2 while paused.
 - **Performance**: about 4.4k cycles per co-op tick. Heavy rounds lag more (c17 +243, c64 +325 lag frames per 3000
   ticks). Phases 4/5 add to the same window.
+
+## Phase 4 (P2 shooting)
+
+Build `c4`. Two edits plus one routine; no change to `HandleShooting`, `BubbleEmergingUpdate` or `SpawnExtraBubbles`.
+
+### Changes
+| site | bank | what |
+|------|------|------|
+| `CoopP2Window` (after the P2 player update, before the swap back) | E | `LDA globalTimer / LSR / BCC` (odd ticks only), `LDA bankedSubRetBank / CMP #.BANK(RoundUpdate) / BNE` (not the intro window), `JSR CoopP2Shoot`. 14 B. |
+| `CoopP2Shoot` (new) | E | P2 resident, bank 9 at `$8000`: `JSR HandleShooting`; if `shooting`: `LDX shootSlot / JSR BubbleEmergingUpdate`. 15 B. |
+| `UpdateBubbles`, US EMERGING branch (`CODE_098135`) | 9 | `BIT coopP2Active / BPL @own / LDA ctxOther_shooting / BEQ @own / CPX ctxOther_shootSlot / BNE @own / JMP CODE_09815D` before `JSR BubbleEmergingUpdate`. 18 B. 1P cost: BIT+BPL, 7 cycles per emerging update. |
+
+`COOP_CODE2` is now $139 B (was $11C). The window does not need other changes:
+- `$8000`: after `RunBankedSub` returns, bank 9 is mapped again (checked: `$54` = 9 at every `CoopP2Shoot` entry, 7185 calls).
+- `$A000`: `BubbleEmergingCheckTerrain` (bank F) reaches `GetTile`/`CheckWall`, which keep the `prgBankB` invariant by themselves
+  (guarded, race-free switch). The window's existing end step (`PLA / CMP prgBankB / BEQ`) runs after the new calls, so it
+  still puts back the caller's `$A000` bank. Measured: `prgBankB` and `$54` at the window entry equal those after its
+  `JSR`: 0 violations over all windows (28740 + 27892).
+- The shot and its flight use only P2's globals because P2 is resident: position (slot 0), `shootDir`, `powerUps` candy bit,
+  `bubbleVariant`, `shootQueuedBubbles`, `shootSlot`/`shootInitialSlot`/`shooting`.
+- `terrainResult` is not pre-cleared (as `UpdateBubbles` does at `CODE_098008`): `BubbleEmergingUpdate` starts with
+  `BubbleEmergingCheckTerrain`, which stores `terrainResult` unconditionally before anything reads it. Nothing else is set up
+  per slot by `UpdateBubbles` before the dispatch (X = bubble index, nothing in A/Y is used).
+- Timing equals P1's: P1's bubble is spawned by `HandleShooting` and updated once in the same odd tick; P2's the same, inside
+  the window. The even window and the intro window do not shoot (the intro window has no `HandleShooting` in the original).
+
+### 4.2 Edge cases of "P2's bubble is skipped in UpdateBubbles"
+- The skip is gated by `coopP2Active`. `UpdateBubbles` and `HandleShooting` have exactly one caller each (`RoundUpdate`), and
+  the odd window runs right before `UpdateBubbles` on every odd tick while P2 is active, so an emerging P2 bubble is always
+  updated by the window and never left stuck.
+- P2 deactivated while its bubble is emerging (`CoopP2Deactivate` from `CODE_0FE36B`): every bubble is despawned there, and
+  `ctxOther_shooting`/`shootSlot` stay stale. Nothing reads them while `coopP2Active` = 0. At the next spawn
+  `CODE_08812A` (run for P2 by `CoopRoundStartP2`) clears `shooting`. Measured: P2 deactivated while shooting 1 time
+  (hold run), `ctxOther_shooting` non-zero at `CoopSpawnP2` entry: 0 times.
+- `shootTrigger` and `shootQueuedBubbles` of P2 are not cleared at deactivation, as for P1 at a respawn in 1P (a stale trigger
+  fires one shot on the first odd tick).
+
+### 4.3 Slot ownership
+- `HandleShooting` never picks an emerging slot: state `$80` is neither 0, nor 2, nor < 2. `SpawnExtraBubbles` only takes
+  `objState` = 0 slots above `shootSlot`, bounded by `bubbleSlotEnd` (checked again: `CMP bubbleSlotEnd`); `ReplaceBubble` takes
+  the slot from its caller. Measured: 0 spawns over a tracked emerging bubble, 0 untracked emerging bubbles, 0 bubble code
+  with `bubbleSpawnSlot` = 39, 0 spawns or extras at index >= `bubbleSlotEnd` while P2 is active.
+- Both players' emerging bubbles are always in separate slots, each updated by its owner's context.
+
+### 4.4 Other readers of `shooting` / `shootSlot` / `shootDir` / `shootQueuedBubbles` / `shootInitialSlot` / `shootTrigger`
+| site | what | verdict |
+|------|------|---------|
+| bank 5 `CODE_058EFB`, `TrySingleBubble`, `CODE_059A59`, `PlayerHandlerInflating` (queued writes) | player update | per player, runs in each player's own context: fine |
+| bank 8 `CODE_08812A` (`shooting` = 0) | per-life init | run for P2 swapped in: fine |
+| bank 8 `CODE_089F47` (`shooting` = 0) | round start, P1 resident | P2's is cleared by its own init: fine |
+| bank 9 `HandleShooting`, `BubbleEmergingUpdate`, `SpawnExtraBubbles` | the shot | handled (window) |
+| bank 9 `UpdateBubbles` `CODE_09813F` -> `CODE_0FFAB9` (state `$88`/`$89` handler, uses `shootInitialSlot`, clears `shooting`) | caught-enemy bubble | P1 only for now, see below |
+| bank F `BubbleEmergingCheckTerrain` | shootDir | called from the owner's context: fine |
+| bank F `CODE_0FF9E8` (does the emerging bubble hit enemy X), `CODE_0FFAA3`, `CODE_0FFB0C`, bank 8 `CODE_089B62`, bank B `CODE_0B9630`, `CODE_0B9AC0` | enemy-bubble capture, called from ~15 enemy AI routines (banks 8 and B) with P1 resident | read P1's `shooting`/`shootInitialSlot`/`shootQueuedBubbles` only |
+
+**Open (needs a Phase 5/6 decision): P2's emerging bubble does not catch enemies.** The capture test runs inside the enemy AI
+with P1 resident and tests only P1's bubble, so P2's bubble flies through enemies and turns into a normal bubble. There is no
+corruption: the P1-only readers can neither see nor modify P2's bubble. To make P2 catch enemies, `CODE_0FF9E8` has to test
+P2's bubble too (from `ctxOther_*`), and `CODE_0FFAA3`/`CODE_0FFAB9`/`CODE_0FFB0C`, plus the `UpdateBubbles` `$88`/`$89`
+handler, have to use the owner's `shootInitialSlot` and clear the owner's `shooting`/`shootQueuedBubbles`. P1's `$88` bubble is
+handled by `UpdateBubbles` with P1 resident, so a P2-owned `$88` bubble would need the owner recorded (for example a
+`coopP2CaughtSlot` byte in `COOP_BSS`).
+
+### Verification
+1. `build c4`, `regress base c4 --reuse-base`: **REGRESSION PASS, 12/12**. JP md5 `8d2855ea5505bf094b7a40155caa92b4`.
+2. Checker `tmp/coop_scripts/p4/p4verify.py` (Lua exec/tick hooks): tracks every emerging bubble from its `SpawnBubbleVariant`
+   (owner = resident player at spawn) to its conversion; per update it checks the updating context, the direction used, the
+   X step, and the flags at tick end. Runs: 7 co-op scenarios (14370 play ticks), c40 c70 cnat cgo (14974), and a second set
+   `--hold` (a patched copy of the harness in `runs/`, `tools/perf` untouched: both pads also hold B for 20/45/70/100 ticks so
+   that inflating gives double/triple shots), 7 scenarios (13946).
+
+   | | 7 co-op | c40 c70 cnat cgo | hold (7 scen) |
+   |--|--|--|--|
+   | P1 / P2 shots | 334 / 598 | 727 / 477 | 280 / 569 |
+   | `CoopP2Shoot` calls (all on odd ticks, P2 resident, bank 9) | 7185 | | 6973 |
+   | emerging bubbles converted P1 / P2 | 287 / 509 | | 232 / 518 |
+   | emerging updates that left the bubble emerging: moved +-7 in the owner's direction / other | 1069 P1, 2083 P2 / 0 | | 1009 P1, 1751 P2 / 0 |
+   | P2 shots with queued > 0 | 0 | 0 | 26 (q1 7, q2 19) |
+   | extra bubbles P1 / P2 | 0 | 0 | 31 / 30 |
+   | ticks with both players' bubbles emerging | 523 | | 532 |
+   | violations | **0** | **0** | **0** |
+
+   (A blocked update, terrain hit, converts the bubble in the same update, so it is counted as a conversion.)
+   The violation counters (all 0): update in the wrong context, direction mismatch, wrong-direction or non-+-7 move, double
+   update in one tick, update of a non-emerging or untracked bubble, spawn over a tracked bubble, untracked emerging bubble,
+   emerging stuck > 20 updates, owner `shooting`/`shootSlot` not matching the emerging bubble at tick end (P1 allows `$88`/`$89`),
+   spawn not at the resident player's position, spawn/extra at index >= `bubbleSlotEnd`, `bubbleSpawnSlot` = 39, slot-39 state
+   >= `$80`, `coopResident` != 0 at tick end or after a window, `prgBankB`/`$54` different after a window, `CoopP2Shoot` on an even
+   tick or outside bank 9, stale `ctxOther_shooting` at P2's spawn.
+
+   Extras of a double/triple shot: 30 extra bubbles for P2 over 26 shots with queued > 0. Fewer than queued only when no free
+   slot is above the shot's slot (the extras fill higher indexes): all 12 short shots among the 42 logged had too few free
+   slots above. With P2 active the highest index is 18, so such cases appear one slot earlier than in 1P.
+   Phase 3 checker `p3verify.py c4` (7 scenarios, 14370 ticks): `p2_missing` 0, `p2_hidden` 0, `p2_state_bad` 0, `resident_bad` 0,
+   `slot19_bubble` 0, `setup_no_spawn` 0; the same slot-39 writers as in Phase 3.
+3. Screenshot: `tmp/runs/c4/c01_t01222.png`. At tick 1222 both dragons have just shot left: P1's bubble (X 29) and P2's (X 183)
+   are in flight (the green dots, the emerging frame). Checker tick numbering = harness numbering (P1 at (55,128), P2 at
+   (226,127) match the picture).
+4. Cost. `stats c4 --vs c3`, 12 default scenarios (coopMode = 0): play mean +10..+18 cycles per tick (+0.05..+0.08 %, total
+   +0.07 %), lag +0..+2 frames. Co-op, `stats c4 --scen <7> --vs c3`:
+
+   | scen | play mean | d_play | d_play% | d_lag |
+   |------|-----------|--------|---------|-------|
+   | c01 | 25532 | +6429 | 33.7 % | +516 |
+   | c05 | 25978 | +6391 | 32.6 % | +433 |
+   | c17 | 31264 | +688 | 2.3 % | +83 |
+   | c20 | 15458 | +224 | 1.5 % | 0 |
+   | c22 | 26947 | +8548 | 46.5 % | +573 |
+   | c50 | 31340 | +6699 | 27.2 % | +631 |
+   | c64 | 36252 | +10587 | 41.3 % | +1552 |
+
+   The shooting code itself is cheap. `profile c4 --vs c3` over the 7 scenarios (21000 ticks): `HandleShooting` +597k, `BubbleEmergingCheckTerrain`
+   +204k, `CoopP2Shoot` 156k, `BubbleEmergingUpdate` +42k, `SpawnBubbleVariant` +50k, window +195k: about 60 cycles per tick on
+   average. The rest is the extra bubble population: **`BubblesTravelUpdate` +24.8M (about +1180 cycles per tick)**, which is
+   quadratic in the number of bubbles, plus `DrawObjects` (+4M in c01) and `UpdateBubbles`. Window mean (p3verify) 3813-4502
+   cycles (was 3668-4329 in Phase 3). For a performance phase: `BubblesTravelUpdate` is the lever.
+5. Coverage (`run c4 --profile` over the 7 co-op scenarios, `cover`): every instruction of `CoopP2Shoot` (`HandleShooting` call 7185,
+   emerging update 2680) and of the new window step (even-tick `BCC` taken 7373, intro-window `BNE` taken 188, `JSR` 7185) ran; in
+   `UpdateBubbles`: `BIT`/`BPL` 5535, `LDA`/`BEQ` 3465, `CPX`/`BNE` 2416 (skip `JMP` 2083, `BNE @own` taken 333). 1P (`r01`, `camp03`
+   with `--profile`): the EMERGING test and `BIT`/`BPL` taken 398 times, nothing past it.
+6. JP unchanged (md5 above).
+
+### Findings
+- **Not a bug: P2's converted bubble is processed once more in the conversion tick.** P2's conversion happens in the window,
+  before `UpdateBubbles`, so the same tick's `UpdateBubbles` loop already treats it as a RISING/POWER bubble (the touch/pop
+  handler runs, and the lifespan counter may step). In 1P the conversion happens inside the loop at its own slot, so that
+  step comes one odd tick later. Visible only as P2's bubbles reaching the "bubble touched/popped" test one odd tick earlier.
+  Pops of this kind are common for P1 too: within 6 ticks after conversion, P1 had 86 bubbles go to state `$22` and 19 to
+  state 0, P2 had 2 and 3 (the checker counts P2's at the conversion tick itself as `resolved_other`: 20 and 68). An
+  exact 1P-like timing would need a "converted this tick" mark checked in the RISING handler (hot path); not done.
+- P1 popping or riding P2's bubbles is the normal touch rule (P1 resident in `UpdateBubbles`); Phase 5 decides the rest.
