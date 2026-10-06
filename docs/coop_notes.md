@@ -869,3 +869,220 @@ editing all of them:
     chain reaction start one odd tick earlier than for P1's pops;
   - P2's caught bubble ($88 -> 3) is likewise processed once more in its conversion tick (same class as the Phase 4
     finding).
+
+## Phase 6a (enemy targeting)
+
+Build `c6` (code commit `934ee69`). All edits to shared code are US branches (`.ifdef REGION_JP` keeps the original
+line); new code is in `COOP_CODE2` (now $40A B, 755 B free). New `COOP_BSS` bytes: `targetX`, `targetY`, `coopTarget`,
+`coopPos[2]`, `coopDist[3]`. Free space after the phase: bank B 46 B (was 59), bank 9 207 B (was 214), bank 8 12 B
+(unchanged: every bank-8 edit keeps its length).
+
+### Design
+- The enemy AI still runs once per even tick with P1 resident. Enemy code reads `targetX`/`targetY` (WRAM, absolute)
+  where it read slot 0's `objX`/`objY`; `LDA/CMP/SBC abs` keep their length and cycle count.
+- **P2 not in the round** (1P, `coopMode` = 0, between rounds): `CoopTargetTick`, called at the top of the enemy loop
+  (`CODE_0B81E3`), sets `coopTarget` = 0 and copies slot 0 into `targetX/targetY` once per even tick, so every
+  converted read sees exactly the value it read before. The only enemy-side writes to slot 0 inside the loop
+  (Ruckus's wrap, see the table) go through `CoopSetP1Y/X`, which keep `targetX/Y` in step while P1 is the target.
+- **P2 in the round**: `BIT coopP2Active / BPL / JSR CoopSelectTarget` (8 B, bank B) runs per live enemy right after
+  the `ENEMY_DYING`/`$0C` checks and before the type dispatch (bank-B behaviours and the bank-8
+  `RemoteEnemyUpdateSubs` alike; X = enemy index, the routine keeps X and Y). `CoopNearest` picks the nearest
+  targetable player by |dx| + |dy| (9-bit sum) between the enemy and slot 0 / slot `OSLOT_P2`; a tie goes to P1.
+- **Targetable** = `playerState` != `PLAYER_STATE_DEAD` (3) (`ctxOther_playerState` for P2; P2 must be in the round,
+  which the gate guarantees). From `PlayerHandlerDead`: state 3 covers the whole death animation and the "no lives
+  left" wait (P2 stays in state 3 at 0 lives, Phase 3). The respawn is in place and instantaneous (`CODE_059A0E` sets
+  state 0, then 120 i-frames). There is no separate respawn state, so i-frames do not make a player untargetable (as in
+  1P, where enemies keep chasing an invincible player). Neither targetable: `coopTarget` is kept and `targetX/Y` are
+  refreshed from that player.
+- **Direct damage**: `CoopDamageTarget` (A = damage; keeps A/X/Y, N/Z from A) writes `playerDmgType` (P1) or
+  `ctxOther_playerDmgType` (P2). P2's damage is consumed by P2's player update in the same tick's even window (P1's on
+  the next tick), the deferral Phase 5 already uses.
+- **Projectile ops that aim** (`ProjOp_HomingPlayer`, `ProjOp_GetPlayerDist`, `ProjOp_GetPlayerSide`, bank 9):
+  `CoopProjTarget` (X = projectile index) picks the nearest targetable player to the projectile itself (the shooter
+  is not recorded), returns its slot in Y (0 or 39) and its position in `targetX/Y`. Slot 0 is the resident player,
+  so the rule is also right while a projectile that touched P2 runs its ops with P2 swapped in (Phase 5
+  swap-on-hit, unchanged). P2 not in the round: slot 0.
+
+### Site table (enemy / boss / projectile code; "tgt" = `objX`->`targetX`, `objY`->`targetY` in the US branch)
+Found by `grep` of every non-indexed `objX`/`objY` and every player variable in banks 7, 8, 9, B, F, and by a
+dynamic trace (`tmp/coop_scripts/p6/p6trace.py`, 28 co-op rounds covering every enemy type) of reads/writes of slot 0
+and of the 31 context bytes, by routine and by phase (enemy AI, projectiles, items, ...).
+
+| # | bank | label | instruction | verdict | rationale |
+|---|------|-------|-------------|---------|-----------|
+| 1 | B | `CODE_0B859D` (ZenChan, HeitaiKun, RoboZen, Springit) | `LDA objY` | tgt | jump when the player is above |
+| 2 | B | `CODE_0B8611` (ZenChan, HeitaiKun) | `LDA objX` | tgt | turn to face the player |
+| 3-4 | B | `CODE_0B87CE`, `CODE_0B87FA` (Banebou) | `LDA objY` x2 | tgt | vertical chase |
+| 5 | B | `CODE_0B87FA` (unreached) | `LDA objX` | tgt | face the player |
+| 6-7 | B | `CODE_0B8C15`, `CODE_0B8C20` (Needler state 2) | `CMP objY`, `SBC objX` | tgt | proximity trigger (player above, abs dx < 16) |
+| 8 | B | `CODE_0B8C74` (Needler state 6, US-only block) | `LDA objY` | tgt (direct, US-only) | player-Y guard before homing |
+| 9 | B | same block (unreached) | `STA objY` | `JSR CoopSetTargetY` | write: Y of the targeted player is zeroed (same length) |
+| 10-11 | B | `CODE_0B8C84` (Needler state 6) | `CMP objY`, `SBC objY` | tgt | flies up to the player's Y ("needle homing") |
+| 12-14 | B | `CODE_0B91A1`, `CODE_0B91C3` (Snagger) | `SBC objY`, `SBC objX`, `LDA objX` | tgt | attack window |
+| 15-19 | B | `CODE_0B91EC`, `CODE_0B9203`, `CODE_0B9228` (Snagger hit) | `SBC objY`, `CMP objX` x4 | tgt | hit test against the target |
+| 20-21 | B | `CODE_0B9203`, `CODE_0B9228` | `STA playerDmgType` x2 | `JSR CoopDamageTarget` | damage the targeted player (+1 B each) |
+| 22-23 | B | `CODE_0B92F7`, `CODE_0B9314` (Mantichar) | `LDA objY`, `LDA objX` | tgt | homing |
+| 24-25 | B | `CODE_0B9571`, `CODE_0B9586` (Flutterfly) | `LDA objX`, `LDA objY` | tgt | homing |
+| 26 | B | `CODE_0B96F3` (Drunk/Chucker) | `LDA objY` | tgt | throw when the player is above |
+| 27-28 | B | `CODE_0B981F`, `CODE_0B9832` (Drunk/Chucker) | `LDA objY`, `CMP objX` | tgt | dy / face before the throw |
+| 29-30 | B | `CODE_0B9BCD`, `CODE_0B9BE9` (SkelMonsta) | `CMP objY`, `CMP objX` | tgt | hurry-up ghost chases |
+| 31 | B | `SpringitBodyUpdate` | `LDA objX+8,X` / `objY+8,X` | leave | X >= 1: the Springit head's slot, not the player |
+| 32 | B | `RounderUpdate` (`CODE_0B9DB8`) | `ADC objX` | leave | entropy for the Rounder's RNG, not aiming |
+| 33 | B | `CODE_0B9CB3` (every enemy, epilogue) | `LDA playerState` | leave (Phase 7) | P1's death calms angry enemies (death flow) |
+| 34 | B | `CODE_0B9D63` (hurry-up) | `LDA playerState` | leave (Phase 7) | P1's death removes SkelMonsta / resets the hurry-up |
+| 35 | B | `CODE_0B9630`, `CODE_0B9AA9` | shot bytes | Phase 5 | capture follow-up (shot exchange) |
+| 36-37 | 8 | `SpikeBallUpdate`, `CODE_0886D7` | `SBC objY`, `SBC objX` | tgt | starts rolling toward the player |
+| 38 | 8 | `CODE_08882A` (Ruckus) | `LDA objY` | leave (Phase 8) | P1's own Y clamp/wrap in round 20 (world, not aiming) |
+| 39-41 | 8 | `CODE_08882A`/`CODE_088841` (Ruckus) | `STA objY` x2, `STA objX` | `JSR CoopSetP1Y/X` | the write stays on P1; targetX/Y follow it (1P identity) |
+| 42 | 8 | `CODE_088A71` (Ruckus) | `CMP objX` | tgt | turn toward the player |
+| 43 | 8 | `CODE_088BCA` (MadMonkey) | `LDA objX` | tgt | drops a Rounder above the player |
+| 44-45 | 8 | `CODE_088EEF`, `CODE_088F0C` (Roc) | `SBC objX`, `CMP objX` | tgt | projectile speed/direction at spawn |
+| 46-47 | 8 | `CODE_08946C` (RedSkull) | `LDA objX`, `LDA objY` | tgt | moves toward the player |
+| 48 | 8 | `CODE_0895F3` (SuperRedSkull) | `LDA playerState` (`== $0A`) | deferred (6b) | belongs to the quake stun below |
+| 49 | 8 | `CODE_08981A` (SuperRedSkull) | reads `playerInvFrames`, `ram_0078`; writes `playerState = $0A`, `ram_0076` | deferred (6b) | landing quake stuns a grounded player: an area effect for both players, not a targeted one; P1 only for now |
+| 50 | 8 | `CODE_089B59` (DOH) | `LDA shootQueuedBubbles` | Phase 5 | capture follow-up |
+| 51 | 8 | `CODE_0884AB` (walk-in), `StartBonusRound` | slot 0 | leave | not enemy code (round start / bonus) |
+| 52 | 9 | `ProjOp_HomingPlayer` | `LDY #$00` | `JSR CoopProjTarget` | Y = nearest player's slot |
+| 53 | 9 | `ProjOp_GetPlayerDist` | `SBC objX`, `SBC objY` | `CoopProjTarget` + tgt | distance to the nearest player |
+| 54 | 9 | `ProjOp_GetPlayerSide` | `CMP objX`, `CMP objY` | `CoopProjTarget` + tgt | side of the nearest player |
+| 55 | 9 | `ProjOp_HurtPlayer/CatchPlayer/CopyPlayerState/PlayerState/Heart` | player state | Phase 5 | act on the touched player (swap-on-hit) |
+| 56 | F | `CODE_0FF088` (enemy prologue), `CODE_0FF9E8` family | - | no player read / Phase 5 | trace: only shot bytes |
+| 57 | F | `CODE_0FF643`, `CODE_0FF6B8`, `CODE_0FF72A`, `CODE_0FF7CA` | slot 0 | leave | player terrain probes / round terrain handlers, run inside each player's update |
+| 58 | 7 | `CODE_0783AC`, `CODE_078549`, `CODE_079C44` | slot 0 | leave | map screen, opening, cutscene |
+| 59 | 7 | `CODE_0786B8`, `CODE_0788CC`, `CODE_078916` collectors | slot 0 / player vars | 6b / Phase 8 | rising water, camera, items (not enemy AI) |
+
+Counts:
+- converted to the target: 39 aiming reads (27 in bank B, 8 in bank 8, 4 in bank 9) plus HomingPlayer's `LDY #0`;
+- routed to the target: 2 damage writes;
+- player-position writes: 4 (1 goes to the target, 3 stay on P1 with the target kept in sync);
+- left as they are, with a reason: 9 (2 not player / RNG, 2 Phase 7, 1 Phase 8 geometry, 2 non-enemy groups,
+  2 deferred SuperRedSkull items);
+- the Phase 5 rows.
+
+Bank 7 has no enemy AI. The trace shows no bank-7 code in the enemy phase; the bank-7 slot-0 users are the map
+screen, the opening, the camera, rising water, cutscenes and the item collectors. All bosses (rounds 20, 40, 60, 80)
+are bank-8 `RemoteEnemyUpdateSubs` and use the per-enemy selection like every other enemy.
+
+### Verification
+1. `build c6`, `regress base c6 --reuse-base`: **REGRESSION PASS, 12/12**. JP md5 `8d2855ea5505bf094b7a40155caa92b4`.
+2. Checker `tmp/coop_scripts/p6/p6verify.py`. It includes p5verify's Lua and Python checks and adds:
+   - At every `CoopSelectTarget` a Lua recompute of the nearest targetable player, compared after the call with
+     `coopTarget`, `targetX/Y`, X and Y.
+   - Every read of `targetX/Y` in the enemy AI equals the `coopTarget` player's position.
+   - Every read in `UpdateProjectiles` equals the nearest targetable player to that projectile. Y at
+     `ProjGetNewHomingAngle` (HomingPlayer) is that slot.
+   - With P2 not in the round, every read equals slot 0 and `coopTarget` is 0.
+   - Co-op selections where P2 is not targetable and P1 is: the target is P1.
+   - Every nonzero `playerDmgType` / `ctxOther_playerDmgType` write in the enemy AI comes from `CoopDamageTarget`,
+     goes to the player `coopTarget` names, and that player is the nearest.
+   - Needler state-2 and state-6 tests, per target.
+   - Writers of slot 39's `objState`.
+
+   Runs:
+   - the 7 standard scenarios;
+   - 24 extra co-op runs: Needler n03 n04 n05 n11 n52 n55, Snagger s12 s22 s31 s32 s58, bosses b20 b40 b48 b60 b80
+     c40, plus f27 m36 d25 h59 o30, cnat and cgo;
+   - n05 n52 s22 s58 c20 c40 b80 with a second pad-2 seed (`--seed2 5000`);
+   - a homing set: h59 b80 o30 x59 x35 x64;
+   - 4 1P runs (p20 p05 p22 p59; P2 never in the round).
+
+   | | 7 std | 24 extra | seed2 (7) | homing (6) |
+   |--|--|--|--|--|
+   | selections (P1 / P2) | 20352 (10196 / 10156) | 78937 (39046 / 39891) | 22186 (10973 / 11213) | 21302 (10844 / 10458) |
+   | selections of P2 while P1 is >= 64 farther | 3778 | 11832 | 3079 | 1911 |
+   | P2 not targetable, P1 targetable (all chose P1) | 1629 | 6722 | 1933 | 2156 |
+   | neither targetable (target kept) | 590 | 2047 | 661 | 386 |
+   | enemy-AI target reads (target P1 / P2) | 4470 / 4795 | 16410 / 11348 | 3788 / 3751 | 1639 / 1123 |
+   | Snagger damage to P1 / P2 | 9 / 3 | 54 / 38 | 20 / 14 | - |
+   | Needler state-6 climbs toward P1 / P2 | 0 / 13 | 2 / 15 | 0 / 0 | - |
+   | Needler trigger tests vs P1 / P2 | 397 / 277 | 2028 / 1673 | 666 / 660 | - |
+   | projectile target reads slot 0 / slot 39 | - | 292 / 128 | 266 / 90 | 244 / 128 |
+   | HomingPlayer to slot 0 / slot 39 | - | 93 / (not counted) | 33 / (not counted) | 78 / 90 |
+   | **violations (p5 + p6)** | **0** | **0** | **0** | **0** |
+
+   - The first two checker versions skipped Y = 39 at `ProjGetNewHomingAngle` ("not counted"). The homing set was
+     re-run with the fix.
+   - In 11 Needler state-6 updates (extra), P1's and P2's Y gave different decisions, and the Needler followed P2.
+   - 1P runs:
+     - 3114 tick fills;
+     - every target read was slot 0 with `coopTarget` 0;
+     - Snagger damage to P1: 24 (p22);
+     - 0 violations.
+   - All p5 checks pass, with one Phase 5 invariant revised: "slot 39 always has `objState` 1". Now that enemies aim at
+     P2, P2 gets caught by Needlers and stuck in DOH/Mantichar rounds, and its `objState` becomes:
+     - $0C (P2 state 8; state 3 if it dies while caught);
+     - $0B (P2 states 0/3/5).
+
+     Why these are legitimate:
+     - $0B with the same states is seen for P1 in o30.
+     - $0C comes from the shared player code (`CODE_059761`: `playerDmgType` $C0 sets `objState` $0C and
+       `PLAYER_STATE_NEEDLER`), writing slot 0 while P2 is swapped in.
+     - The new writer check confirms that while P2 is active only co-op code (`CoopSwap`, blink, spawn,
+       deactivate) writes slot 39's `objState`.
+     - P2 recovered every time (example: c05, $0C from tick 1225 to 1427).
+3. Screenshots `tmp/coop_scripts/p6/runs/shots/c6_b20_t01037.png` and `c6_b20_t01065.png` (round 20, Ruckus):
+   - P1 waits at the left wall (22,156);
+   - P2 is at the top right, moving from (235,55) to (233,36);
+   - Ruckus moves right across the upper floor, from X 175 to 231, toward P2;
+   - the checker logged these ticks as "chaseP2": P2 is nearer by more than 150 px of |dx|+|dy|.
+
+   `c6_c01_t01101/1121.png`: a ZenChan at the bottom right follows P2 while P1 is on the left.
+4. Cost.
+   - 1P, `stats c6 --vs c5` (12 scenarios): +12..+30 cycles per play tick (+0.13 % in total), lag frames unchanged.
+     This is `CoopTargetTick` once per even tick (about 40 cycles) plus `BIT/BPL` (7 cycles) per live enemy.
+   - Co-op, `profile c6 --scen <7> --vs c5` (21000 ticks): `CoopNearest` 2.40M plus `CoopSelectTarget` 1.28M, about
+     175 cycles per tick (about 350 per even tick, roughly 50 per live enemy). `CoopTargetTick` 86k (gate only).
+   - `stats c6 --scen <7> --vs c5`:
+
+     | scen | d_play | d_lag |
+     |------|--------|-------|
+     | c01 | +583 (+3.0 %) | +19 |
+     | c05 | -1164 | -67 |
+     | c17 | +2023 (+7.7 %) | +26 |
+     | c20 | +105 | 0 |
+     | c22 | -350 | -35 |
+     | c50 | +396 | -1 |
+     | c64 | +522 | +124 |
+
+     Total d_play +1.26 %. Most of this comes from the changed play, not from the new code: enemies now go after P2,
+     which changes kills, bubbles and deaths.
+5. Coverage. Profiles from the 7 standard scenarios (`perf.py run --profile`) plus 17 helper runs
+   (`tmp/coop_scripts/p6/profrun.py`). `tmp/coop_scripts/p6/sitecov.py` gives exec counts per edited instruction.
+
+   Executed:
+   - every instruction of `CoopTargetTick` (both paths), `CoopSelectTarget`, `CoopNearest` and `CoopProjTarget`;
+   - `CoopDamageTarget` (P1 and P2 paths) and `CoopSetP1Y` (both paths);
+   - both hooks in bank B, and the HomingPlayer and GetPlayerDist hooks;
+   - 34 of the 39 converted reads, and HomingPlayer's replaced `LDY #0`.
+
+   Not executed, argued instead:
+   - `ProjOp_GetPlayerSide`: only the final SkelMonsta script `psFinalSkelMonstaHalt` uses it. It makes the same
+     helper call as GetPlayerDist plus same-length operand swaps.
+   - SkelMonsta's 2 reads: the hurry-up was not reached in any run; operand swaps only.
+   - Banebou's unreached `LDA objX`.
+   - The unreached Needler write (`CoopSetTargetY`).
+   - Ruckus's Y >= $E8 wrap: the second `CoopSetP1Y` site and `CoopSetP1X`. Same 5-instruction pattern as the
+     executed `CoopSetP1Y`.
+6. JP unchanged (md5 above).
+
+### Phase 6b items found (not changed here)
+- Item collectors `CODE_078916` (`CODE_078BC5`...): read slot 0's position and `playerState`; write `playerHearts`,
+  `playerDmgType`/`ram_007B`, `playerLives`, `playerState`, `powerUps`. P1 only.
+- Rising water `CODE_0786B8` (`objY` against the water line, sets `playerHazardTrigger` = $F8): P1 only.
+- Special-bubble effect direction `CODE_098191`/`CODE_0981F8` uses P1's `playerDir`.
+- SuperRedSkull landing quake (`CODE_08981A`) and its `playerState == $0A` test (`CODE_0895F3`): P1 only.
+- Bank-F terrain/conveyor handlers that write `ram_0078`/`ram_007B` (`CODE_0FF6B8`, `CODE_0FF72A`, `CODE_0FF7CA`,
+  `$FD34`/`$FD45`): they run inside each player's own update. Not re-checked here.
+- Not 6b (Phase 7/8):
+  - enemies calmed and the hurry-up reset on P1's death (`CODE_0B9CB3`, `CODE_0B9D63`);
+  - Ruckus's round-20 player wrap (`CODE_08882A`) and `CODE_088AA2`, which zeroes slot 39's Y;
+  - the camera, `CODE_0788CC`.
+
+### Open issues
+- The target is re-evaluated every even tick. A Snagger that starts its attack at one player hits whichever player is
+  nearest at the hit frame, tested against that player's position.
+- Projectile aiming uses the player nearest to the projectile, not the shooter's target.
+- A tie goes to P1. With both players dead the previous target is kept, so enemies drift toward that player's corpse,
+  as in 1P.
+- P2's Snagger damage is applied one tick earlier than P1's: in the same tick, during the even window.
+- p5verify's slot-39 `objState == 1` invariant is superseded (see verification 2).
