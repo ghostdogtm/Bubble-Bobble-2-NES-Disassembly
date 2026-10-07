@@ -3952,10 +3952,5 @@ DATA_0CBE33:
 	.byte anBlobbyR_ID					;- D 0 - - - 0x019E5F 06:BE4F: 46
 
 ;Filler data
-.ifdef REGION_JP
-	;- - - - - - 0x019FAA 06:BF9A: 3E
-	.incbin "filler/fill0C_JP.bin"
-.else
 	;- - - - - - 0x019E60 06:BE50: 00
 	.incbin "filler/fill0C.bin"
-.endif

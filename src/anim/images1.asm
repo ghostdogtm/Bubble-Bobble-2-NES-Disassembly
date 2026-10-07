@@ -306,17 +306,10 @@ ImageTable1:
 	.word imgBlobbyUnderR_1
 
 DATA_04A25C:
-.ifdef REGION_JP
-	.byte $80					;- - - - - - 0x00826C 02:A25C: 80
-	.byte $00					;- - - - - - 0x00826D 02:A25D: 00
-	.byte $00					;- - - - - - 0x00826E 02:A25E: 00
-	.byte $07					;- - - - - - 0x00826F 02:A25F: 07
-.else
 	.byte $00					;- - - - - - 0x00826C 02:A25C: 00
 	.byte $00					;- - - - - - 0x00826D 02:A25D: 00
 	.byte $11					;- - - - - - 0x00826E 02:A25E: 11
 	.byte $12					;- - - - - - 0x00826F 02:A25F: 12
-.endif
 
 imgDummy:
 	;0000 04A260 (0x008270)

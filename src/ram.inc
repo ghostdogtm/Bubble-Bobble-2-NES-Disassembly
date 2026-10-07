@@ -60,9 +60,7 @@ ram_0038:             .res 1          ;= $38 ; N/A
 ram_0039:             .res 1          ;= $39 ; N/A
 ram_003A:             .res 1          ;= $3A ; N/A
 
-.ifndef REGION_JP
 newPrgBank:           .res 1          ;= $3B ; 50
-.endif
 
 mapMacroList:         .res 2          ;= $3C ; 8   ($indirect,X) <1>
 mapMacroDefs:         .res 2          ;= $3E ; 4
@@ -82,9 +80,6 @@ chrBankF:             .res 1          ;= $50 ; 6
 nmiPrgBankA:          .res 1          ;= $51 ; 37
 nmiPrgBankB:          .res 1          ;= $52 ; 4
 
-.ifdef REGION_JP
-ram_0052:             .res 1          ;= $52
-.endif
 
 prgBankB:             .res 1          ;= $53 ; 41
 prgBankA:             .res 1          ;= $54 ; 6

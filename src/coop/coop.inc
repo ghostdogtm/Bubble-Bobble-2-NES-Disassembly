@@ -1,5 +1,5 @@
 ; Co-op (2-player simultaneous) constants. Constants only: no code, no data.
-; Included from main.asm after defines.inc, US build only (.ifndef REGION_JP).
+; Included from main.asm after defines.inc, US build only.
 
 OSLOT_P2        = 39            ; object slot reserved for player 2 (see docs/coop_notes.md)
 BUBBLE_SLOTS    = 20            ; bubble slots OSLOT_BUBBLE..39 in the original game (19 while P2 owns slot 39)

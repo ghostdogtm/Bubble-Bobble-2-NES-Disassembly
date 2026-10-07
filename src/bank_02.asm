@@ -140,8 +140,3 @@ macBonus:
 	;- - - - - - 0x005D4E 01:BD3E: 00
 	.incbin "map/macBonus.bin"
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x005F29 01:BF19: 7F
-	.incbin "filler/fill02_JP.bin"
-.endif

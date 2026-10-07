@@ -1,22 +1,24 @@
 # Bubble-Bobble-2-NES-Disassembly
-Disassembly of Bubble Bobble 2 for the NES. Both US and JP ROMs buildable.
+Disassembly of Bubble Bobble 2 for the NES (US version only). This branch also carries a 2-player simultaneous co-op hack (see docs/coop_notes.md).
+
+The ROM is NES 2.0 with 8 KB of PRG-RAM (MMC3 board with WRAM); use an emulator or flash cart that supports it.
 
 ## Building
 
 ### Windows
 
 Download cc65 and make sure its bin folder is added to the PATH variable.<br>
-Run assemble_us.bat or assemble_jp.bat. The resulting ROM will be created in the base directory.
+Run assemble_us.bat. The resulting ROM will be created in the base directory.
 
 ### Other systems
 
-Should be pretty straightforward. Assemble main.asm with **REGION_US** or **REGION_JP** defined and link the single object file using the appropriate config file.
+Should be pretty straightforward. Assemble main.asm and link the single object file using config_us.
 
 ## Making edits
 
 <p>The disassembled code is not fully labeled but I've gone for the most important parts to aid in porting, modding or further analysis of the code.</p>
 
-<p>Some banks (actually several ones in the Japanese version) have filler data included at the end. Take these out to get space for new content.
+<p>Some banks have filler data included at the end. Take these out to get space for new content.
 Everything should (hopefully) be disassembled and labeled enough to let you move stuff around without issues. Only the two sprite tables (ImageTable1 and ImageTable2) need to be at the start of their respective banks.</p>
 
 ## Introduction to the game engine

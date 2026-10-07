@@ -11,13 +11,8 @@ StartTaitoLogo:
 	LDA #chrTaito_A_ID					;C - - - - - 0x00A017 02:8007: A9 04
 	STA chrBankB				;C - - - - - 0x00A019 02:8009: 85 4C
 
-.ifdef REGION_JP
-	LDA #$40
-	STA $E000
-.else
 	LDA #$01					;C - - - - - 0x00A01B 02:800B: A9 01
 	STA $A000				;C - - - - - 0x00A01D 02:800D: 8D 00 A0
-.endif
 
 	LDA #$00					;C - - - - - 0x00A020 02:8010: A9 00
 	STA wideRound				;C - - - - - 0x00A022 02:8012: 8D B0 03
@@ -26,9 +21,7 @@ StartTaitoLogo:
 	STA vNametable				;C - - - - - 0x00A029 02:8019: 85 2D
 	STA hNametable				;C - - - - - 0x00A02B 02:801B: 85 2F
 
-.ifndef REGION_JP
 	STA roundSkelDelay				;C - - - - - 0x00A02D 02:801D: 85 6D
-.endif
 
 	LDA #SPLASH_TAITO			;C - - - - - 0x00A02F 02:801F: A9 02
 	STA scratch0				;C - - - - - 0x00A031 02:8021: 85 00
@@ -189,19 +182,12 @@ DATA_058103:
 
 CODE_058121:
 	LDA playerInvFrames				;C - - - - - 0x00A131 02:8121: AD 77 04
-.ifdef REGION_JP
-	CMP #120					;C - - - - - 0x00A132 02:8122: C9 78
-	BCC CODE_058136				;C - - - - - 0x00A134 02:8124: 90 0A
-.else
 	CMP #90					;C - - - - - 0x00A134 02:8124: C9 5A
 	BCC CODE_05813C				;C - - - - - 0x00A136 02:8126: 90 14
-.endif
 	BNE TitleScreenInitialWait				;C - - - - - 0x00A138 02:8128: D0 1D
 
-.ifndef REGION_JP
 	LDA #$01					;C - - - - - 0x00A13A 02:812A: A9 01
 	STA roundSkelDelay				;C - - - - - 0x00A13C 02:812C: 85 6D
-.endif
 
 CODE_05A13E:
 	LDA #$00					;C - - - - - 0x00A13E 02:812E: A9 00
@@ -212,14 +198,12 @@ CODE_058136:
 	JMP CODE_0581D0				;C - - - - - 0x00A149 02:8139: 4C D0 81
 CODE_05813C:
 
-.ifndef REGION_JP
 	LDA roundSkelDelay				;C - - - - - 0x00A14C 02:813C: A5 6D
 	BEQ CODE_058136				;C - - - - - 0x00A14E 02:813E: F0 F6
 		;Unreached
 		LDA #120					;- - - - - - 0x00A150 02:8140: A9
 		STA playerInvFrames				;- - - - - - 0x00A152 02:8142: 8D
 		BNE CODE_05A13E				;- - - - - - 0x00A155 02:8145: D0
-.endif
 
 TitleScreenInitialWait:
 	LDA pressedP1				;C - - - - - 0x00A157 02:8147: A5 0E
@@ -365,17 +349,10 @@ TitleScreenFirstLetters:
 	.byte $E9					;- D 0 - - - 0x00A254 02:8244: E9
 	.byte $EA					;- D 0 - - - 0x00A255 02:8245: EA
 TitleScreenTextPos:
-.ifdef REGION_JP
-	.byte 40
-	.byte 40
-	.byte 45
-	.byte (32*3) + 13
-.else
 	.byte 8						;- D 0 - - - 0x00A256 02:8246: 08
 	.byte 8						;- D 0 - - - 0x00A257 02:8247: 08
 	.byte 13					;- D 0 - - - 0x00A258 02:8248: 0D
 	.byte (32*2) + 13				;- D 0 - - - 0x00A259 02:8249: 4D
-.endif
 TitleScreenTextPlayers:
 	;Starting from space
 	.byte $FF					;- D 0 - - - 0x00A25A 02:824A: FF
@@ -441,11 +418,7 @@ SplashSprParams:
 	;01: X
 	;02,03: Animation
 
-.ifdef REGION_JP
-	.byte $92,$5C
-.else
 	.byte $8A,$5C
-.endif
 	.word anBubble_ID
 
 	.byte $80,$88
@@ -487,9 +460,7 @@ CODE_0582BE:
 	STA continues				;C - - - - - 0x00A2E7 02:82D7: 85 DC
 	STA ram_00DD				;C - - - - - 0x00A2E9 02:82D9: 85 DD
 	JSR ResetLivesAndScore				;C - - - - - 0x00A2EB 02:82DB: 20 8B 88
-.ifndef REGION_JP
 	JSR CoopNewGame				;co-op: P2 starts with the same lives/hearts
-.endif
 	LDA #$01					;C - - - - - 0x00A2EE 02:82DE: A9 01
 	STA scratch0				;C - - - - - 0x00A2F0 02:82E0: 85 00
 	JSR SplashScreenSprSetup				;C - - - - - 0x00A2F2 02:82E2: 20 62 82
@@ -541,13 +512,8 @@ TitleScreenUpdateCursor:
 	RTS							;C - - - - - 0x00A351 02:8341: 60
 
 TitleScreenCursorPositions:
-.ifdef REGION_JP
-	.byte 146
-	.byte 162
-.else
 	.byte 138					;- D 0 - - - 0x00A352 02:8342: 8A
 	.byte 154					;- D 0 - - - 0x00A353 02:8343: 9A
-.endif
 
 SetupIntroCutscene:
 	LDX #CS_INTRO					;C - - - - - 0x00A354 02:8344: A2 00
@@ -566,13 +532,8 @@ SetupIntroCutscene:
 LoadOpeningScreen:
 	LDA #.BANK(OpeningChrA)					;C - - - - - 0x00A36D 02:835D: A9 04
 
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00A36F 02:835F: 85 3B
 	JSR SwapPrgBankB			;C - - - - - 0x00A371 02:8361: 20 56 FF
-.endif
 
 	LDY openingCounter			;C - - - - - 0x00A374 02:8364: AC CC 04
 	LDA OpeningChrA,Y			;C - - - - - 0x00A377 02:8367: B9 50 BB
@@ -598,24 +559,14 @@ LoadOpeningScreen:
 	LDA #.HIBYTE(LoadOpeningPalettes)	;C - - - - - 0x00A3A3 02:8393: A9 83
 	STA updateSub+1				;C - - - - - 0x00A3A5 02:8395: 85 1A
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	RTS							;C - - - - - 0x00A3A7 02:8397: 60
 
 LoadOpeningPalettes:
 	LDA #.BANK(OpeningPalTable)					;C - - - - - 0x00A3A8 02:8398: A9 04
 
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00A3AA 02:839A: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00A3AC 02:839C: 20 56 FF
-.endif
 
 	LDY openingCounter				;C - - - - - 0x00A3AF 02:839F: AC CC 04
 	LDA OpeningFadeColorAmounts,Y			;C - - - - - 0x00A3B2 02:83A2: B9 7A BB
@@ -635,11 +586,6 @@ CODE_0583B6:
 	CPY scratch1				;C - - - - - 0x00A3CC 02:83BC: C4 01
 	BNE CODE_0583B6				;C - - - - - 0x00A3CE 02:83BE: D0 F6
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	LDA #FADE_IN					;C - - - - - 0x00A3D0 02:83C0: A9 01
 	STA fadeMode				;C - - - - - 0x00A3D2 02:83C2: 8D 53 05
@@ -679,11 +625,7 @@ IntroUpdate:
 		STA openingStage				;C - - - - - 0x00A416 02:8406: 8D CF 04
 		STA openingCounter				;C - - - - - 0x00A419 02:8409: 8D CC 04
 
-.ifdef REGION_JP
-		JMP CODE_058436
-.else
 		BNE CODE_058436				;C - - - - - 0x00A41C 02:840C: D0 28
-.endif
 CODE_05840E:
 	LDA globalTimer				;C - - - - - 0x00A41E 02:840E: A5 14
 	AND #$3F					;C - - - - - 0x00A420 02:8410: 29 3F
@@ -695,11 +637,7 @@ CODE_05840E:
 		BCC CODE_058429				;C - - - - - 0x00A430 02:8420: 90 07
 			LDA #$00					;C - - - - - 0x00A432 02:8422: A9 00
 			STA openingCycle				;C - - - - - 0x00A434 02:8424: 8D CD 04
-.ifdef REGION_JP
-			JMP CODE_058436
-.else
 			BEQ CODE_058436				;C - - - - - 0x00A437 02:8427: F0 0D
-.endif
 CODE_058429:
 	LDA openingStage				;C - - - - - 0x00A439 02:8429: AD CF 04
 	CMP #OPENING_TREE_PLAY					;C - - - - - 0x00A43C 02:842C: C9 04
@@ -710,23 +648,13 @@ CODE_058429:
 CODE_058436:
 	LDA #.BANK(DATA_04BB80)					;C - - - - - 0x00A446 02:8436: A9 04
 
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00A448 02:8438: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00A44A 02:843A: 20 56 FF
-.endif
 
 	LDY openingCounter				;C - - - - - 0x00A44D 02:843D: AC CC 04
 	LDA DATA_04BB80,Y			;C - - - - - 0x00A450 02:8440: B9 80 BB
 	STA scratch1				;C - - - - - 0x00A453 02:8443: 85 01
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	LDA #FADE_OUT					;C - - - - - 0x00A455 02:8445: A9 00
 	STA fadeMode				;C - - - - - 0x00A457 02:8447: 8D 53 05
@@ -826,13 +754,8 @@ CutsceneActorTable:
 UpdateCutsceneActors:
 	LDA #.BANK(CutsceneActorScripts)					;C - - - - - 0x00A4EC 02:84DC: A9 06
 
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00A4EE 02:84DE: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00A4F0 02:84E0: 20 56 FF
-.endif
 
 	LDX currentCutsceneActor				;C - - - - - 0x00A4F3 02:84E3: AE 5B 07
 	LDA cutsceneActorActive,X				;C - - - - - 0x00A4F6 02:84E6: BD 53 07
@@ -1103,11 +1026,6 @@ UpdateCutsceneActors_NextActor:
 		STA currentCutsceneActor				;C - - - - - 0x00A6C3 02:86B3: 8D 5B 07
 @loopchecked:
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	JSR AnimateNonBubbles				;C - - - - - 0x00A6C6 02:86B6: 20 5C EE
 	JSR DrawObjects				;C - - - - - 0x00A6C9 02:86B9: 20 E2 EE
@@ -1488,13 +1406,8 @@ DATA_058944:
 CODE_05894D:
 	LDA #.BANK(DATA_0ABF19)					;C - - - - - 0x00A95D 02:894D: A9 0A
 
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00A95F 02:894F: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00A961 02:8951: 20 56 FF
-.endif
 
 	LDA pressedP1				;C - - - - - 0x00A964 02:8954: A5 0E
 	AND #KEY_START				;C - - - - - 0x00A966 02:8956: 29 08
@@ -1572,11 +1485,6 @@ CODE_0589D5:
 	LDA #.HIBYTE(CODE_088000)	;C - - - - - 0x00A9F2 02:89E2: A9 80
 	STA nmiBankedSub+1			;C - - - - - 0x00A9F4 02:89E4: 85 17
 CODE_0589E6:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x00A9F6 02:89E6: 60
 
 CODE_0589E7:
@@ -1675,11 +1583,7 @@ CODE_058A58:
 	STA fadeMode				;C - - - - - 0x00AA7D 02:8A6D: 8D 53 05
 	LDA #$2A					;C - - - - - 0x00AA80 02:8A70: A9 2A
 	STA fadeUnk0556				;C - - - - - 0x00AA82 02:8A72: 8D 56 05
-.ifdef REGION_JP
-	LDA #$03					;- - - - - - 0x00AA99 02:8A89: A9
-.else
 	LDA #$07					;C - - - - - 0x00AA85 02:8A75: A9 07
-.endif
 	STA fadeSpeedMask				;C - - - - - 0x00AA87 02:8A77: 8D 57 05
 	LDA #.LOBYTE(colorBuffer)					;C - - - - - 0x00AA8A 02:8A7A: A9 00
 	STA fadeColorsAdr				;C - - - - - 0x00AA8C 02:8A7C: 8D 5A 05
@@ -1690,17 +1594,10 @@ CODE_058A58:
 	LDA #32					;C - - - - - 0x00AA99 02:8A89: A9 20
 	STA fadeColorsAmount				;C - - - - - 0x00AA9B 02:8A8B: 8D 55 05
 
-.ifdef REGION_JP
-	LDA #.LOBYTE(CODE_JP_058AC4)					;- - - - - - 0x00AAB2 02:8AA2: A9
-	STA updateSub					;- - - - - - 0x00AAB4 02:8AA4: 85
-	LDA #.HIBYTE(CODE_JP_058AC4)					;- - - - - - 0x00AAB6 02:8AA6: A9
-	STA updateSub+1					;- - - - - - 0x00AAB8 02:8AA8: 85
-.else
 	LDA #.LOBYTE(CODE_058AB0)	;C - - - - - 0x00AA9E 02:8A8E: A9 B0
 	STA updateSub				;C - - - - - 0x00AAA0 02:8A90: 85 19
 	LDA #.HIBYTE(CODE_058AB0)	;C - - - - - 0x00AAA2 02:8A92: A9 8A
 	STA updateSub+1				;C - - - - - 0x00AAA4 02:8A94: 85 1A
-.endif
 
 	LDA #.LOBYTE(RunColorFader)	;C - - - - - 0x00AAA6 02:8A96: A9 50
 	STA nmiBankedSub			;C - - - - - 0x00AAA8 02:8A98: 85 16
@@ -1728,95 +1625,8 @@ palEndingUnfaded:
 	.byte $0C					;- D 0 - - - 0x00AABE 02:8AAE: 0C
 	.byte $0F					;- D 0 - - - 0x00AABF 02:8AAF: 0F
 
-.ifdef REGION_JP
-CODE_JP_058AC4:
-	;- - - - - - 0x00AAD4 02:8AC4: A9
-	LDA #FADE_IN
-	STA fadeMode
-	LDA #$2A
-	STA fadeUnk0556
-	LDA #$03
-	STA fadeSpeedMask
-	LDA #.LOBYTE(unfadedColorBuffer)
-	STA fadeMaxColorsAdr
-	LDA #.HIBYTE(unfadedColorBuffer)
-	STA fadeMaxColorsAdr+1
-	LDA #.LOBYTE(colorBuffer)
-	STA fadeColorsAdr
-	LDA #.HIBYTE(colorBuffer)
-	STA fadeColorsAdr+1
-	LDA #4
-	STA fadePasses
-	LDA #$20
-	STA fadeColorsAmount
-	LDA #.LOBYTE(CODE_JP_058B02)
-	STA updateSub
-	LDA #.HIBYTE(CODE_JP_058B02)
-	STA updateSub+1
-	LDA #.LOBYTE(RunColorFader)
-	STA nmiBankedSub
-	LDA #.HIBYTE(RunColorFader)
-	STA nmiBankedSub+1
-	RTS
-.endif
 
-.ifdef REGION_JP
-CODE_JP_058B02:
-	LDA #FADE_WHITE					;- - - - - - 0x00AB12 02:8B02: A9
-	STA fadeMode					;- - - - - - 0x00AB14 02:8B04: 8D
-	LDA #$2A					;- - - - - - 0x00AB17 02:8B07: A9
-	STA fadeUnk0556					;- - - - - - 0x00AB19 02:8B09: 8D
-	LDA #$03					;- - - - - - 0x00AB1C 02:8B0C: A9
-	STA fadeSpeedMask					;- - - - - - 0x00AB1E 02:8B0E: 8D
-	LDA #.LOBYTE(colorBuffer)					;- - - - - - 0x00AB21 02:8B11: A9
-	STA fadeColorsAdr					;- - - - - - 0x00AB23 02:8B13: 8D
-	LDA #.HIBYTE(colorBuffer)					;- - - - - - 0x00AB26 02:8B16: A9
-	STA fadeColorsAdr+1					;- - - - - - 0x00AB28 02:8B18: 8D
-	LDA #4					;- - - - - - 0x00AB2B 02:8B1B: A9
-	STA fadePasses					;- - - - - - 0x00AB2D 02:8B1D: 8D
-	LDA #32					;- - - - - - 0x00AB30 02:8B20: A9
-	STA fadeColorsAmount					;- - - - - - 0x00AB32 02:8B22: 8D
-	LDA #.LOBYTE(CODE_JP_058B36)					;- - - - - - 0x00AB35 02:8B25: A9
-	STA updateSub					;- - - - - - 0x00AB37 02:8B27: 85
-	LDA #.HIBYTE(CODE_JP_058B36)					;- - - - - - 0x00AB39 02:8B29: A9
-	STA updateSub+1					;- - - - - - 0x00AB3B 02:8B2B: 85
-	LDA #.LOBYTE(RunColorFader)					;- - - - - - 0x00AB3D 02:8B2D: A9
-	STA nmiBankedSub					;- - - - - - 0x00AB3F 02:8B2F: 85
-	LDA #.HIBYTE(RunColorFader)					;- - - - - - 0x00AB41 02:8B31: A9
-	STA nmiBankedSub+1					;- - - - - - 0x00AB43 02:8B33: 85
-	RTS					;- - - - - - 0x00AB45 02:8B35: 60
-.endif
 
-.ifdef REGION_JP
-CODE_JP_058B36:
-	LDA #FADE_IN					;- - - - - - 0x00AB46 02:8B36: A9
-	STA fadeMode					;- - - - - - 0x00AB48 02:8B38: 8D
-	LDA #$2A					;- - - - - - 0x00AB4B 02:8B3B: A9
-	STA fadeUnk0556					;- - - - - - 0x00AB4D 02:8B3D: 8D
-	LDA #$03					;- - - - - - 0x00AB50 02:8B40: A9
-	STA fadeSpeedMask					;- - - - - - 0x00AB52 02:8B42: 8D
-	LDA #.LOBYTE(unfadedColorBuffer)					;- - - - - - 0x00AB55 02:8B45: A9
-	STA fadeMaxColorsAdr					;- - - - - - 0x00AB57 02:8B47: 8D
-	LDA #.HIBYTE(unfadedColorBuffer)					;- - - - - - 0x00AB5A 02:8B4A: A9
-	STA fadeMaxColorsAdr+1					;- - - - - - 0x00AB5C 02:8B4C: 8D
-	LDA #.LOBYTE(colorBuffer)					;- - - - - - 0x00AB5F 02:8B4F: A9
-	STA fadeColorsAdr					;- - - - - - 0x00AB61 02:8B51: 8D
-	LDA #.HIBYTE(colorBuffer)					;- - - - - - 0x00AB64 02:8B54: A9
-	STA fadeColorsAdr+1					;- - - - - - 0x00AB66 02:8B56: 8D
-	LDA #4					;- - - - - - 0x00AB69 02:8B59: A9
-	STA fadePasses					;- - - - - - 0x00AB6B 02:8B5B: 8D
-	LDA #32					;- - - - - - 0x00AB6E 02:8B5E: A9
-	STA fadeColorsAmount					;- - - - - - 0x00AB70 02:8B60: 8D
-	LDA #.LOBYTE(CODE_058AB0)					;- - - - - - 0x00AB73 02:8B63: A9
-	STA updateSub					;- - - - - - 0x00AB75 02:8B65: 85
-	LDA #.HIBYTE(CODE_058AB0)					;- - - - - - 0x00AB77 02:8B67: A9
-	STA updateSub+1					;- - - - - - 0x00AB79 02:8B69: 85
-	LDA #.LOBYTE(RunColorFader)					;- - - - - - 0x00AB7B 02:8B6B: A9
-	STA nmiBankedSub					;- - - - - - 0x00AB7D 02:8B6D: 85
-	LDA #.HIBYTE(RunColorFader)					;- - - - - - 0x00AB7F 02:8B6F: A9
-	STA nmiBankedSub+1					;- - - - - - 0x00AB81 02:8B71: 85
-	RTS					;- - - - - - 0x00AB83 02:8B73: 60
-.endif
 
 CODE_058AB0:
 	LDA #$05					;C - - - - - 0x00AAC0 02:8AB0: A9 05
@@ -1918,13 +1728,8 @@ CODE_058B5A:
 	STA vNametable				;C - - - - - 0x00AB6C 02:8B5C: 85 2D
 	STA roundFlags				;C - - - - - 0x00AB6E 02:8B5E: 8D 71 04
 
-.ifdef REGION_JP
-	LDA #$40
-	STA $E000
-.else
 	LDA #$01					;C - - - - - 0x00AB71 02:8B61: A9 01
 	STA $A000				;C - - - - - 0x00AB73 02:8B63: 8D 00 A0
-.endif
 
 	LDA #$00					;C - - - - - 0x00AB76 02:8B66: A9 00
 	STA wideRound				;C - - - - - 0x00AB78 02:8B68: 8D B0 03
@@ -2280,9 +2085,7 @@ CODE_058DB2:
 	STA a:musicTrigger				;C - - - - - 0x00ADC4 02:8DB4: 8D E0 00
 
 	JSR ResetLivesAndScore				;C - - - - - 0x00ADC7 02:8DB7: 20 8B 88
-.ifndef REGION_JP
 	JSR CoopContinue			;(co-op 7a) P2 gets the same fresh start
-.endif
 	JSR CODE_05962D				;C - - - - - 0x00ADCA 02:8DBA: 20 2D 96
 CODE_058DBD:
 	RTS							;C - - - - - 0x00ADCD 02:8DBD: 60
@@ -2530,10 +2333,6 @@ CODE_058F5E:
 	AND #KEY_B					;C - - - - - 0x00AF70 02:8F60: 29 02
 	BEQ CODE_058F85				;C - - - - - 0x00AF72 02:8F62: F0 21
 
-.ifdef REGION_JP
-	LDA shooting					;- - - - - - 0x00B038 02:9028: AD
-	BNE @holding					;- - - - - - 0x00B03B 02:902B: D0
-.endif
 
 	LDA playerPressed			;C - - - - - 0x00AF74 02:8F64: A5 73
 	AND #KEY_B					;C - - - - - 0x00AF76 02:8F66: 29 02
@@ -2860,11 +2659,9 @@ DATA_059155:
 	.byte $04					;- - - - - - 0x00B168 02:9158: 04
 
 TrySingleBubble:
-.ifndef REGION_JP
 	;JP ver does this check elsewhere
 	LDA shooting				;C - - - - - 0x00B169 02:9159: AD 17 05
 	BNE @end				;C - - - - - 0x00B16C 02:915C: D0 15
-.endif
 		LDA playerDir				;C - - - - - 0x00B16E 02:915E: A5 77
 		STA shootDir				;C - - - - - 0x00B170 02:9160: 8D 14 05
 		LDA #$01					;C - - - - - 0x00B173 02:9163: A9 01
@@ -3258,10 +3055,8 @@ CODE_059410:
 		JSR CODE_059A0E				;C - - - - - 0x00B432 02:9422: 20 0E 9A
 		JSR TrySingleBubble				;C - - - - - 0x00B435 02:9425: 20 59 91
 
-.ifndef REGION_JP
 		LDA #$00					;C - - - - - 0x00B438 02:9428: A9 00
 		STA ram_04CA				;C - - - - - 0x00B43A 02:942A: 8D CA 04
-.endif
 CODE_05942D:
 	JSR CODE_0596DF				;C - - - - - 0x00B43D 02:942D: 20 DF 96
 	JSR CODE_058EFB				;C - - - - - 0x00B440 02:9430: 20 FB 8E
@@ -3544,28 +3339,18 @@ CODE_0595C1:
 		LDA currentRound				;C - - - - - 0x00B5DC 02:95CC: A5 D8
 		CMP #20					;C - - - - - 0x00B5DE 02:95CE: C9 14
 		BNE CODE_0595D7				;C - - - - - 0x00B5E0 02:95D0: D0 05
-.ifndef REGION_JP
 			LDA coopResident			;(co-op 7a) only the resident (camera) player's respawn resets the scroll
 			BNE CODE_0595D7
-.endif
 			LDA #$01					;C - - - - - 0x00B5E2 02:95D2: A9 01
 			STA wideHScroll				;C - - - - - 0x00B5E4 02:95D4: 8D 61 07
 	CODE_0595D7:
-.ifdef REGION_JP
-		LDA multiplayer				;C - - - - - 0x00B5E7 02:95D7: A5 74
-.else
 		JSR CoopMultiplayer			;(co-op 7a) multiplayer, or 0 in co-op: no alternating-2P switch
-.endif
 		CMP #$01					;C - - - - - 0x00B5E9 02:95D9: C9 01
 		BNE CODE_0595E3				;C - - - - - 0x00B5EB 02:95DB: D0 06
 			JSR CODE_05962D				;C - - - - - 0x00B5ED 02:95DD: 20 2D 96
 			JMP CODE_059606				;C - - - - - 0x00B5F0 02:95E0: 4C 06 96
 	CODE_0595E3:
-.ifdef REGION_JP
-		LDA #196					;- - - - - - 0x00B6B2 02:96A2: A9
-.else
 		LDA #193					;C - - - - - 0x00B5F3 02:95E3: A9 C1
-.endif
 		STA objY				;C - - - - - 0x00B5F5 02:95E5: 8D 8B 05
 		LDA #31					;C - - - - - 0x00B5F8 02:95E8: A9 1F
 		STA objX				;C - - - - - 0x00B5FA 02:95EA: 8D B3 05
@@ -4490,7 +4275,6 @@ CODE_059BB8:
 	STA ram_0081				;C - - - - - 0x00BBCA 02:9BBA: 85 81
 	RTS							;C - - - - - 0x00BBCC 02:9BBC: 60
 
-.ifndef REGION_JP
 CODE_059BBD:
 	;Unreached
 	LDA objY				;- - - - - - 0x00BBCD 02:9BBD: AD
@@ -4506,7 +4290,6 @@ CODE_059BCE:
 	STA ram_0078				;- - - - - - 0x00BBE0 02:9BD0: 85
 CODE_059BD2:
 	RTS							;- - - - - - 0x00BBE2 02:9BD2: 60
-.endif
 
 CODE_059BD3:
 	LDA #$00					;C - - - - - 0x00BBE3 02:9BD3: A9 00
@@ -4971,13 +4754,8 @@ CODE_059EAF:
 
 CODE_059EE4:
 	LDA #.BANK(RoundHUDChrBanks)					;C - - - - - 0x00BEF4 02:9EE4: A9 04
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00BEF6 02:9EE6: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00BEF8 02:9EE8: 20 56 FF
-.endif
 
 	LDX vNametable				;C - - - - - 0x00BEFB 02:9EEB: A6 2D
 	LDY currentRound				;C - - - - - 0x00BEFD 02:9EED: A4 D8
@@ -5031,18 +4809,8 @@ CODE_059F2A:
 	LDA #$03					;C - - - - - 0x00BF55 02:9F45: A9 03
 	STA livesCurrentPos				;C - - - - - 0x00BF57 02:9F47: 8D 98 04
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB					;- - - - - - 0x00C003 02:9FF3: A5
-	STA prgBankB					;- - - - - - 0x00C005 02:9FF5: 85
-	STA $8001					;- - - - - - 0x00C007 02:9FF7: 8D
-.endif
 	RTS							;C - - - - - 0x00BF5A 02:9F4A: 60
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x00C00B 02:9FFB: 04
-	.incbin "filler/fill05_JP.bin"
-.else
 DATA_059F4B:
 	;Unreached
 	.byte $03					;- - - - - - 0x00BF5B 02:9F4B: 03
@@ -5053,4 +4821,3 @@ CODE_059F4C:
 	LDA #$03					;- - - - - - 0x00BF60 02:9F50: A9
 	STA livesCurrentPos				;- - - - - - 0x00BF62 02:9F52: 8D
 	RTS							;- - - - - - 0x00BF65 02:9F55: 60
-.endif

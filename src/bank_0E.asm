@@ -2810,21 +2810,6 @@ DATA_0ECE0F:
 	.byte $16					;- - - - - - 0x01CE50 07:CE40: 16
 	.byte $0C					;- - - - - - 0x01CE51 07:CE41: 0C
 	.byte $17					;- - - - - - 0x01CE52 07:CE42: 17
-.ifdef REGION_JP
-	.byte $D8					;- - - - - - 0x01CE53 07:CE43: D8
-	.byte $40					;- - - - - - 0x01CE54 07:CE44: 40
-	.byte $40					;- - - - - - 0x01CE55 07:CE45: 40
-	.byte $E0					;- - - - - - 0x01CE56 07:CE46: E0
-	.byte $F8					;- - - - - - 0x01CE57 07:CE47: F8
-	.byte $00					;- - - - - - 0x01CE58 07:CE48: 00
-	.byte $5F					;- D 0 - - - 0x01CE59 07:CE49: 5F
-	.byte $3F					;- D 0 - - - 0x01CE5A 07:CE4A: 3F
-	.byte $3F					;- D 0 - - - 0x01CE5B 07:CE4B: 3F
-	.byte $3F					;- D 0 - - - 0x01CE5C 07:CE4C: 3F
-	.byte $3F					;- - - - - - 0x01CE5D 07:CE4D: 3F
-	.byte $5F					;- - - - - - 0x01CE5E 07:CE4E: 5F
-	.byte $67					;- - - - - - 0x01CE5F 07:CE4F: 67
-.else
 	.byte $26					;- - - - - - 0x01CE53 07:CE43: 26
 	.byte $11					;- - - - - - 0x01CE54 07:CE44: 11
 	.byte $39					;- - - - - - 0x01CE55 07:CE45: 39
@@ -2838,7 +2823,6 @@ DATA_0ECE0F:
 	.byte $26					;- - - - - - 0x01CE5D 07:CE4D: 26
 	.byte $11					;- - - - - - 0x01CE5E 07:CE4E: 11
 	.byte $36					;- - - - - - 0x01CE5F 07:CE4F: 36
-.endif
 
 MusicTable:
 	;- D 0 - - - 0x01CE60 07:CE50: 00
@@ -2867,24 +2851,6 @@ MusicTable:
 	.word trGameOver
 
 DATA_0ECE70:
-.ifdef REGION_JP
-	.byte $E0					;- - - - - - 0x01CE80 07:CE70: E0
-	.byte $70					;- - - - - - 0x01CE81 07:CE71: 70
-	.byte $28					;- - - - - - 0x01CE82 07:CE72: 28
-	.byte $14					;- - - - - - 0x01CE83 07:CE73: 14
-	.byte $0A					;- - - - - - 0x01CE84 07:CE74: 0A
-	.byte $06					;- - - - - - 0x01CE85 07:CE75: 06
-	.byte $00					;- - - - - - 0x01CE86 07:CE76: 00
-	.byte $00					;- - - - - - 0x01CE87 07:CE77: 00
-	.byte $40					;- - - - - - 0x01CE88 07:CE78: 40
-	.byte $00					;- D 0 - - - 0x01CE89 07:CE79: 00
-	.byte $10					;- D 0 - - - 0x01CE8A 07:CE7A: 10
-	.byte $08					;- D 0 - - - 0x01CE8B 07:CE7B: 08
-	.byte $04					;- D 0 - - - 0x01CE8C 07:CE7C: 04
-	.byte $00					;- - - - - - 0x01CE8D 07:CE7D: 00
-	.byte $00					;- - - - - - 0x01CE8E 07:CE7E: 00
-	.byte $00					;- - - - - - 0x01CE8F 07:CE7F: 00
-.else
 	.byte $00					;- - - - - - 0x01CE80 07:CE70: 00
 	.byte $3E					;- - - - - - 0x01CE81 07:CE71: 3E
 	.byte $07					;- - - - - - 0x01CE82 07:CE72: 07
@@ -2901,7 +2867,6 @@ DATA_0ECE70:
 	.byte $00					;- - - - - - 0x01CE8D 07:CE7D: 00
 	.byte $2B					;- - - - - - 0x01CE8E 07:CE7E: 2B
 	.byte $07					;- - - - - - 0x01CE8F 07:CE7F: 07
-.endif
 
 SoundTable:
 	;- D 0 - - - 0x01CE90 07:CE80: 09
@@ -2956,12 +2921,7 @@ SoundTable:
 	.word 0,snClock
 
 DATA_0ECF40:
-.ifdef REGION_JP
-	;- - - - - - 0x01CF50 07:CF40: 03
-	.incbin "filler/fill0E_Engine_JP.bin"
-.else
 	;Filler removed: $CF40-$D2FF is the COOP_CODE segment (see config_us)
-.endif
 
 .segment "PRG_BANK_E_TRACKS"
 
@@ -4500,9 +4460,4 @@ trGameOver_TRI:
 	.byte SO_END
 
 ;Filler data
-.ifdef REGION_JP
-	;- - - - - - 0x01D913 07:D903: 00
-	.incbin "filler/fill0E_Tracks_JP.bin"
-.else
 	;Filler removed: $D903-$DFFF is the COOP_CODE2 segment (see config_us)
-.endif

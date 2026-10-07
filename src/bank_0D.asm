@@ -6681,8 +6681,3 @@ snClock_BE07:
 	.byte SO_RET
 	.byte SO_END
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x01BE24 06:BE14: C1
-	.incbin "filler/fill0D_JP.bin"
-.endif

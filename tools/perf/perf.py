@@ -136,7 +136,7 @@ def cmd_build(a):
     d = os.path.join(BUILDS, a.name)
     os.makedirs(d, exist_ok=True)
     obj = os.path.join(d, "main.o")
-    defs = ["-D", "REGION_US"] + sum([["-D", x] for x in (a.define or [])], [])
+    defs = sum([["-D", x] for x in (a.define or [])], [])
     sh(["ca65", "-g"] + defs + ["src/main.asm", "-o", obj], cwd=ROOT)
     sh(["ld65", "-C", "config_us", "-Ln", os.path.join(d, "labels.txt"), "-m", os.path.join(d, "rom.map"),
         "--dbgfile", os.path.join(d, "rom.dbg"), "-o", os.path.join(d, "rom.nes"), obj], cwd=ROOT)

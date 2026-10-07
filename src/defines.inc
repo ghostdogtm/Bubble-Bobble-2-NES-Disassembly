@@ -1,23 +1,4 @@
 ;--- JP-exculsives ---
-.ifdef REGION_JP
-
-.ifndef INCLUDE_DEBUG_MENU
-	INCLUDE_DEBUG_MENU = 	1
-.endif
-
-.ifndef JP_ENEMY_PLACEMENT
-	JP_ENEMY_PLACEMENT = 	1
-.endif
-
-.ifndef JP_ROUND_MAPS
-	JP_ROUND_MAPS = 		1
-.endif
-
-.ifndef JP_AIRFLOW
-	JP_AIRFLOW = 			1
-.endif
-
-.endif
 
 ;--- RAM ---
 .include "ram.inc"

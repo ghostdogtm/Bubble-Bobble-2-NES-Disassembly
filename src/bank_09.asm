@@ -13,169 +13,11 @@ CODE_098008:
 	STA terrainResult				;C - - - - - 0x01201A 04:800A: 8D E9 04
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01201D 04:800D: BD 77 05
 	BNE CODE_098015				;C - - - - - 0x012020 04:8010: D0 03
-.ifdef REGION_JP
-		JMP CODE_09815D				;C - - - - - 0x012022 04:8012: 4C 5D 81
-.else
 		;Empty slot: step to the next slot right here instead of JMP CODE_09815D (perf phase 4)
 		INX
 		CPX bubbleSlotEnd			;(co-op) was CPX #20: 19 while P2 owns slot 39
 		BNE CODE_098008
 		JMP CODE_098165
-.endif
-.ifdef REGION_JP
-CODE_098015:
-	CMP #BUBBLE_RISING					;C - - - - - 0x012025 04:8015: C9 01
-	BNE CODE_09803C				;C - - - - - 0x012027 04:8017: D0 23
-		LDA globalTimer				;C - - - - - 0x012029 04:8019: A5 14
-		AND #$0E					;C - - - - - 0x01202B 04:801B: 29 0E
-		BNE CODE_098039				;C - - - - - 0x01202D 04:801D: D0 1A
-			INC bubbleProgress,X				;C - - - - - 0x01202F 04:801F: FE D5 04
-			LDA bubbleProgress,X				;C - - - - - 0x012032 04:8022: BD D5 04
-			CMP bubbleLifespan				;C - - - - - 0x012035 04:8025: CD 1C 05
-			BNE CODE_098039				;C - - - - - 0x012038 04:8028: D0 0F
-				LDA #BUBBLE_EXPIRING					;C - - - - - 0x01203A 04:802A: A9 02
-				STA scratch0				;C - - - - - 0x01203C 04:802C: 85 00
-				LDA #.LOBYTE(anBubbleWeak_ID)					;C - - - - - 0x01203E 04:802E: A9 30
-				STA scratch1				;C - - - - - 0x012040 04:8030: 85 01
-				LDA #.HIBYTE(anBubbleWeak_ID)					;C - - - - - 0x012042 04:8032: A9 00
-				STA scratch2				;C - - - - - 0x012044 04:8034: 85 02
-				JSR ReplaceBubble				;C - - - - - 0x012046 04:8036: 20 CE 8A
-	CODE_098039:
-		JMP CODE_098149				;C - - - - - 0x012049 04:8039: 4C 49 81
-CODE_09803C:
-	CMP #BUBBLE_EXPIRING					;C - - - - - 0x01204C 04:803C: C9 02
-	BNE CODE_098052				;C - - - - - 0x01204E 04:803E: D0 12
-		INC bubbleProgress,X				;C - - - - - 0x012050 04:8040: FE D5 04
-		LDA bubbleProgress,X				;C - - - - - 0x012053 04:8043: BD D5 04
-		CMP #$FF					;C - - - - - 0x012056 04:8046: C9 FF
-		BNE CODE_09804F				;C - - - - - 0x012058 04:8048: D0 05
-			LDA #BUBBLE_EXPIRED					;C - - - - - 0x01205A 04:804A: A9 19
-			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01205C 04:804C: 9D 77 05
-	CODE_09804F:
-		JMP CODE_098149				;C - - - - - 0x01205F 04:804F: 4C 49 81
-CODE_098052:
-	CMP #BUBBLE_ENEMY					;C - - - - - 0x012062 04:8052: C9 03
-	BNE CODE_098079				;C - - - - - 0x012064 04:8054: D0 23
-		LDA globalTimer				;C - - - - - 0x012066 04:8056: A5 14
-		AND #$0E					;C - - - - - 0x012068 04:8058: 29 0E
-		BNE CODE_098076				;C - - - - - 0x01206A 04:805A: D0 1A
-			INC bubbleProgress,X				;C - - - - - 0x01206C 04:805C: FE D5 04
-			LDA bubbleProgress,X				;C - - - - - 0x01206F 04:805F: BD D5 04
-			CMP bubbleLifespan				;C - - - - - 0x012072 04:8062: CD 1C 05
-			BNE CODE_098076				;C - - - - - 0x012075 04:8065: D0 0F
-				LDA #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x012077 04:8067: A9 04
-				STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x012079 04:8069: 9D 77 05
-				LDA #$03					;C - - - - - 0x01207C 04:806C: A9 03
-				STA objAttr+OSLOT_BUBBLE,X				;C - - - - - 0x01207E 04:806E: 9D 07 07
-				LDA #$00					;C - - - - - 0x012081 04:8071: A9 00
-				STA bubbleProgress,X				;C - - - - - 0x012083 04:8073: 9D D5 04
-	CODE_098076:
-		JMP CODE_098149				;C - - - - - 0x012086 04:8076: 4C 49 81
-CODE_098079:
-	CMP #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x012089 04:8079: C9 04
-	BNE CODE_0980B5				;C - - - - - 0x01208B 04:807B: D0 38
-		INC bubbleProgress,X				;C - - - - - 0x01208D 04:807D: FE D5 04
-		LDA bubbleProgress,X				;C - - - - - 0x012090 04:8080: BD D5 04
-		CMP #$80					;C - - - - - 0x012093 04:8083: C9 80
-		BCC CODE_0980B2				;C - - - - - 0x012095 04:8085: 90 2B
-			STX scratch1				;C - - - - - 0x012097 04:8087: 86 01
-			LDA bubbleTrappedSlot,X				;C - - - - - 0x012099 04:8089: BD FF 04
-			TAX							;C - - - - - 0x01209C 04:808C: AA
-			TAY							;C - - - - - 0x01209D 04:808D: A8
-
-			LDA #$01					;C - - - - - 0x01209E 04:808E: A9 01
-			STA objState+OSLOT_ENEMY,X				;C - - - - - 0x0120A0 04:8090: 9D 6C 05
-			STA enemyMad,X				;C - - - - - 0x0120A3 04:8093: 95 63
-
-			LDX scratch1				;C - - - - - 0x0120A5 04:8095: A6 01
-			LDA objY+OSLOT_BUBBLE,X				;C - - - - - 0x0120A7 04:8097: BD 9F 05
-			STA objY+OSLOT_ENEMY,Y				;C - - - - - 0x0120AA 04:809A: 99 94 05
-			LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x0120AD 04:809D: BD C7 05
-			STA objX+OSLOT_ENEMY,Y				;C - - - - - 0x0120B0 04:80A0: 99 BC 05
-
-			LDA #3					;C - - - - - 0x0120B3 04:80A3: A9 03
-			STA objAttr+OSLOT_ENEMY,Y				;C - - - - - 0x0120B5 04:80A5: 99 FC 06
-			LDA #BUBBLE_EXPIRED					;C - - - - - 0x0120B8 04:80A8: A9 19
-			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x0120BA 04:80AA: 9D 77 05
-
-			LDA #$00					;C - - - - - 0x0120BD 04:80AD: A9 00
-			STA bubbleTrappedSlot,X				;C - - - - - 0x0120BF 04:80AF: 9D FF 04
-	CODE_0980B2:
-		JMP CODE_098149				;C - - - - - 0x0120C2 04:80B2: 4C 49 81
-CODE_0980B5:
-	CMP #BUBBLE_POWER					;C - - - - - 0x0120C5 04:80B5: C9 05
-	BNE CODE_0980BC				;C - - - - - 0x0120C7 04:80B7: D0 03
-		JMP CODE_098149				;C - - - - - 0x0120C9 04:80B9: 4C 49 81
-CODE_0980BC:
-	CMP #BUBBLE_POWER_POPPED					;C - - - - - 0x0120CC 04:80BC: C9 06
-	BNE CODE_0980C6				;C - - - - - 0x0120CE 04:80BE: D0 06
-		JSR CODE_098339				;C - - - - - 0x0120D0 04:80C0: 20 39 83
-		JMP CODE_09815D				;C - - - - - 0x0120D3 04:80C3: 4C 5D 81
-CODE_0980C6:
-	CMP #BUBBLE_EXPIRED					;C - - - - - 0x0120D6 04:80C6: C9 19
-	BNE CODE_0980DC				;C - - - - - 0x0120D8 04:80C8: D0 12
-		LDA #$20					;C - - - - - 0x0120DA 04:80CA: A9 20
-		STA scratch0				;C - - - - - 0x0120DC 04:80CC: 85 00
-		LDA #.LOBYTE(anBubblePop_ID)					;C - - - - - 0x0120DE 04:80CE: A9 2E
-		STA scratch1				;C - - - - - 0x0120E0 04:80D0: 85 01
-		LDA #.HIBYTE(anBubblePop_ID)					;C - - - - - 0x0120E2 04:80D2: A9 00
-		STA scratch2				;C - - - - - 0x0120E4 04:80D4: 85 02
-		JSR ReplaceBubble				;C - - - - - 0x0120E6 04:80D6: 20 CE 8A
-		JMP CODE_09815D				;C - - - - - 0x0120E9 04:80D9: 4C 5D 81
-CODE_0980DC:
-	CMP #BUBBLE_EXPIRED_POP					;C - - - - - 0x0120EC 04:80DC: C9 20
-	BNE CODE_0980F8				;C - - - - - 0x0120EE 04:80DE: D0 18
-
-	INC bubbleProgress,X				;C - - - - - 0x0120F0 04:80E0: FE D5 04
-	LDA bubbleProgress,X				;C - - - - - 0x0120F3 04:80E3: BD D5 04
-	CMP #$04					;C - - - - - 0x0120F6 04:80E6: C9 04
-	BCC CODE_09815D				;C - - - - - 0x0120F8 04:80E8: 90 73
-
-	LDA #$00					;C - - - - - 0x0120FA 04:80EA: A9 00
-	STA scratch0				;C - - - - - 0x0120FC 04:80EC: 85 00
-	STA scratch1				;C - - - - - 0x0120FE 04:80EE: 85 01
-	STA scratch2				;C - - - - - 0x012100 04:80F0: 85 02
-	JSR ReplaceBubble				;C - - - - - 0x012102 04:80F2: 20 CE 8A
-	JMP CODE_09815D				;C - - - - - 0x012105 04:80F5: 4C 5D 81
-CODE_0980F8:
-	CMP #BUBBLE_POPPING					;C - - - - - 0x012108 04:80F8: C9 22
-	BNE CODE_098119				;C - - - - - 0x01210A 04:80FA: D0 1D
-		LDA objAnimHI+OSLOT_BUBBLE,X				;C - - - - - 0x01210C 04:80FC: BD 2F 07
-		BEQ CODE_098107				;C - - - - - 0x01210F 04:80FF: F0 06
-			JSR CODE_0981F8				;C - - - - - 0x012111 04:8101: 20 F8 81
-			JMP CODE_09815D				;C - - - - - 0x012114 04:8104: 4C 5D 81
-	CODE_098107:
-		LDA #BUBBLE_POPPED					;C - - - - - 0x012117 04:8107: A9 23
-		STA scratch0				;C - - - - - 0x012119 04:8109: 85 00
-		LDA #.LOBYTE(anBubblePop_ID)					;C - - - - - 0x01211B 04:810B: A9 2E
-		STA scratch1				;C - - - - - 0x01211D 04:810D: 85 01
-		LDA #.HIBYTE(anBubblePop_ID)					;C - - - - - 0x01211F 04:810F: A9 00
-		STA scratch2				;C - - - - - 0x012121 04:8111: 85 02
-		JSR ReplaceBubble				;C - - - - - 0x012123 04:8113: 20 CE 8A
-		JMP CODE_09815D				;C - - - - - 0x012126 04:8116: 4C 5D 81
-CODE_098119:
-	CMP #BUBBLE_POPPED					;C - - - - - 0x012129 04:8119: C9 23
-	BNE CODE_098135				;C - - - - - 0x01212B 04:811B: D0 18
-		INC bubbleProgress,X				;C - - - - - 0x01212D 04:811D: FE D5 04
-		LDA bubbleProgress,X				;C - - - - - 0x012130 04:8120: BD D5 04
-		CMP #$04					;C - - - - - 0x012133 04:8123: C9 04
-		BCC CODE_09815D				;C - - - - - 0x012135 04:8125: 90 36
-			LDA #$00					;C - - - - - 0x012137 04:8127: A9 00
-			STA scratch0				;C - - - - - 0x012139 04:8129: 85 00
-			STA scratch1				;C - - - - - 0x01213B 04:812B: 85 01
-			STA scratch2				;C - - - - - 0x01213D 04:812D: 85 02
-			JSR ReplaceBubble				;C - - - - - 0x01213F 04:812F: 20 CE 8A
-			JMP CODE_09815D				;C - - - - - 0x012142 04:8132: 4C 5D 81
-CODE_098135:
-	CMP #BUBBLE_EMERGING					;C - - - - - 0x012145 04:8135: C9 80
-.ifdef REGION_JP
-	BNE CODE_09815D					;- - - - - - 0x012147 04:8137: D0
-.else
-	BNE CODE_09813F				;C - - - - - 0x012147 04:8137: D0 06
-.endif
-		JSR BubbleEmergingUpdate				;C - - - - - 0x012149 04:8139: 20 9C 8B
-		JMP CODE_09815D				;C - - - - - 0x01214C 04:813C: 4C 5D 81
-.else
 ;Perf phase 4: the same compare/handler blocks, reordered by measured state frequency
 ;(RISING, ENEMY, EXPIRING, POWER, POPPING, EMERGING first). Every handler is still entered from its
 ;own CMP #state / BNE pair, so A = state, Z = 1, C = 1, N = 0 and X/Y/V are unchanged. POPPED and
@@ -338,16 +180,13 @@ CODE_0980C6:
 		STA scratch2				;C - - - - - 0x0120E4 04:80D4: 85 02
 		JSR ReplaceBubble				;C - - - - - 0x0120E6 04:80D6: 20 CE 8A
 		JMP CODE_09815D				;C - - - - - 0x0120E9 04:80D9: 4C 5D 81
-.endif
 CODE_09813F:
-.ifndef REGION_JP
 	TXA							;C - - - - - 0x01214F 04:813F: 8A
 	PHA							;C - - - - - 0x012150 04:8140: 48
 	JSR CODE_0FFAB9				;C - - - - - 0x012151 04:8141: 20 B9 FA
 	PLA							;C - - - - - 0x012154 04:8144: 68
 	TAX							;C - - - - - 0x012155 04:8145: AA
 	JMP CODE_09815D				;C - - - - - 0x012156 04:8146: 4C 5D 81
-.endif
 CODE_098149:
 	LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x012159 04:8149: BD C7 05
 	STA scratch4				;C - - - - - 0x01215C 04:814C: 85 04
@@ -361,11 +200,7 @@ CODE_098149:
 	TAX							;C - - - - - 0x01216C 04:815C: AA
 CODE_09815D:
 	INX							;C - - - - - 0x01216D 04:815D: E8
-.ifdef REGION_JP
-	CPX #20					;C - - - - - 0x01216E 04:815E: E0 14
-.else
 	CPX bubbleSlotEnd			;(co-op) was CPX #20
-.endif
 	BEQ CODE_098165				;C - - - - - 0x012170 04:8160: F0 03
 		JMP CODE_098008				;C - - - - - 0x012172 04:8162: 4C 08 80
 CODE_098165:
@@ -391,11 +226,7 @@ CODE_098182:
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x012194 04:8184: BD 77 05
 	BEQ CODE_098191				;C - - - - - 0x012197 04:8187: F0 08
 		INX							;C - - - - - 0x012199 04:8189: E8
-.ifdef REGION_JP
-		CPX #$14					;C - - - - - 0x01219A 04:818A: E0 14
-.else
 		CPX bubbleSlotEnd			;(co-op) was CPX #$14
-.endif
 		BCS CODE_0981DC				;C - - - - - 0x01219C 04:818C: B0 4E
 		JMP CODE_098182				;C - - - - - 0x01219E 04:818E: 4C 82 81
 CODE_098191:
@@ -478,11 +309,7 @@ CODE_0981F8:
 	TAY							;C - - - - - 0x01220C 04:81FC: A8
 	LDA DATA_0981E5,Y			;C - - - - - 0x01220D 04:81FD: B9 E5 81
 	BEQ CODE_09820D				;C - - - - - 0x012210 04:8200: F0 0B
-.ifdef REGION_JP
-		LDA playerDir				;C - - - - - 0x012212 04:8202: A5 77
-.else
 		JSR CoopPopDir				;(co-op) the popping player's playerDir (P2's if P2 popped it)
-.endif
 		CMP #$01					;C - - - - - 0x012214 04:8204: C9 01
 		BEQ CODE_09820D				;C - - - - - 0x012216 04:8206: F0 05
 			LDA #$80					;C - - - - - 0x012218 04:8208: A9 80
@@ -568,12 +395,10 @@ CODE_098258:
 CODE_0982B4:
 	LDA currentRound				;C - - - - - 0x0122C4 04:82B4: A5 D8
 	CMP #50					;C - - - - - 0x0122C6 04:82B6: C9 32
-.ifndef REGION_JP
 	BNE CODE_0982C1				;C - - - - - 0x0122C8 04:82B8: D0 07
 
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x0122CA 04:82BA: BD 77 05
 	CMP #$05					;C - - - - - 0x0122CD 04:82BD: C9 05
-.endif
 	BEQ CODE_0982EA				;C - - - - - 0x0122CF 04:82BF: F0 29
 CODE_0982C1:
 	LDA roundSkelDelay				;C - - - - - 0x0122D1 04:82C1: A5 6D
@@ -1117,13 +942,9 @@ CODE_0986A1:
 	JMP CODE_09876A				;C - - - - - 0x0126B1 04:86A1: 4C 6A 87
 CODE_0986A4:
 	CMP #$0C					;C - - - - - 0x0126B4 04:86A4: C9 0C
-.ifdef REGION_JP
-	BNE CODE_098723					;- - - - - - 0x0126A5 04:8695: D0
-.else
 	BEQ CODE_0986AB				;C - - - - - 0x0126B6 04:86A6: F0 03
 		;Unreached
 		JMP CODE_098723				;- - - - - - 0x0126B8 04:86A8: 4C
-.endif
 CODE_0986AB:
 	;Runs when popping star bubble
 	LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x0126BB 04:86AB: BD C7 05
@@ -1135,17 +956,11 @@ CODE_0986AB:
 	STA scratch3				;C - - - - - 0x0126C9 04:86B9: 85 03
 	JSR HazardCheckEnemies				;C - - - - - 0x0126CB 04:86BB: 20 1D 8A
 
-.ifdef REGION_JP
-	LDA #.BANK(DATA_04BF88)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x0126CE 04:86BE: A9 07
 	STA $8000				;C - - - - - 0x0126D2 04:86C2: 8D 00 80
 	LDA #.BANK(DATA_04BF88)					;C - - - - - 0x0126D5 04:86C5: A9 04
 	STA prgBankB				;C - - - - - 0x0126DA 04:86CA: 85 53
 	STA $8001				;C - - - - - 0x0126D7 04:86C7: 8D 01 80
-.endif
 
 	LDY bubbleProgress,X				;C - - - - - 0x0126EA 04:86DA: BC D5 04
 	LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x0126ED 04:86DD: BD C7 05
@@ -1157,9 +972,6 @@ CODE_0986AB:
 	SBC DATA_04BFBC,Y			;C - - - - - 0x0126FB 04:86EB: F9 BC BF
 	STA objY+OSLOT_BUBBLE,X				;C - - - - - 0x0126FE 04:86EE: 9D 9F 05
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB					;- - - - - - 0x0126D8 04:86C8: A5
-.endif
 
 	INC bubbleProgress,X				;C - - - - - 0x012701 04:86F1: FE D5 04
 	LDA bubbleProgress,X				;C - - - - - 0x012704 04:86F4: BD D5 04
@@ -1412,11 +1224,7 @@ CODE_0988EE:
 	LDA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x0128FE 04:88EE: B9 77 05
 	BEQ CODE_0988FB				;C - - - - - 0x012901 04:88F1: F0 08
 		INY							;C - - - - - 0x012903 04:88F3: C8
-.ifdef REGION_JP
-		CPY #20					;C - - - - - 0x012904 04:88F4: C0 14
-.else
 		CPY bubbleSlotEnd			;(co-op) was CPY #20
-.endif
 		BNE CODE_0988EE				;C - - - - - 0x012906 04:88F6: D0 F6
 			;Unreached
 			JMP CODE_098931				;- - - - - - 0x012908 04:88F8: 4C
@@ -1436,12 +1244,7 @@ CODE_0988FB:
 	LDA #$00					;C - - - - - 0x012929 04:8919: A9 00
 	STA objAnimProgress+OSLOT_BUBBLE,Y				;C - - - - - 0x01292B 04:891B: 99 DF 06
 	STA objAnimTimer+OSLOT_BUBBLE,Y				;C - - - - - 0x01292E 04:891E: 99 B7 06
-.ifdef REGION_JP
-	LDA bubbleProgress,X				;C - - - - - 0x012931 04:8921: BD D5 04
-	STA bubbleProgress,Y				;C - - - - - 0x012934 04:8924: 99 D5 04
-.else
 	JSR CoopFloodCopy			;(co-op 7a) the same copy, and the flood piece gets the water bubble's owner
-.endif
 	LDA #$00					;C - - - - - 0x012937 04:8927: A9 00
 	STA objAttr+OSLOT_BUBBLE,Y				;C - - - - - 0x012939 04:8929: 99 07 07
 	LDA #$01					;C - - - - - 0x01293C 04:892C: A9 01
@@ -1529,12 +1332,7 @@ CODE_0989AB:
 		STA ram_007D				;C - - - - - 0x0129C8 04:89B8: 85 7D
 		JMP CODE_0989C2				;C - - - - - 0x0129CA 04:89BA: 4C C2 89
 CODE_0989BD:
-.ifdef REGION_JP
-	STX scratch1				;C - - - - - 0x0129CD 04:89BD: 86 01
-	JSR PopBubble				;C - - - - - 0x0129CF 04:89BF: 20 7B FC
-.else
 	JSR CoopTouchPop			;(co-op 7a) STX scratch1 / JSR PopBubble, the toucher owns the pop
-.endif
 CODE_0989C2:
 	RTS							;C - - - - - 0x0129D2 04:89C2: 60
 
@@ -1606,12 +1404,10 @@ HazardCheckPlayer:
 			STA playerHazardTrigger				;C - - - - - 0x012A28 04:8A18: 85 7E
 			STX playerHazardSlot				;C - - - - - 0x012A2A 04:8A1A: 86 7F
 @end:
-.ifndef REGION_JP
 	BIT coopP2Active				;co-op: the same hazard box against P2 (slot OSLOT_P2, P2's shadow bytes)
 	BPL :+
 		JMP CoopHazardCheckP2
 :
-.endif
 	RTS							;C - - - - - 0x012A2C 04:8A1C: 60
 
 HazardCheckEnemies:
@@ -1621,11 +1417,7 @@ HazardCheckEnemies:
 	;04: X
 	;05: Y
 
-.ifdef REGION_JP
-	TXA							;C - - - - - 0x012A2D 04:8A1D: 8A
-.else
 	JSR CoopHazEnter			;(co-op 7a) TXA, and the effect's owner owns its kills
-.endif
 	PHA							;C - - - - - 0x012A2E 04:8A1E: 48
 	LDX #$00					;C - - - - - 0x012A2F 04:8A1F: A2 00
 @checkslot:
@@ -1674,12 +1466,7 @@ HazardCheckEnemies:
 		CMP collH				;C - - - - - 0x012A7C 04:8A6C: C5 D1
 		BCS @next				;C - - - - - 0x012A7E 04:8A6E: B0 08
 			LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x012A80 04:8A70: BD 6C 05
-.ifdef REGION_JP
-			ORA #$C0					;C - - - - - 0x012A83 04:8A73: 09 C0
-			STA objState+OSLOT_ENEMY,X				;C - - - - - 0x012A85 04:8A75: 9D 6C 05
-.else
 			JSR CoopHazKill				;(co-op 7a) ORA #$C0 / STA objState+OSLOT_ENEMY,X, killer = effect owner
-.endif
 @next:
 	INX							;C - - - - - 0x012A88 04:8A78: E8
 	CPX roundEnemies				;C - - - - - 0x012A89 04:8A79: EC A8 04
@@ -1793,16 +1580,9 @@ HandleShooting:
 	BNE @shoot				;C - - - - - 0x012B02 04:8AF2: D0 03
 		JMP @end				;C - - - - - 0x012B04 04:8AF4: 4C 9B 8B
 @shoot:
-.ifdef REGION_JP
-	LDA #$00					;- - - - - - 0x012AE0 04:8AD0: A9
-	STA scratch1					;- - - - - - 0x012AE2 04:8AD2: 85
-	STA scratch2					;- - - - - - 0x012AE4 04:8AD4: 85
-	LDX #$00					;- - - - - - 0x012AE6 04:8AD6: A2
-.else
 	LDX #$00					;C - - - - - 0x012B07 04:8AF7: A2 00
 	STX scratch1				;C - - - - - 0x012B09 04:8AF9: 86 01
 	STX scratch2				;C - - - - - 0x012B0B 04:8AFB: 86 02
-.endif
 	;01: Slot first alternative (expiring bubble)
 	;02: Slot second alternative (vacant or rising)
 @findslot:
@@ -1822,23 +1602,13 @@ HandleShooting:
 			STX scratch2				;C - - - - - 0x012B23 04:8B13: 86 02
 @nonexpiringchecked:
 	INX							;C - - - - - 0x012B25 04:8B15: E8
-.ifdef REGION_JP
-	CPX #20					;C - - - - - 0x012B26 04:8B16: E0 14
-.else
 	CPX bubbleSlotEnd			;(co-op) was CPX #20
-.endif
 	BNE @findslot				;C - - - - - 0x012B28 04:8B18: D0 E3
 
 	LDX scratch1				;C - - - - - 0x012B2A 04:8B1A: A6 01
-.ifdef REGION_JP
-	LDA scratch1				;- - - - - - 0x012B07 04:8AF7: A5
-.endif
 	BNE @foundslot				;C - - - - - 0x012B2C 04:8B1C: D0 12
 
 	LDX scratch2				;C - - - - - 0x012B2E 04:8B1E: A6 02
-.ifdef REGION_JP
-	LDA scratch2					;- - - - - - 0x012B0D 04:8AFD: A5
-.endif
 	BNE @foundslot				;C - - - - - 0x012B30 04:8B20: D0 0E
 		;No valid slot found, cancel
 		LDA #$00					;C - - - - - 0x012B32 04:8B22: A9 00
@@ -1975,36 +1745,6 @@ BubbleEmergingUpdate:
 	STA objAnimTimer+OSLOT_BUBBLE,X				;C - - - - - 0x012C39 04:8C29: 9D B7 06
 	STA objAnimHI+OSLOT_BUBBLE,X				;C - - - - - 0x012C3C 04:8C2C: 9D 2F 07
 CODE_JP_098C0E:
-.ifdef REGION_JP
-	JMP CODE_098C2F					;- - - - - - 0x012C1E 04:8C0E: 4C
-	CMP #$FF					;- - - - - - 0x012C21 04:8C11: C9
-	BNE	CODE_JP_098C25				;- - - - - - 0x012C23 04:8C13: D0
-		LDA #$19					;- - - - - - 0x012C25 04:8C15: A9
-		STA objState+OSLOT_BUBBLE,X					;- - - - - - 0x012C27 04:8C17: 9D
-		LDA #$00					;- - - - - - 0x012C2A 04:8C1A: A9
-		STA shooting					;- - - - - - 0x012C2C 04:8C1C: 8D
-		STA shootQueuedBubbles					;- - - - - - 0x012C2F 04:8C1F: 8D
-		JMP CODE_098C2F					;- - - - - - 0x012C32 04:8C22: 4C
-CODE_JP_098C25:
-	AND #$0F					;- - - - - - 0x012C35 04:8C25: 29
-	STA scratch0					;- - - - - - 0x012C37 04:8C27: 85
-	LDA shootDir					;- - - - - - 0x012C39 04:8C29: AD
-	CMP #$01					;- - - - - - 0x012C3C 04:8C2C: C9
-	BEQ CODE_JP_098C34				;- - - - - - 0x012C3E 04:8C2E: F0
-		CMP #$02					;- - - - - - 0x012C40 04:8C30: C9
-		BEQ CODE_JP_098C3D			;- - - - - - 0x012C42 04:8C32: F0
-CODE_JP_098C34:
-	LDA objX+OSLOT_BUBBLE,X					;- - - - - - 0x012C44 04:8C34: BD
-	CLC							;- - - - - - 0x012C47 04:8C37: 18
-	ADC scratch0				;- - - - - - 0x012C48 04:8C38: 65
-	JMP CODE_JP_098C43				;- - - - - - 0x012C4A 04:8C3A: 4C
-CODE_JP_098C3D:
-	LDA objX+OSLOT_BUBBLE,X					;- - - - - - 0x012C4D 04:8C3D: BD
-	SEC							;- - - - - - 0x012C50 04:8C40: 38
-	SBC scratch0				;- - - - - - 0x012C51 04:8C41: E5
-CODE_JP_098C43:
-	STA objX+OSLOT_BUBBLE,X					;- - - - - - 0x012C53 04:8C43: 9D
-.endif
 CODE_098C2F:
 	RTS							;C - - - - - 0x012C3F 04:8C2F: 60
 
@@ -2030,11 +1770,7 @@ SpawnExtraBubbles:
 @findslot:
 	INC shootSlot				;C - - - - - 0x012C4E 04:8C3E: EE 13 05
 	LDA shootSlot				;C - - - - - 0x012C51 04:8C41: AD 13 05
-.ifdef REGION_JP
-	CMP #20					;C - - - - - 0x012C54 04:8C44: C9 14
-.else
 	CMP bubbleSlotEnd			;(co-op) was CMP #20
-.endif
 	BEQ @end				;C - - - - - 0x012C56 04:8C46: F0 71
 
 	LDY shootSlot				;C - - - - - 0x012C58 04:8C48: AC 13 05
@@ -2178,13 +1914,8 @@ LoadEnemyPalettes:
 	STA scratch5				;C - - - - - 0x012D40 04:8D30: 85 05
 CODE_098D32:
 	LDA #.BANK(RoundsEnemyPalettes)					;C - - - - - 0x012D42 04:8D32: A9 04
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x012D44 04:8D34: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x012D46 04:8D36: 20 56 FF
-.endif
 
 	LDY scratch4				;C - - - - - 0x012D49 04:8D39: A4 04
 	LDA RoundsEnemyPalettes,Y			;C - - - - - 0x012D4B 04:8D3B: B9 97 B9
@@ -2203,13 +1934,8 @@ CODE_098D32:
 	INY							;C - - - - - 0x012D5D 04:8D4D: C8
 CODE_098D4E:
 	LDA #.BANK(EnemyPalettes)					;C - - - - - 0x012D5E 04:8D4E: A9 0C
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x012D60 04:8D50: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x012D62 04:8D52: 20 56 FF
-.endif
 
 	LDA EnemyPalettes,X			;C - - - - - 0x012D65 04:8D55: BD 0C B3
 	STA colorBuffer+$14,Y		;C - - - - - 0x012D68 04:8D58: 99 14 03
@@ -2225,11 +1951,6 @@ CODE_098D4E:
 	INC scratch4				;C - - - - - 0x012D77 04:8D67: E6 04
 	JMP CODE_098D32				;C - - - - - 0x012D79 04:8D69: 4C 32 8D
 CODE_098D6C:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	LDA #.BANK(CODE_0B8000)					;C - - - - - 0x012D7C 04:8D6C: A9 0B
 	STA nmiPrgBankA				;C - - - - - 0x012D7E 04:8D6E: 85 51
@@ -2246,13 +1967,8 @@ CODE_098D6C:
 
 UpdateProjectiles:
 	LDA #.BANK(ProjScriptTable)					;C - - - - - 0x012D91 04:8D81: A9 0A
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x012D93 04:8D83: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x012D95 04:8D85: 20 56 FF
-.endif
 
 	LDX #$00					;C - - - - - 0x012D98 04:8D88: A2 00
 UpdateProjectiles_CheckProj:
@@ -2268,13 +1984,8 @@ UpdateProjectiles_CheckProj:
 	STA scratch7				;C - - - - - 0x012DAC 04:8D9C: 85 07
 
 	LDA #.BANK(EnemyProjSizeIndexes)					;C - - - - - 0x012DAE 04:8D9E: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x012DB0 04:8DA0: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x012DB2 04:8DA2: 20 56 FF
-.endif
 
 	LDA #$00					;C - - - - - 0x012DB5 04:8DA5: A9 00
 	STA projTouchingPlayer				;C - - - - - 0x012DB7 04:8DA7: 85 CE
@@ -2289,12 +2000,10 @@ UpdateProjectiles_CheckProj:
 	LDA EnemyProjSizeTable+1,Y			;C - - - - - 0x012DC7 04:8DB7: B9 EB BE
 	STA collH				;C - - - - - 0x012DCA 04:8DBA: 85 D1
 	JSR PlayerCheckProjCollision				;C - - - - - 0x012DCC 04:8DBC: 20 EF FB
-.ifndef REGION_JP
 	BIT coopP2Active				;co-op: P1 not hit -> test P2 (slot OSLOT_P2); on a hit P2 is swapped in
 	BPL :+							;for this projectile's ops (they write the touched player's state)
 		JSR CoopProjCheckP2
 :
-.endif
 
 	LDA objState+OSLOT_PROJ,X				;C - - - - - 0x012DCF 04:8DBF: BD 64 05
 	AND #PROJ_HIT					;C - - - - - 0x012DD2 04:8DC2: 29 80
@@ -2311,10 +2020,6 @@ UpdateProjectiles_CheckProj:
 	STA projScriptOfs				;C - - - - - 0x012DE4 04:8DD4: 85 5D
 UpdateProjectiles_ReadOp:
 	LDA #.BANK(ProjScriptTable)					;C - - - - - 0x012DE6 04:8DD6: A9 0A
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x012DE8 04:8DD8: 85 3B
 	;(Perf) Guard: skip the call when the bank is already mapped (83.6% of the time: the
 	;op loop comes back here after each op). prgBankB mirrors the $A000 slot, see
@@ -2323,7 +2028,6 @@ UpdateProjectiles_ReadOp:
 	BEQ @mapped
 	JSR SwapPrgBankB				;C - - - - - 0x012DEA 04:8DDA: 20 56 FF
 @mapped:
-.endif
 
 	LDY projScriptOfs				;C - - - - - 0x012DED 04:8DDD: A4 5D
 	LDA (scratch6),Y			;C - - - - - 0x012DEF 04:8DDF: B1 06
@@ -2347,12 +2051,10 @@ UpdateProjectiles_OpRet:
 		STA projScriptOfs				;C - - - - - 0x012E0D 04:8DFD: 85 5D
 		JMP UpdateProjectiles_ReadOp				;C - - - - - 0x012E0F 04:8DFF: 4C D6 8D
 @trymove:
-.ifndef REGION_JP
 	LDA coopResident				;co-op: the ops of this projectile ran with P2 resident (P2 was hit)
 	BEQ :+
 		JSR CoopProjSwapBack		;P1 resident again (keeps X)
 :
-.endif
 	LDA objState+OSLOT_PROJ,X				;C - - - - - 0x012E12 04:8E02: BD 64 05
 	BEQ UpdateProjectiles_NextProj				;C - - - - - 0x012E15 04:8E05: F0 14
 		;Move
@@ -2597,17 +2299,12 @@ ProjOp_Set:
 	JMP UpdateProjectiles_OpRet				;- - - - - - 0x012F9D 04:8F8D: 4C
 
 ProjOp_HomingPlayer:
-.ifndef REGION_JP
 	JSR CoopProjTarget			;co-op 6a: Y = slot of the nearest targetable player (1P: 0)
-.endif
 	TXA							;C - - - - - 0x012FA0 04:8F90: 8A
 	PHA							;C - - - - - 0x012FA1 04:8F91: 48
 	CLC							;C - - - - - 0x012FA2 04:8F92: 18
 	ADC #$01					;C - - - - - 0x012FA3 04:8F93: 69 01
 	TAX							;C - - - - - 0x012FA5 04:8F95: AA
-.ifdef REGION_JP
-	LDY #$00					;C - - - - - 0x012FA6 04:8F96: A0 00
-.endif
 	JSR ProjGetNewHomingAngle				;C - - - - - 0x012FA8 04:8F98: 20 C2 93
 
 	PLA							;C - - - - - 0x012FAB 04:8F9B: 68
@@ -2652,16 +2349,10 @@ ProjOp_GetCount:
 	JMP UpdateProjectiles_OpRet				;C - - - - - 0x012FE7 04:8FD7: 4C F6 8D
 
 ProjOp_GetPlayerDist:
-.ifndef REGION_JP
 	JSR CoopProjTarget			;co-op 6a: targetX/Y = nearest targetable player (1P: slot 0)
-.endif
 	LDA objX+OSLOT_PROJ,X				;C - - - - - 0x012FEA 04:8FDA: BD B4 05
 	SEC							;C - - - - - 0x012FED 04:8FDD: 38
-.ifdef REGION_JP
-	SBC objX				;C - - - - - 0x012FEE 04:8FDE: ED B3 05
-.else
 	SBC targetX
-.endif
 	STA scratch0				;C - - - - - 0x012FF1 04:8FE1: 85 00
 	BCS CODE_098FEA				;C - - - - - 0x012FF3 04:8FE3: B0 05
 		LDA #$00					;C - - - - - 0x012FF5 04:8FE5: A9 00
@@ -2672,11 +2363,7 @@ CODE_098FEA:
 
 	LDA objY+OSLOT_PROJ,X				;C - - - - - 0x012FFC 04:8FEC: BD 8C 05
 	SEC							;C - - - - - 0x012FFF 04:8FEF: 38
-.ifdef REGION_JP
-	SBC objY				;C - - - - - 0x013000 04:8FF0: ED 8B 05
-.else
 	SBC targetY
-.endif
 	STA scratch0				;C - - - - - 0x013003 04:8FF3: 85 00
 	BCS CODE_098FFC				;C - - - - - 0x013005 04:8FF5: B0 05
 		LDA #$00					;C - - - - - 0x013007 04:8FF7: A9 00
@@ -2701,13 +2388,8 @@ ProjOp_MultiProj:
 	STA otherDirAnim				;C - - - - - 0x013022 04:9012: 8D C9 04
 
 	LDA #.BANK(MultiProjTable)					;C - - - - - 0x013025 04:9015: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x013027 04:9017: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x013029 04:9019: 20 56 FF
-.endif
 
 	LDA MultiProjTable,Y			;C - - - - - 0x01302C 04:901C: B9 02 BF
 	STA scratch8				;C - - - - - 0x01302F 04:901F: 85 08
@@ -2882,13 +2564,8 @@ ProjOp_NOP:
 
 ProjOp_ApplyAngle:
 	LDA #.BANK(HomingSpeedTable_H)					;C - - - - - 0x013140 04:9130: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x013142 04:9132: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x013144 04:9134: 20 56 FF
-.endif
 
 	LDY scratch5				;C - - - - - 0x013147 04:9137: A4 05
 	LDA HomingSpeedTable_H,Y			;C - - - - - 0x013149 04:9139: B9 AA BE
@@ -3016,13 +2693,8 @@ CODE_0991F7:
 
 	;Should be $0A? (For ProjScriptTable access at 0x012DA4?)
 	LDA #$08					;C - - - - - 0x01320D 04:91FD: A9 08
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x01320F 04:91FF: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x013211 04:9201: 20 56 FF
-.endif
 
 	LDA #$01					;C - - - - - 0x013214 04:9204: A9 01
 	JMP UpdateProjectiles_OpRet				;C - - - - - 0x013216 04:9206: 4C F6 8D
@@ -3252,16 +2924,10 @@ ProjOp_Parent:
 	JMP UpdateProjectiles_OpRet				;C - - - - - 0x01336E 04:935E: 4C F6 8D
 
 ProjOp_GetPlayerSide:
-.ifndef REGION_JP
 	JSR CoopProjTarget			;co-op 6a: targetX/Y = nearest targetable player (1P: slot 0)
-.endif
 	LDY #$01					;C - - - - - 0x013371 04:9361: A0 01
 	LDA objX+OSLOT_PROJ,X				;C - - - - - 0x013373 04:9363: BD B4 05
-.ifdef REGION_JP
-	CMP objX				;C - - - - - 0x013376 04:9366: CD B3 05
-.else
 	CMP targetX
-.endif
 	BCC CODE_09936D				;C - - - - - 0x013379 04:9369: 90 02
 		LDY #$00					;C - - - - - 0x01337B 04:936B: A0 00
 CODE_09936D:
@@ -3269,11 +2935,7 @@ CODE_09936D:
 
 	LDY #$01					;C - - - - - 0x01337F 04:936F: A0 01
 	LDA objY+OSLOT_PROJ,X				;C - - - - - 0x013381 04:9371: BD 8C 05
-.ifdef REGION_JP
-	CMP objY				;C - - - - - 0x013384 04:9374: CD 8B 05
-.else
 	CMP targetY
-.endif
 	BCC CODE_09937B				;C - - - - - 0x013387 04:9377: 90 02
 		LDY #$00					;C - - - - - 0x013389 04:9379: A0 00
 CODE_09937B:
@@ -3309,7 +2971,6 @@ CODE_0993AF:
 	LDA #$01					;C - - - - - 0x0133BF 04:93AF: A9 01
 	JMP UpdateProjectiles_OpRet				;C - - - - - 0x0133C1 04:93B1: 4C F6 8D
 
-.ifndef REGION_JP
 ProjOp_GetParentHits:
 	;Unreached
 	LDA projParent,X				;- - - - - - 0x0133C4 04:93B4: BD
@@ -3319,19 +2980,13 @@ ProjOp_GetParentHits:
 
 	LDA #$01					;- - - - - - 0x0133CD 04:93BD: A9
 	JMP UpdateProjectiles_OpRet				;- - - - - - 0x0133CF 04:93BF: 4C
-.endif
 
 ProjGetNewHomingAngle:
 	;X: Projectile object index
 	;Y: Target object index
 	LDA #.BANK(HomingAngleTable)					;C - - - - - 0x0133D2 04:93C2: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x0133D4 04:93C4: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x0133D6 04:93C6: 20 56 FF
-.endif
 
 	LDA #$00					;C - - - - - 0x0133D9 04:93C9: A9 00
 	STA scratch3				;C - - - - - 0x0133DB 04:93CB: 85 03
@@ -3803,9 +3458,7 @@ ProjOpHandlers:
 	.word ProjOp_GetPlayerSide			;38 Get 1 to $04 if X >= player X, 0 otherwise. Same for $05 and Y
 	.word ProjOp_PlayerState			;39 xx Set player state
 	.word ProjOp_Heart					;3A Add player heart
-.ifndef REGION_JP
 	.word ProjOp_GetParentHits			;3B (UNUSED) Get hit count from parent
-.endif
 
 RoundUpdate:
 	LDA ram_04D1				;C - - - - - 0x013720 04:9710: AD D1 04
@@ -3829,12 +3482,10 @@ CODE_099728:
 	LDA #.BANK(*)					;C - - - - - 0x013744 04:9734: A9 09
 	STA bankedSubRetBank				;C - - - - - 0x013746 04:9736: 85 58
 	JSR RunBankedSub				;C - - - - - 0x013748 04:9738: 20 72 E7
-.ifndef REGION_JP
 .ifdef COOP_SWAPTEST
 	JSR CoopSwap					;co-op phase 2 self-test: double swap per tick must be the identity
 CoopSwapTest_mid:
 	JSR CoopSwap
-.endif
 .endif
 
 	LDA globalTimer				;C - - - - - 0x01374B 04:973B: A5 14
@@ -3842,12 +3493,10 @@ CoopSwapTest_mid:
 	BEQ CODE_099750				;C - - - - - 0x01374F 04:973F: F0 0F
 		JSR BubblesTravelUpdate				;C - - - - - 0x013751 04:9741: 20 9A 9D
 		JSR HandleShooting				;C - - - - - 0x013754 04:9744: 20 EF 8A
-.ifndef REGION_JP
 		BIT coopP2Active				;co-op: P2 window (odd tick), only while P2 is in the round
 		BPL :+
 			JSR CoopP2WindowOdd
 	:
-.endif
 		JSR UpdateBubbles				;C - - - - - 0x013757 04:9747: 20 00 80
 		JSR AnimateObjects				;C - - - - - 0x01375A 04:974A: 20 1E ED
 		JMP CODE_099785				;C - - - - - 0x01375D 04:974D: 4C 85 97
@@ -3877,12 +3526,10 @@ CODE_099750:
 	LDA #.BANK(*)					;C - - - - - 0x01378B 04:977B: A9 09
 	STA bankedSubRetBank				;C - - - - - 0x01378D 04:977D: 85 58
 	JSR RunBankedSub				;C - - - - - 0x01378F 04:977F: 20 72 E7
-.ifndef REGION_JP
 	BIT coopP2Active				;co-op: P2 window (even tick), only while P2 is in the round
 	BPL :+
 		JSR CoopP2WindowEven
 :
-.endif
 
 	JSR AnimateNonBubbles				;C - - - - - 0x013792 04:9782: 20 5C EE
 CODE_099785:
@@ -3894,19 +3541,15 @@ CODE_099785:
 		LDA #$00					;C - - - - - 0x0137A1 04:9791: A9 00
 		STA objState				;C - - - - - 0x0137A3 04:9793: 8D 63 05
 CODE_099796:
-.ifndef REGION_JP
 	BIT coopP2Active				;co-op: P2's invincibility blink (slot OSLOT_P2)
 	BPL :+
 		JSR CoopP2BlinkHide
 :
-.endif
 	JSR DrawObjects				;C - - - - - 0x0137A6 04:9796: 20 E2 EE
-.ifndef REGION_JP
 	BIT coopP2Active
 	BPL :+
 		JSR CoopP2BlinkRestore
 :
-.endif
 	LDA scratch6				;C - - - - - 0x0137A9 04:9799: A5 06
 	STA objState				;C - - - - - 0x0137AB 04:979B: 8D 63 05
 	LDA #.HIBYTE(@bganimret-1)					;C - - - - - 0x0137AE 04:979E: A9 97
@@ -3916,12 +3559,10 @@ CODE_099796:
 	JMP (roundAnimSub)				;C - - - - - 0x0137B4 04:97A4: 6C 59 00
 @bganimret:
 	JSR CODE_099D3B				;C - - - - - 0x0137B7 04:97A7: 20 3B 9D
-.ifndef REGION_JP
 	BIT coopP2Active			;(co-op 7a) the other player's extra life
 	BPL :+
 		JSR CoopExtraLifeOther
 :
-.endif
 	JSR CODE_099BE7				;C - - - - - 0x0137BA 04:97AA: 20 E7 9B
 	JSR CheckPause				;C - - - - - 0x0137BD 04:97AD: 20 58 9A
 	LDA playerState				;C - - - - - 0x0137C0 04:97B0: A5 75
@@ -3929,14 +3570,12 @@ CODE_099796:
 	BNE CODE_0997B9				;C - - - - - 0x0137C4 04:97B4: D0 03
 		JMP CODE_09983C				;C - - - - - 0x0137C6 04:97B6: 4C 3C 98
 CODE_0997B9:
-.ifndef REGION_JP
 	LDA playerLives				;(co-op 7a) no lives and not dying: the resident player is out
 	BNE :+
 		JSR CoopResidentOut		;partner in the round: he takes over (C = 1); else the game over below
 		BCC :+
 		JMP CODE_09983C
 :
-.endif
 	LDA roundFlags				;C - - - - - 0x0137C9 04:97B9: AD 71 04
 	AND #$20					;C - - - - - 0x0137CC 04:97BC: 29 20
 	BEQ CODE_0997C6				;C - - - - - 0x0137CE 04:97BE: F0 06
@@ -4008,11 +3647,9 @@ CODE_09983C:
 	RTS							;C - - - - - 0x01384C 04:983C: 60
 
 CODE_09983D:
-.ifndef REGION_JP
 	LDA #$00					;C - - - - - 0x01384D 04:983D: A9 00
 	STA a:jingleTrigger			;C - - - - - 0x01384F 04:983F: 8D E2 00
 	STA roundPaused				;C - - - - - 0x013852 04:9842: 8D 74 04
-.endif
 
 	LDA #$03					;C - - - - - 0x013855 04:9845: A9 03
 	STA scratch0				;C - - - - - 0x013857 04:9847: 85 00
@@ -4389,9 +4026,6 @@ CheckPause:
 	STA a:soundTrigger			;C - - - - - 0x013AA6 04:9A96: 8D E1 00
 	LDA roundPaused				;C - - - - - 0x013AA9 04:9A99: AD 74 04
 	STA a:jingleTrigger			;C - - - - - 0x013AAC 04:9A9C: 8D E2 00
-.ifdef REGION_JP
-	JMP @end					;- - - - - - 0x013AB5 04:9AA5: 4C
-.endif
 @end:
 	RTS							;C - - - - - 0x013AAF 04:9A9F: 60
 
@@ -4520,9 +4154,6 @@ CODE_099B9C:
 	STA livesDigits,X				;C - - - - - 0x013BAD 04:9B9D: 9D 7F 04
 	LDX scratch3				;C - - - - - 0x013BB0 04:9BA0: A6 03
 
-.ifdef REGION_JP
-	LDY #$00					;- - - - - - 0x013BBB 04:9BAB: A0
-.else
 	LDY livesCurrentPos				;C - - - - - 0x013BB2 04:9BA2: AC 98 04
 	BEQ CODE_099BC3				;C - - - - - 0x013BB5 04:9BA5: F0 1C
 	DEY							;C - - - - - 0x013BB7 04:9BA7: 88
@@ -4542,7 +4173,6 @@ CODE_099B9C:
 		ADC scratch0				;C - - - - - 0x013BCB 04:9BBB: 65 00
 		STA mapBuffer+1				;C - - - - - 0x013BCD 04:9BBD: 8D 69 03
 		STA mapBuffer+32+1				;C - - - - - 0x013BD0 04:9BC0: 8D 89 03
-.endif
 CODE_099BC3:
 	;Print first digit
 	LDA livesDigits,X				;C - - - - - 0x013BD3 04:9BC3: BD 7F 04
@@ -4644,17 +4274,10 @@ DATA_099C5A:
 	.byte $00					;- D 0 - - - 0x013C6C 04:9C5C: 00
 	.byte $02					;- D 0 - - - 0x013C6D 04:9C5D: 02
 HUDMapTargetsLO:
-.ifdef REGION_JP
-	.byte $00					;- - - - - - 0x013C58 04:9C48: 00
-	.byte $55					;- - - - - - 0x013C59 04:9C49: 55
-	.byte $4A					;- - - - - - 0x013C5A 04:9C4A: 4A
-	.byte $47					;- - - - - - 0x013C5B 04:9C4B: 47
-.else
 	.byte $00					;- - - - - - 0x013C6E 04:9C5E: 00
 	.byte $55					;- D 0 - - - 0x013C6F 04:9C5F: 55
 	.byte $4A					;- D 0 - - - 0x013C70 04:9C60: 4A
 	.byte $46					;- D 0 - - - 0x013C71 04:9C61: 46
-.endif
 
 DrawHearts:
 	LDA #$66					;C - - - - - 0x013C72 04:9C62: A9 66
@@ -4707,17 +4330,11 @@ CODE_099CAE:
 	RTS							;C - - - - - 0x013CC6 04:9CB6: 60
 
 CODE_099CB7:
-.ifdef REGION_JP
-	LDA #.BANK(DATA_06B8B6)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x013CC7 04:9CB7: A9 07
 	STA $8000				;C - - - - - 0x013CCB 04:9CBB: 8D 00 80
 	LDA #.BANK(DATA_06B8B6)					;C - - - - - 0x013CCE 04:9CBE: A9 06
 	STA prgBankB				;C - - - - - 0x013CD3 04:9CC3: 85 53
 	STA $8001				;C - - - - - 0x013CD0 04:9CC0: 8D 01 80
-.endif
 
 	LDA #.LOBYTE(DATA_06B8B6)					;C - - - - - 0x013CE3 04:9CD3: A9 B6
 	STA scratch8				;C - - - - - 0x013CE5 04:9CD5: 85 08
@@ -4759,11 +4376,6 @@ CODE_099D11:
 	STA mapBuffer,Y				;C - - - - - 0x013D23 04:9D13: 99 68 03
 	STA mapBuffer+32,Y				;C - - - - - 0x013D26 04:9D16: 99 88 03
 CODE_099D19:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x013D29 04:9D19: 60
 
 .ifdef INCLUDE_DEBUG_MENU
@@ -5122,25 +4734,7 @@ CODE_099D91:
 CODE_099D99:
 	RTS							;C - - - - - 0x013DA9 04:9D99: 60
 
-.ifdef REGION_JP
-DATA_JP_099F32:
-	.byte $04					;- - - - - - 0x013F42 04:9F32: 04
 
-CODE_JP_099F33:
-	INC bubblesLifespanLevel	;- - - - - - 0x013F43 04:9F33: E6
-	LDA bubblesLifespanLevel	;- - - - - - 0x013F45 04:9F35: A5
-	CMP #15					;- - - - - - 0x013F47 04:9F37: C9
-	BCC	CODE_JP_099F3F				;- - - - - - 0x013F49 04:9F39: 90
-		LDA #15					;- - - - - - 0x013F4B 04:9F3B: A9
-		STA bubblesLifespanLevel	;- - - - - - 0x013F4D 04:9F3D: 85
-CODE_JP_099F3F:
-	LDA #3					;- - - - - - 0x013F4F 04:9F3F: A9
-	STA livesCurrentPos					;- - - - - - 0x013F51 04:9F41: 8D
-	JMP CODE_099D57					;- - - - - - 0x013F54 04:9F44: 4C
-	RTS					;- - - - - - 0x013F57 04:9F47: 60
-.endif
-
-.ifndef REGION_JP
 ;For JP, this is located in bank 0F instead
 BubblesTravelUpdate:
 	LDA #8					;C - - - - - 0x013DAA 04:9D9A: A9 08
@@ -5361,10 +4955,4 @@ CODE_099EF0:
 	STA ram_0549				;C - - - - - 0x013F05 04:9EF5: 8D 49 05
 CODE_099EF8:
 	RTS							;C - - - - - 0x013F08 04:9EF8: 60
-.endif
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x013F58 04:9F48: F2
-	.incbin "filler/fill09_JP.bin"
-.endif

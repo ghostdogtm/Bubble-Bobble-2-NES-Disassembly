@@ -31,11 +31,7 @@
 .incbin "chr/GiantTower_AB.chr"
 
 ;14
-.ifdef REGION_JP
-.incbin "chr/GiantTower_BA_JP.chr"
-.else
 .incbin "chr/GiantTower_BA.chr"
-.endif
 
 .incbin "chr/GiantTower_BB.chr"
 .incbin "chr/GiantTower_CA.chr"
@@ -55,11 +51,7 @@
 .incbin "chr/ShiningLake_AB.chr"
 
 ;22
-.ifdef REGION_JP
-.incbin "chr/ShiningLake_BA_JP.chr"
-.else
 .incbin "chr/ShiningLake_BA.chr"
-.endif
 
 .incbin "chr/ShiningLake_BB.chr"
 .incbin "chr/ShiningLake_CA.chr"
@@ -86,11 +78,7 @@
 ;34
 .incbin "chr/BigReward_A.chr"
 
-.ifdef REGION_JP
-.incbin "chr/BigReward_B_JP.chr"
-.else
 .incbin "chr/BigReward_B.chr"
-.endif
 
 ;36
 .incbin "chr/PlayerTravel_A.chr"
@@ -220,14 +208,7 @@
 .incbin "chr/EndingActors_B.chr"
 
 ;7C
-.ifdef REGION_JP
-.incbin "chr/TitleScreen_A_JP.chr"
-.incbin "chr/TitleScreen_B_JP.chr"
-.incbin "chr/TitleScreen_C_JP.chr"
-.incbin "chr/TitleScreen_D_JP.chr"
-.else
 .incbin "chr/TitleScreen_A.chr"
 .incbin "chr/TitleScreen_B.chr"
 .incbin "chr/TitleScreen_C.chr"
 .incbin "chr/TitleScreen_D.chr"
-.endif

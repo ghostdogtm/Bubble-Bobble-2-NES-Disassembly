@@ -5,10 +5,8 @@
 
 CODE_088000:
 	LDA #$00					;C - - - - - 0x010010 04:8000: A9 00
-.ifndef REGION_JP
 	STA a:jingleTrigger				;C - - - - - 0x010012 04:8002: 8D E2 00
 	STA roundPaused				;C - - - - - 0x010015 04:8005: 8D 74 04
-.endif
 	STA ram_0475				;C - - - - - 0x010018 04:8008: 8D 75 04
 	STA ram_0472				;C - - - - - 0x01001B 04:800B: 8D 72 04
 	STA bigRewardCategory				;C - - - - - 0x01001E 04:800E: 8D 4F 05
@@ -198,13 +196,8 @@ CODE_088169:
 
 CODE_08816F:
 	LDA #.BANK(RoundsSolidRangeTable)					;C - - - - - 0x01017F 04:816F: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x010181 04:8171: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x010183 04:8173: 20 56 FF
-.endif
 
 	LDA currentRound				;C - - - - - 0x010186 04:8176: A5 D8
 	ASL							;C - - - - - 0x010188 04:8178: 0A
@@ -244,11 +237,6 @@ CODE_0881B4:
 	LDA DATA_06B807,X			;C - - - - - 0x0101C6 04:81B6: BD 07 B8
 	STA ram_0070				;C - - - - - 0x0101C9 04:81B9: 85 70
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x0101CB 04:81BB: 60
 
 DATA_0881BC:
@@ -340,13 +328,8 @@ DATA_0881BC:
 
 CODE_088264:
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x010274 04:8264: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x010276 04:8266: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x010278 04:8268: 20 56 FF
-.endif
 
 	LDA currentRound				;C - - - - - 0x01027B 04:826B: A5 D8
 	ASL							;C - - - - - 0x01027D 04:826D: 0A
@@ -365,22 +348,12 @@ CODE_088264:
 	LDA DATA_06B48A,X			;C - - - - - 0x01029A 04:828A: BD 8A B4
 	STA ram_0083				;C - - - - - 0x01029D 04:828D: 85 83
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01029F 04:828F: 60
 
 RoundBGSetup:
 	LDA #.BANK(RoundMaps)					;C - - - - - 0x0102A0 04:8290: A9 04
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x0102A2 04:8292: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x0102A4 04:8294: 20 56 FF
-.endif
 
 	LDX currentRound				;C - - - - - 0x0102A7 04:8297: A6 D8
 	LDA RoundMaps,X			;C - - - - - 0x0102A9 04:8299: BD AE BA
@@ -403,11 +376,7 @@ RoundBGSetup:
 	LDA #$00					;C - - - - - 0x0102C7 04:82B7: A9 00
 	STA wideRound				;C - - - - - 0x0102C9 04:82B9: 8D B0 03
 
-.ifdef REGION_JP
-	LDA #$40					;- - - - - - 0x0102D4 04:82C4: A9
-.else
 	LDA #$01					;C - - - - - 0x0102CC 04:82BC: A9 01
-.endif
 	CPY #20						;C - - - - - 0x0102CE 04:82BE: C0 14
 	BNE CODE_0882D3				;C - - - - - 0x0102D0 04:82C0: D0 11
 		;Round 20 is two screens wide
@@ -421,18 +390,9 @@ RoundBGSetup:
 		STA wideRound				;C - - - - - 0x0102DE 04:82CE: 8D B0 03
 		LDA #$00					;C - - - - - 0x0102E1 04:82D1: A9 00
 CODE_0882D3:
-.ifdef REGION_JP
-	STA $E000					;- - - - - - 0x0102EB 04:82DB: 8D
-.else
 	STA $A000				;C - - - - - 0x0102E3 04:82D3: 8D 00 A0
-.endif
 	JSR LoadMap				;C - - - - - 0x0102E6 04:82D6: 20 23 E5
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x0102E9 04:82D9: 60
 
 RoundNTBaseTiles:
@@ -448,13 +408,8 @@ RoundNTTargets:
 CODE_0882E0:
 	;Unreached
 	LDA #.BANK(RoundMaps)					;- - - - - - 0x0102F0 04:82E0: A9
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;- - - - - - 0x0102F2 04:82E2: 85
 	JSR SwapPrgBankB				;- - - - - - 0x0102F4 04:82E4: 20
-.endif
 
 	LDX currentRound				;- - - - - - 0x0102F7 04:82E7: A6
 	DEX							;- - - - - - 0x0102F9 04:82E9: CA
@@ -472,20 +427,10 @@ CODE_0882E0:
 	LDA #$00					;- - - - - - 0x010313 04:8303: A9
 	STA wideRound				;- - - - - - 0x010315 04:8305: 8D
 
-.ifdef REGION_JP
-	LDA #$40					;- - - - - - 0x010327 04:8317: A9
-	STA $E000					;- - - - - - 0x010329 04:8319: 8D
-.else
 	LDA #$01					;- - - - - - 0x010318 04:8308: A9
 	STA $A000					;- - - - - - 0x01031A 04:830A: 8D
-.endif
 	JSR LoadMap				;- - - - - - 0x01031D 04:830D: 20
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;- - - - - - 0x010320 04:8310: 60
 
 CODE_088311:
@@ -831,13 +776,8 @@ palFinalBossCave:
 
 SetRoundMusic:
 	LDA #.BANK(RoundsMusicTracks)					;C - - - - - 0x01049D 04:848D: A9 04
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x01049F 04:848F: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x0104A1 04:8491: 20 56 FF
-.endif
 
 	LDX currentRound				;C - - - - - 0x0104A4 04:8494: A6 D8
 	LDA RoundsMusicTracks,X			;C - - - - - 0x0104A6 04:8496: BD 1E BC
@@ -846,11 +786,6 @@ SetRoundMusic:
 		AND #~MUSIC_PLAYING					;C - - - - - 0x0104AE 04:849E: 29 7F
 		STA a:musicTrigger						;C - - - - - 0x0104B0 04:84A0: 8D E0 00
 CODE_0884A3:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x0104B3 04:84A3: 60
 
 SetRoundPaletteAndMusic:
@@ -898,9 +833,7 @@ CODE_0884CF:
 			STA nmiBankedSub				;C - - - - - 0x010505 04:84F5: 85 16
 			LDA updateSub+1				;C - - - - - 0x010507 04:84F7: A5 1A
 			STA nmiBankedSub+1				;C - - - - - 0x010509 04:84F9: 85 17
-.ifndef REGION_JP
 			JSR CoopRoundStartP2			;co-op: P1 has reached the start position: spawn P2
-.endif
 CODE_0884FB:
 	LDA globalTimer				;C - - - - - 0x01050B 04:84FB: A5 14
 	AND #$01					;C - - - - - 0x01050D 04:84FD: 29 01
@@ -1004,10 +937,8 @@ CODE_08856D:
 	STA scratch4				;C - - - - - 0x01058E 04:857E: 85 04
 	JSR SpawnAnnounceObj				;C - - - - - 0x010590 04:8580: 20 76 9C
 
-.ifndef REGION_JP
 	LDA roundSkelDelay				;C - - - - - 0x010593 04:8583: A5 6D
 	BEQ CODE_088599				;C - - - - - 0x010595 04:8585: F0 12
-.endif
 
 	LDA powerUps				;C - - - - - 0x010597 04:8587: A5 DE
 	AND #POWERUP_BIG_BELL					;C - - - - - 0x010599 04:8589: 29 04
@@ -1136,14 +1067,7 @@ CODE_088664:
 	LDA #$00					;C - - - - - 0x010678 04:8668: A9 00
 	STA scratch0				;C - - - - - 0x01067A 04:866A: 85 00
 
-.ifdef REGION_JP
-	LDA powerUps				;C - - - - - 0x01067C 04:866C: A5 DE
-	AND #~POWERUP_CANDY					;C - - - - - 0x01067E 04:866E: 29 FE
-	ORA #POWERUP_BOSS_BONUS					;C - - - - - 0x010680 04:8670: 09 80
-	STA powerUps				;C - - - - - 0x010682 04:8672: 85 DE
-.else
 	JSR CoopBossCandy			;(co-op 7a) the same, and the other player's candy too
-.endif
 CODE_088674:
 	JSR CODE_088678				;C - - - - - 0x010684 04:8674: 20 78 86
 	RTS							;C - - - - - 0x010687 04:8677: 60
@@ -1185,11 +1109,7 @@ SpikeBallUpdate:
 		STA scratch1				;C - - - - - 0x0106C7 04:86B7: 85 01
 		LDA objY+OSLOT_ENEMY,X				;C - - - - - 0x0106C9 04:86B9: BD 94 05
 		SEC							;C - - - - - 0x0106CC 04:86BC: 38
-.ifdef REGION_JP
-		SBC objY				;C - - - - - 0x0106CD 04:86BD: ED 8B 05
-.else
 		SBC targetY				;co-op 6a: targeted player
-.endif
 		BCS CODE_0886C9				;C - - - - - 0x0106D0 04:86C0: B0 07
 			EOR #$FF					;C - - - - - 0x0106D2 04:86C2: 49 FF
 			CLC							;C - - - - - 0x0106D4 04:86C4: 18
@@ -1207,11 +1127,7 @@ SpikeBallUpdate:
 		STA scratch0				;C - - - - - 0x0106E9 04:86D9: 85 00
 		LDA objX+OSLOT_ENEMY,X				;C - - - - - 0x0106EB 04:86DB: BD BC 05
 		SEC							;C - - - - - 0x0106EE 04:86DE: 38
-.ifdef REGION_JP
-		SBC objX				;C - - - - - 0x0106EF 04:86DF: ED B3 05
-.else
 		SBC targetX				;co-op 6a: targeted player
-.endif
 		BCS CODE_0886EB				;C - - - - - 0x0106F2 04:86E2: B0 07
 			INC scratch0				;C - - - - - 0x0106F4 04:86E4: E6 00
 			EOR #$FF					;C - - - - - 0x0106F6 04:86E6: 49 FF
@@ -1372,13 +1288,8 @@ CODE_0887F3:
 
 RuckusUpdate:
 	LDA #.BANK(DATA_06BD4B)					;C - - - - - 0x010804 04:87F4: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x010806 04:87F6: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x010808 04:87F8: 20 56 FF
-.endif
 
 	LDA #$00					;C - - - - - 0x01080B 04:87FB: A9 00
 	STA ram_04AD				;C - - - - - 0x01080D 04:87FD: 8D AD 04
@@ -1409,26 +1320,14 @@ CODE_08882A:
 	CMP #$08					;C - - - - - 0x010848 04:8838: C9 08
 	BCS CODE_088841				;C - - - - - 0x01084A 04:883A: B0 05
 		LDA #$08					;C - - - - - 0x01084C 04:883C: A9 08
-.ifdef REGION_JP
-		STA objY				;C - - - - - 0x01084E 04:883E: 8D 8B 05
-.else
 		JSR CoopSetP1Y				;co-op 6a: P1 moved, targetX/Y follow
-.endif
 CODE_088841:
 	CMP #$E8					;C - - - - - 0x010851 04:8841: C9 E8
 	BCC CODE_088857				;C - - - - - 0x010853 04:8843: 90 12
 		LDA #$00					;C - - - - - 0x010855 04:8845: A9 00
-.ifdef REGION_JP
-		STA objY				;C - - - - - 0x010857 04:8847: 8D 8B 05
-.else
 		JSR CoopSetP1Y				;co-op 6a: P1 moved, targetX/Y follow
-.endif
 		LDA #$A0					;C - - - - - 0x01085A 04:884A: A9 A0
-.ifdef REGION_JP
-		STA objX				;C - - - - - 0x01085C 04:884C: 8D B3 05
-.else
 		JSR CoopSetP1X				;co-op 6a: P1 moved, targetX/Y follow
-.endif
 		LDA #$FF					;C - - - - - 0x01085F 04:884F: A9 FF
 		STA wideHScroll				;C - - - - - 0x010861 04:8851: 8D 61 07
 		JSR CODE_088AA2				;C - - - - - 0x010864 04:8854: 20 A2 8A
@@ -1754,11 +1653,7 @@ CODE_088A71:
 		CMP #$F8					;C - - - - - 0x010A94 04:8A84: C9 F8
 		BCS CODE_088AA1				;C - - - - - 0x010A96 04:8A86: B0 19
 			LDA objX+OSLOT_ENEMY				;C - - - - - 0x010A98 04:8A88: AD BC 05
-.ifdef REGION_JP
-			CMP objX				;C - - - - - 0x010A9B 04:8A8B: CD B3 05
-.else
 			CMP targetX				;co-op 6a: targeted player
-.endif
 			BCS CODE_088A94				;C - - - - - 0x010A9E 04:8A8E: B0 04
 				LDA #$02					;C - - - - - 0x010AA0 04:8A90: A9 02
 				BNE CODE_088A96				;C - - - - - 0x010AA2 04:8A92: D0 02
@@ -1945,11 +1840,7 @@ CODE_088BCA:
 		LDA #anRounderFall_ID					;C - - - - - 0x010BFA 04:8BEA: A9 E0
 		JSR StartEnemyAnim				;C - - - - - 0x010BFC 04:8BEC: 20 58 99
 		STA objAnimHI+OSLOT_ENEMY,X				;C - - - - - 0x010BFF 04:8BEF: 9D 24 07
-.ifdef REGION_JP
-		LDA objX				;C - - - - - 0x010C02 04:8BF2: AD B3 05
-.else
 		LDA targetX				;co-op 6a: targeted player
-.endif
 		STA objX+OSLOT_ENEMY,X				;C - - - - - 0x010C05 04:8BF5: 9D BC 05
 		LDA #$10					;C - - - - - 0x010C08 04:8BF8: A9 10
 		STA objY+OSLOT_ENEMY,X				;C - - - - - 0x010C0A 04:8BFA: 9D 94 05
@@ -2331,11 +2222,7 @@ CODE_088EEF:
 	STA projVSpeed,Y				;C - - - - - 0x010F01 04:8EF1: 99 35 05
 	LDA objX+OSLOT_PROJ,Y				;C - - - - - 0x010F04 04:8EF4: B9 B4 05
 	SEC							;C - - - - - 0x010F07 04:8EF7: 38
-.ifdef REGION_JP
-	SBC objX				;C - - - - - 0x010F08 04:8EF8: ED B3 05
-.else
 	SBC targetX				;co-op 6a: targeted player
-.endif
 	BCS CODE_088F02				;C - - - - - 0x010F0B 04:8EFB: B0 05
 		EOR #$FF					;C - - - - - 0x010F0D 04:8EFD: 49 FF
 		CLC							;C - - - - - 0x010F0F 04:8EFF: 18
@@ -2351,11 +2238,7 @@ CODE_088F02:
 CODE_088F0C:
 	STA scratch0				;C - - - - - 0x010F1C 04:8F0C: 85 00
 	LDA objX+OSLOT_PROJ,Y				;C - - - - - 0x010F1E 04:8F0E: B9 B4 05
-.ifdef REGION_JP
-	CMP objX				;C - - - - - 0x010F21 04:8F11: CD B3 05
-.else
 	CMP targetX				;co-op 6a: targeted player
-.endif
 	BCC CODE_088F1D				;C - - - - - 0x010F24 04:8F14: 90 07
 		LDA #$00					;C - - - - - 0x010F26 04:8F16: A9 00
 		SEC							;C - - - - - 0x010F28 04:8F18: 38
@@ -2812,11 +2695,7 @@ CODE_08928E:
 	STA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x01129E 04:928E: 99 77 05
 	STA objAnimHI+OSLOT_BUBBLE,Y				;C - - - - - 0x0112A1 04:9291: 99 2F 07
 	INY							;C - - - - - 0x0112A4 04:9294: C8
-.ifdef REGION_JP
-	CPY #20					;C - - - - - 0x0112A5 04:9295: C0 14
-.else
 	CPY bubbleSlotEnd			;(co-op) was CPY #20: keeps P2 (slot 39)
-.endif
 	BCC CODE_08928E				;C - - - - - 0x0112A7 04:9297: 90 F5
 
 	LDA #$05					;C - - - - - 0x0112A9 04:9299: A9 05
@@ -3054,17 +2933,9 @@ CODE_089465:
 CODE_08946C:
 	LDA #$03					;C - - - - - 0x01147C 04:946C: A9 03
 	STA objAttr+OSLOT_ENEMY,X				;C - - - - - 0x01147E 04:946E: 9D FC 06
-.ifdef REGION_JP
-	LDA objX				;C - - - - - 0x011481 04:9471: AD B3 05
-.else
 	LDA targetX				;co-op 6a: targeted player
-.endif
 	STA scratch0				;C - - - - - 0x011484 04:9474: 85 00
-.ifdef REGION_JP
-	LDA objY				;C - - - - - 0x011486 04:9476: AD 8B 05
-.else
 	LDA targetY				;co-op 6a: targeted player
-.endif
 	STA scratch1				;C - - - - - 0x011489 04:9479: 85 01
 	LDA objState+OSLOT_ENEMY				;C - - - - - 0x01148B 04:947B: AD 6C 05
 	ORA objState+OSLOT_ENEMY+1				;C - - - - - 0x01148E 04:947E: 0D 6D 05
@@ -3273,12 +3144,7 @@ CODE_0895F3:
 	LDA objY+OSLOT_ENEMY,X				;C - - - - - 0x01161A 04:960A: BD 94 05
 	CMP #$90					;C - - - - - 0x01161D 04:960D: C9 90
 	BCC CODE_089641				;C - - - - - 0x01161F 04:960F: 90 30
-.ifdef REGION_JP
-		LDA playerState				;C - - - - - 0x011621 04:9611: A5 75
-		CMP #$0A					;C - - - - - 0x011623 04:9613: C9 0A
-.else
 		JSR CoopQuakeReady			;(co-op) Z = 1 while either player is stunned (1P: playerState = $0A)
-.endif
 		BEQ CODE_089641				;C - - - - - 0x011625 04:9615: F0 2A
 			LDA globalTimer				;C - - - - - 0x011627 04:9617: A5 14
 			CMP #$78					;C - - - - - 0x011629 04:9619: C9 78
@@ -3546,9 +3412,7 @@ CODE_08981A:
 		STA ram_00BB				;C - - - - - 0x01183E 04:982E: 85 BB
 		LDA #snBasketFail_ID					;C - - - - - 0x011840 04:9830: A9 1C
 		STA a:soundTrigger				;C - - - - - 0x011842 04:9832: 8D E1 00
-.ifndef REGION_JP
 		JSR CoopQuakeStunP2			;(co-op) the landing quake stuns P2 by the same rule as P1 below
-.endif
 		LDA playerInvFrames				;C - - - - - 0x011845 04:9835: AD 77 04
 		BNE CODE_089848				;C - - - - - 0x011848 04:9838: D0 0E
 			LDA ram_0078				;C - - - - - 0x01184A 04:983A: A5 78
@@ -3655,13 +3519,8 @@ CODE_0898F5:
 
 CODE_0898F6:
 	LDA #.BANK(DATA_06BE6E)					;C - - - - - 0x011906 04:98F6: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x011908 04:98F8: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x01190A 04:98FA: 20 56 FF
-.endif
 
 	LDA scratch4				;C - - - - - 0x01190D 04:98FD: A5 04
 	ASL							;C - - - - - 0x01190F 04:98FF: 0A
@@ -4025,10 +3884,6 @@ CODE_089B59:
 
 	JSR CODE_0FFAA3				;C - - - - - 0x011B94 04:9B84: 20 A3 FA
 
-.ifdef REGION_JP
-	LDA #anDOHTrapped_ID					;- - - - - - 0x011BB0 04:9BA0: A9
-	STA objAnim+OSLOT_BUBBLE,Y					;- - - - - - 0x011BB2 04:9BA2: 99
-.endif
 
 	LDA #$00					;C - - - - - 0x011B97 04:9B87: A9 00
 	STA ram_00C0,X				;C - - - - - 0x011B99 04:9B89: 95 C0
@@ -4347,17 +4202,11 @@ CODE_089D5D:
 	RTS							;C - - - - - 0x011D79 04:9D69: 60
 
 CODE_089D6A:
-.ifdef REGION_JP
-	LDA #.BANK(RoundMaps)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x011D7A 04:9D6A: A9 07
 	STA $8000				;C - - - - - 0x011D7E 04:9D6E: 8D 00 80
 	LDA #.BANK(RoundMaps)					;C - - - - - 0x011D81 04:9D71: A9 04
 	STA prgBankB				;C - - - - - 0x011D86 04:9D76: 85 53
 	STA $8001				;C - - - - - 0x011D83 04:9D73: 8D 01 80
-.endif
 
 	LDX currentRound				;C - - - - - 0x011D96 04:9D86: A6 D8
 	LDA RoundMaps,X			;C - - - - - 0x011D98 04:9D88: BD AE BA
@@ -4376,22 +4225,12 @@ CODE_089D6A:
 	LDA #$00					;C - - - - - 0x011DB4 04:9DA4: A9 00
 	STA wideRound				;C - - - - - 0x011DB6 04:9DA6: 8D B0 03
 
-.ifdef REGION_JP
-	LDA #$40
-	STA $E000
-.else
 	LDA #$01					;C - - - - - 0x011DB9 04:9DA9: A9 01
 	STA $A000				;C - - - - - 0x011DBB 04:9DAB: 8D 00 A0
-.endif
 	JSR LoadMap				;C - - - - - 0x011DBE 04:9DAE: 20 23 E5
 	LDA #$01					;C - - - - - 0x011DC1 04:9DB1: A9 01
 	STA enteringRound				;C - - - - - 0x011DC3 04:9DB3: 85 37
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x011DC5 04:9DB5: 60
 
 DATA_089DB6:
@@ -4520,13 +4359,8 @@ StartBonusRound:
 
 	JSR CODE_089E8F				;C - - - - - 0x011E80 04:9E70: 20 8F 9E
 
-.ifdef REGION_JP
-	LDA #$40
-	STA $E000
-.else
 	LDA #$01					;C - - - - - 0x011E83 04:9E73: A9 01
 	STA $A000				;C - - - - - 0x011E85 04:9E75: 8D 00 A0
-.endif
 
 	LDA #$00					;C - - - - - 0x011E88 04:9E78: A9 00
 	STA wideRound				;C - - - - - 0x011E8A 04:9E7A: 8D B0 03
@@ -4543,13 +4377,8 @@ StartBonusRound:
 
 CODE_089E8F:
 	LDA #.BANK(BonusGameMaps)					;C - - - - - 0x011E9F 04:9E8F: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x011EA1 04:9E91: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x011EA3 04:9E93: 20 56 FF
-.endif
 
 	LDY bonusGameProgress				;C - - - - - 0x011EA6 04:9E96: A4 D6
 	LDA BonusGameMaps,Y			;C - - - - - 0x011EA8 04:9E98: B9 A4 BD
@@ -4652,10 +4481,8 @@ CODE_089F40:
 	RTS							;C - - - - - 0x011F56 04:9F46: 60
 
 CODE_089F47:
-.ifndef REGION_JP
 	LDA #$00					;C - - - - - 0x011F57 04:9F47: A9 00
 	STA shooting				;C - - - - - 0x011F59 04:9F49: 8D 17 05
-.endif
 
 	LDA #.LOBYTE(RoundUpdate)	;C - - - - - 0x011F5C 04:9F4C: A9 10
 	STA nmiBankedSub			;C - - - - - 0x011F5E 04:9F4E: 85 16
@@ -4672,13 +4499,8 @@ CODE_089F47:
 
 CODE_089F61:
 	LDA #.BANK(DATA_06BDEF)					;C - - - - - 0x011F71 04:9F61: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x011F73 04:9F63: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x011F75 04:9F65: 20 56 FF
-.endif
 
 	LDX vNametable				;C - - - - - 0x011F78 04:9F68: A6 2D
 	LDA DATA_089FAE,X			;C - - - - - 0x011F7A 04:9F6A: BD AE 9F
@@ -4720,10 +4542,5 @@ DATA_089FAE:
 	.byte $2B					;- D 0 - - - 0x011FBF 04:9FAF: 2B
 
 ;Filler data
-.ifdef REGION_JP
-	;- - - - - - 0x011FCB 04:9FBB: 00
-	.incbin "filler/fill08_JP.bin"
-.else
 	;- - - - - - 0x011FC0 04:9FB0: 83
 	.incbin "filler/fill08.bin"
-.endif

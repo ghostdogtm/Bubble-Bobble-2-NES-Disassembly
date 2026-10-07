@@ -104,20 +104,12 @@ anSpringitDieL_ID = $66
 anDOHProj_ID = $67
 anDOHProjSpin_ID = $68
 
-.ifdef REGION_JP
-anDOHTrapped_ID = $69
-.else
 anZenChanTurnL_ID = $69
-.endif
 
 anDrunkTrapped_ID = $6A
 anFlutterflyTrapped_ID = $6B
 
-.ifdef REGION_JP
-anZenChanTurnL_ID = $6C
-.else
 anDOHTrapped_ID = $6C
-.endif
 
 anZenChanTurnR_ID = $6D
 anGhostMonstaL_ID = $6E
