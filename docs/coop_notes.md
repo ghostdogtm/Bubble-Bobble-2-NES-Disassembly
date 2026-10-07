@@ -1678,3 +1678,105 @@ Retired rules
   is no JP side. Edits go straight into the US code; the acceptance check for refactors is a byte-identical US ROM, for
   behaviour changes the `perf.py regress` / co-op checkers. Older sections of these notes that mention `.ifndef REGION_JP` or a US
   `.else` branch describe history; the code they refer to now simply sits inline.
+
+## R2: alternating 2P removed
+
+Commit `07a2009` ("Remove the alternating 2P mode: 1P and co-op only (R2)"), starting from `3e4c1e8` (R1). Plan:
+`tmp/bb2_remove_alt2p_plan.md`; owner decisions D-R2a (a) keep the 1P new-game writes of `ram_00D7/D9/DD`, D-R2b keep
+`coopMode` in WRAM and leave `$74 multiplayer` unused, D-R2c harness selects co-op through the menu. The game now has two
+modes: 1 player (the original, RAM-identical) and co-op. The title menu's second line ("2 PLAYERS") means co-op.
+
+### Site table (re-derived from the code: `multiplayer`, `currentPlayer`, the `bonusGameProgress,X / ram_00D7,X` pair loop,
+`ANNOUNCE_PLAYER`, `CoopMultiplayer`)
+| site | bank | what it did | verdict |
+|------|------|-------------|---------|
+| `@advance` (title setup) `STA multiplayer` | 5 | cleared the mode at every title setup | now `STA coopMode` (A = 0): every return to the title defaults to 1P. `COOP_FORCE` adds `INC coopMode` here (co-op line pre-selected; SELECT still toggles). The old reset-time `COOP_FORCE` store in `CoopReset` is removed. +1 B (STA abs) |
+| `TitleScreenMenu` SELECT: `multiplayer ^= 1` | 5 | 1P/2P choice | toggles `coopMode` instead (+2 B) |
+| `TitleScreenUpdateCursor` `LDX multiplayer` | 5 | cursor Y from `TitleScreenCursorPositions` (138/154) | `LDX coopMode` (+1 B); table kept |
+| `CODE_0582BE` (START, new game): `currentPlayer` = 0, both lives digit sets, `ram_00D7`/`ram_00D9`/`ram_00DD` | 5 | new game for both alternating players | kept unchanged (D-R2a: the three writes are dead now but keep 1P RAM identical; the P2 digit set is used by co-op) |
+| `CODE_0595D7` death epilogue: `JSR CoopMultiplayer / CMP #1 / BNE / JSR CODE_05962D / JMP` | 5 | alternating death switch (7a gate) | removed (13 B); the two round-20 branches go straight to `CODE_0595E3` (in-place respawn, label kept: the verifiers use it) |
+| `CoopMultiplayer` | E (COOP_CODE2) | 7a gate: `multiplayer`, or 0 in co-op | removed (10 B); `CoopFlowRts` (shared RTS) kept |
+| `CODE_05962D` switch: `currentPlayer ^= multiplayer`, swap of the pairs `$D6/$D7 .. $DE/$DF` (`CODE_059645` loop) | 5 | other player's turn | removed (34 B). Shared head (`playerInvFrames`/`soundTrigger` = 0) and tail `CODE_059657` (lives reload from the digits, hearts 1, `CODE_0FEC8C`, round-restart fade, `updateSub` = `CODE_058DBE`) kept byte for byte. Only caller now: the continue (`CODE_058DB2`) |
+| `CODE_058CC3` (game over, no continues, key pressed): `multiplayer == 1` -> `ResetLivesAndScore`, `CODE_05962D`, `multiplayer` = 2 | 5 | hand the game to the other player | removed (24 B); `CODE_058C9D`'s branch goes to `CODE_058CDB` (title) directly. The fall-through after `CMP #KEY_START / BEQ CODE_058D1A` (never taken: A = `KEY_START` there) now reaches `CODE_058CDB` |
+| `CODE_058E6A` (end of the ending, bank 7 `CODE_078026` stores it in `nmiBankedSub`): same hand-over, else `JMP CODE_058CDB` | 5 | | body replaced by `JMP CODE_058CDB` (-22 B). The label is kept so the pointer bank 7 stores keeps its name (the regress pointer translation compares names) |
+| `CODE_058DBE` ("PLAYER n" announce: `ANNOUNCE_PLAYER`, `SpawnAnnounceObj`, `CODE_0885FE` digit, $28-tick wait) | 5 | round restart in 2P | removed (109 B). The label `CODE_058DBE` now sits on the former `CODE_058E2B` (the code the 1P path jumped to), so `updateSub` holds the same name as in the original. Labels gone: `CODE_058E1A/E20/E23/E2B/E69/E73` |
+| `ANNOUNCE_PLAYER` (defines.inc), announce type 3 data in bank 8, `SpawnAnnounceObj`, `CODE_0885FE` | 8 | | kept: constant only / shared routines used by the round announce; the type-3 table entry sits inside indexed tables |
+| `multiplayer` ($74, ram.inc) | | | kept as a definition, never read or written now (D-R2b). 1P never wrote anything but 0 there, so `regress` still sees 0 |
+| `currentPlayer` readers: `ResetLivesAndScore` (`LivesScoreResetPlayerOfs`), ending palette setup (`DATA_058B3E`, before `CODE_058B40`), `CODE_058C2E` (`GameOverPlayerColors`), `CODE_058E83` (`PlayerInputIndex`), bank 7 `CODE_078FD0` (bonus palette `DATA_079001`), bank 7 `CODE_0792E8` / `CODE_07930A` (`heldP1`/`heldP2` pointer), bank 8 `CODE_0880C8` (`PlayerSpecificColor`), bank 9 `RefreshLivesDigits` / `CODE_099D3B` (`LivesDigitsPlayerOfs`), bank F `AddScore` (`ScoreAdditionStartOfs`), co-op swap/score code | 5 7 8 9 F E | per-player tables | all kept: co-op sets `currentPlayer = coopResident ^ coopRoles` and uses them. `CODE_0792E8` reads the resident's pad (correct for co-op), re-check in 7b |
+| `currentPlayer` writers: `CODE_0582BE` (= 0), `CoopSwap`/`CoopSwapCtx`, `CoopResidentOut`, `CoopAddScoreAs`, `CoopExtraLifeOther` | 5 E | | kept (the only removed writer is the `CODE_05962D` switch) |
+| pair loop `bonusGameProgress,X / ram_00D7,X` | 5 | | only in `CODE_05962D` (removed). Other readers of `ram_00D7..DF`: none (`$D7/$D9/$DD` are written once at a new game) |
+
+R2.5 re-check of the Phase 3-7a hooks: the only hook that existed for the alternating case was `CoopMultiplayer` (removed).
+`CoopNewGame`, `CoopContinue`/`CoopResetOther`, `CoopRoundStartP2`, `CoopResidentOut` and the score-owner code are gated by
+`coopMode` or `coopP2Active`, not by `multiplayer`, and stay as they are. Comments that mentioned the alternating mode
+(score attribution header, `CoopContinue`, `coopMode`) were updated. D6 ("harness pokes `coopMode`", "`COOP_FORCE` sets it in
+the reset hook") is superseded by this section.
+
+### Harness change (D-R2c)
+- `tools/perf/harness.lua`: new optional `CFG.coop_select = {mode = coopMode, menu = TitleScreenMenu}`. While the title menu
+  runs (`nmiBankedSub` == `TitleScreenMenu`) and `coopMode` != 1, pad 1 taps SELECT (2 ticks held, 2 ticks released, nothing
+  else pressed) instead of the generator's input; the generator's normal START taps then start the game. The run fails with
+  the csv line `COOP_NOT_SELECTED ...` and exit code 3 if the game starts with `coopMode` != 1 or if 4 SELECT taps did not set
+  it. Without `coop_select` the input is the generator's, unchanged (the generator is still called every tick).
+- `tools/perf/perf.py`: the CFG options of `run_scen` moved into `scen_extra(build, opts, seed)` (also used by
+  `tmp/coop_scripts/r2/coophelp.py`); for `coop` scenarios it emits `coop_select` instead of the tick-1 `coopMode` poke.
+  `coopP2Lives` stays in `lives_addrs`; `pokes` is still available. The comparison logic is untouched.
+- In practice the menu appears at tick ~277; SELECT is tapped there and the START tap at tick 320 starts the game at tick
+  321, the same tick as before. So the co-op runs after the start are the same games as with the old poke (see below).
+- A pre-R2 build (where SELECT toggles `multiplayer`) now fails loudly: `perf.py run r2pre --scen c01` -> exit code 3,
+  `COOP_NOT_SELECTED SELECT did not set coopMode`. `tmp/coop_scripts/p7/altcmp.py` is obsolete (no alternating mode).
+
+### Freed space (`perf.py build` segment report, r2pre -> r2)
+| segment | free before | free after | gained |
+|---------|-------------|------------|--------|
+| bank 5 | 158 | 356 | +198 |
+| COOP_CODE2 | 284 | 294 | +10 (`CoopMultiplayer`) |
+| COOP_CODE | 130 | 130 | 0 (the `COOP_FORCE` store moved to bank 5: `r2f` bank 5 free 353) |
+| banks 7, 8, 9, B, F | 28, 15, 182, 26, 215 | same | 0 |
+
+Bank 5 in detail: -109 announce, -34 pair swap, -24 `CODE_058CC3`, -22 `CODE_058E6A`, -13 `CODE_0595D7`, +4 menu/title
+(`coopMode` is absolute).
+
+### Verification
+1. `perf.py build r2`, `build r2f --define COOP_FORCE`, `build r2t --define COOP_SWAPTEST`: all assemble.
+2. `perf.py regress base r2 --reuse-base`: **REGRESSION PASS, 12/12** (natural covers deaths, game over, continue).
+3. `tmp/coop_scripts/r2/r2verify.py` (copy of `p7verify.py`: no o5 / `mp1` case, no `CoopMultiplayer` counter; the
+   `CODE_05962D` hook now flags any call from a death; a non-zero Mesen exit code counts as a violation; runs through
+   `r2/coophelp.py`). 15 runs: c01 c05 c17 c20 c22 c50 c64, d13 d04 d25, o1 o2 o3 o4 o6.
+   - baseline `r2pre` (old harness, tick-1 poke): **violations p5 0, p6 0, p6b 0, p7 0** (`r2/base_r2pre.txt`);
+   - `r2` (co-op entered through the menu): **violations p5 0, p6 0, p6b 0, p7 0**, every run rc 0 (`r2/final_r2.txt`).
+   - Event counts are identical in both: deaths P1 64 / P2 53 (2 in the same tick, 23 during the other's death),
+     2 co-op game overs, 2 continues with both players back (`spawn_after_continue` 2, lives 3/3), 1 P2 out in its window,
+     3 role exchanges, 3 round starts with the other player out, kills by bubble P1 21 / P2 20, multi-kill awards 38,
+     touch pops 435/475, chain pops 6795/8043, play ticks both 28207, P2 alone 5760, P1 alone 1730,
+     `roundrestart_05962D_other_coop` 2 (the two continues), no `CODE_05962D` from a death. They are identical because the
+     game starts on the same tick (321) as with the poke; the per-tick cycle counts differ (removed code), the games do not.
+     (The p5 lines `v_slot39_state_0B/0C` are the Phase 6a info counters, as before.)
+4. Menu tests `tmp/coop_scripts/r2/menutest.py` (standalone Lua per case, `runs/menu/`), all PASS:
+   - a) START: menu at t287 with coopMode 0 / cursor Y 138; round 1 in play with coopMode 0, P2 never active;
+   - b) SELECT (coopMode 1, cursor 154), START: round 1 with coopMode 1, `coopP2Active` $80, slot 39 in use;
+   - c) SELECT, SELECT (back to 0 / 138), START: 1P as in a;
+   - d) co-op, then continues 0 and both players killed: co-op game over at t1044, A -> title; the menu shows again with
+     coopMode 0 and the cursor on line 1 (the continue screen has no timeout: with continues left only START leaves it,
+     so "declining" means the no-continue game-over screen);
+   - e) `r2f` (COOP_FORCE): menu boots with coopMode 1 / cursor 154; START gives co-op with P2;
+   - f) `r2f`: SELECT, START gives 1P (the pre-selection can be toggled).
+   - Also `perf.py run r2f --scen c01`: no SELECT needed, same start tick and round sequence as `r2`.
+5. Continue in co-op restores both players: covered by r2verify (2 continues, both lives 3, both spawned, 0 violations).
+6. `perf.py stats r2 --vs c7a`: 1P total -1 cycles (-0.00 %), every scenario within -2..+4 play cycles, lag +0..+1.
+   Co-op (`run r2 --scen <7>`, `stats --vs c7a`): total -1 cycles (-0.00 %), lag unchanged (same start tick, so the
+   comparison is exact, not rough).
+7. Screenshot of the title menu with the cursor on the second line: `tmp/coop_scripts/r2/menu_coop.png`.
+
+### Deviations from the plan
+- `CODE_058E6A` is not deleted: bank 7 stores it as `nmiBankedSub`, so it stays as a 3-byte `JMP CODE_058CDB` (pointer name
+  unchanged for the regress pointer translation).
+- `CODE_058DBE` keeps its name on the former `CODE_058E2B` code for the same reason (`updateSub` after a continue).
+- The `COOP_FORCE` store moved from `CoopReset` to `@advance` (the reset-time store would be cleared by `@advance` anyway).
+
+### Left for Phase 7b
+- The second menu line still reads "2 PLAYERS"; it now means co-op (text change only if the font allows).
+- HUD for both players, co-op game-over / continue screens (one dragon, P1 colour, continue by pad 1 START only), lone-P2
+  palette after a role exchange, bonus credit (Phase 7a 7b list), `CODE_0792E8` pad read re-check.
+- Dead bytes that could go later: `ram_00D7/D9/DD` writes in `CODE_0582BE` (6 B, D-R2a keeps them), `TitleScreenCursorPositions`
+  stays used; `$74` is free for reuse (perf phase, D-R2b).
