@@ -51,11 +51,7 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 	LDA #BUBBLE_SLOTS-1
 	STA bubbleSlotLast
 
-.ifdef COOP_FORCE
-	LDA #$01						;manual-test build: co-op always on
-	STA coopMode
-.endif
-	RTS
+	RTS								;(R2) COOP_FORCE now pre-selects the co-op line at the title (bank 5 @advance)
 
 ; ---------------------------------------------------------------------------------------------
 ; CoopSwap: exchange the resident player with the one stored in ctxOther / object slot OSLOT_P2.
@@ -1047,7 +1043,8 @@ CoopResidentOut:
 	RTS
 
 ; ---------------------------------------------------------------------------------------------
-; CoopContinue: continue chosen (CODE_058DB2, bank 5: after ResetLivesAndScore for P1, before CODE_05962D).
+; CoopContinue: continue chosen (CODE_058DB2, bank 5: after ResetLivesAndScore for P1, before CODE_05962D, the
+; round restart).
 ; Co-op: P2 gets the same fresh start; CoopRoundStartP2 then spawns both players again.
 ; CoopResetOther: ResetLivesAndScore for the other player's context (3 lives, 1 heart, his score and extra-life
 ; accumulator 0; currentPlayer = 1 while it runs). Objects untouched. Bank 5 must be mapped. Clobbers A/X/Y.
@@ -1060,16 +1057,7 @@ CoopResetOther:
 	JSR ResetLivesAndScore
 	JMP CoopSwapCtx
 
-; ---------------------------------------------------------------------------------------------
-; CoopMultiplayer (bank 5, CODE_0595D7, respawn after a death): A = multiplayer, or 0 in co-op, so the
-; alternating-2P switch (CODE_05962D: other player's turn, round restart) is never taken in co-op. X/Y kept.
-; ---------------------------------------------------------------------------------------------
-CoopMultiplayer:
-	LDA coopMode
-	BNE :+
-	LDA multiplayer
-	RTS
-:	LDA #$00
+; (R2) CoopMultiplayer (the 7a gate of the alternating-2P death switch) is gone with the alternating mode.
 CoopFlowRts:
 	RTS
 
@@ -1121,8 +1109,7 @@ CoopExtraLifeOther:
 ; =============================================================================================
 ; Phase 7a: score attribution (COOP_CODE). Scores granted by code that runs with P1 resident go to the player
 ; who earned them. Owners are physical player ids (currentPlayer of the player who acted); $FF = unknown,
-; credited to currentPlayer as in the original. In 1P / alternating 2P every owner is currentPlayer, so the
-; credit is unchanged.
+; credited to currentPlayer as in the original. In 1P every owner is currentPlayer, so the credit is unchanged.
 ;   coopBubOwner[bubble]: the popper (touch pop, CoopTouchPop) or, for a chain pop, the owner of the popped
 ;                         bubble that touched it (CoopChainOwner); copied to water-flood pieces (CoopFloodCopy)
 ;   coopKiller[enemy]:    set at the kill: enemy bubble popped (CoopCountKill: bubble owner), special-bubble

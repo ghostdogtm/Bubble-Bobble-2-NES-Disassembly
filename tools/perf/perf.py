@@ -17,9 +17,11 @@ Scenario tuples are (ticks, seed, start_round, inf_lives, start_taps[, style][, 
 optional dict as the LAST element (the first five fields and an optional style string are unchanged):
   pad2   bool   drive pad 2 with a second generator (CFG.pad2, seed2 = seed + 7919 unless "seed2" given)
   seed2  int    explicit pad-2 seed
-  coop   bool   co-op scenario: poke 1 into the symbol coopMode at tick 1 (looked up in the build's
-                labels.txt; if the symbol is missing prints a NOTE and runs anyway, co-op inert) and
-                top up the symbol coopP2Lives too (if defined) via CFG.lives_addrs
+  coop   bool   co-op scenario: select co-op on the title menu with pad-1 SELECT (CFG.coop_select with the
+                symbols coopMode and TitleScreenMenu from the build's labels.txt; the run fails if the game
+                starts without coopMode = 1; if coopMode is missing prints a NOTE and runs anyway, co-op
+                inert) and top up the symbol coopP2Lives too (if defined) via CFG.lives_addrs.
+                (Before R2 this was a poke of 1 into coopMode at tick 1; R2's @advance clears coopMode.)
   pokes  list   extra {tick=N, addr=A, val=V} CPU-bus writes at the start of tick N (CFG.pokes)
 The co-op scenarios (c01 c05 c17 c20 c22 c50 c64) are NOT part of DEFAULT_SCENS; name them with --scen.
 
@@ -228,6 +230,30 @@ def build_symbol(build, name):
     return None
 
 
+def scen_extra(build, opts, seed):
+    """the CFG fields (Lua, each starting with ', ') for a scenario's opts dict (see the module docstring)"""
+    extra = ""
+    pokes = list(opts.get("pokes", []))
+    lives = []
+    if opts.get("coop"):
+        a = build_symbol(build, "coopMode")
+        m = build_symbol(build, "TitleScreenMenu")
+        if a is None or m is None:
+            print(f"NOTE: {build} has no coopMode symbol - co-op inert")
+        else:
+            extra += f", coop_select = {{mode = {a}, menu = {m}}}"
+        a = build_symbol(build, "coopP2Lives")
+        if a is not None:
+            lives = [0x0479, a]
+    if opts.get("pad2"):
+        extra += f', pad2 = true, seed2 = {opts.get("seed2", seed + 7919)}'
+    if pokes:
+        extra += ", pokes = {" + ",".join(f"{{tick={p['tick']},addr={p['addr']},val={p['val']}}}" for p in pokes) + "}"
+    if lives:
+        extra += ", lives_addrs = {" + ",".join(map(str, lives)) + "}"
+    return extra
+
+
 def run_scen(build, scen, dump=False, profile=False, shots=None):
     sc = SCENARIOS[scen]
     opts = sc[-1] if isinstance(sc[-1], dict) else {}
@@ -238,24 +264,7 @@ def run_scen(build, scen, dump=False, profile=False, shots=None):
     os.makedirs(od, exist_ok=True)
     out = os.path.join(od, scen)
     lua = lambda v: "true" if v else "false"
-    extra = ""
-    pokes = list(opts.get("pokes", []))
-    lives = []
-    if opts.get("coop"):
-        a = build_symbol(build, "coopMode")
-        if a is None:
-            print(f"NOTE: {build} has no coopMode symbol - co-op inert")
-        else:
-            pokes.append(dict(tick=1, addr=a, val=1))
-        a = build_symbol(build, "coopP2Lives")
-        if a is not None:
-            lives = [0x0479, a]
-    if opts.get("pad2"):
-        extra += f', pad2 = true, seed2 = {opts.get("seed2", seed + 7919)}'
-    if pokes:
-        extra += ", pokes = {" + ",".join(f"{{tick={p['tick']},addr={p['addr']},val={p['val']}}}" for p in pokes) + "}"
-    if lives:
-        extra += ", lives_addrs = {" + ",".join(map(str, lives)) + "}"
+    extra = scen_extra(build, opts, seed)
     cfg = (f'CFG = {{ out = [[{out}]], ticks = {ticks}, seed = {seed}, '
            f'start_round = {rnd if rnd else "nil"}, inf_lives = {lua(inf)}, start_taps = {lua(taps)}, '
            f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}}{extra} }}\n')

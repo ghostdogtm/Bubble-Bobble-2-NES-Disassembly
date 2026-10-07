@@ -3,7 +3,8 @@
 
 .segment "COOP_BSS"
 
-coopMode:       .res 1          ; 0 = normal 1-player game, 1 = co-op active
+coopMode:       .res 1          ; 0 = normal 1-player game, 1 = co-op active (R2: the title menu's SELECT toggles it;
+                                ; cleared at reset and at every title setup, bank 5 @advance)
 coopResident:   .res 1          ; which player's state is in the main game variables: 0 = P1, 1 = P2
 coopCanary:     .res 4          ; "COOP" written at reset; shows PRG-RAM is mapped and writable
 

@@ -21,6 +21,12 @@
 --                so $6000-$7FFF reaches cartridge PRG-RAM if the mapper provides it)
 --   lives_addrs  (optional) list of CPU addresses topped up to 3 when < 2 if inf_lives is set
 --                (default {0x0479} = playerLives)
+--   coop_select  (optional) {mode = A, menu = M}: co-op scenario (R2). While the title menu runs
+--                (nmiBankedSub == M, TitleScreenMenu) and the byte at A (coopMode) is not 1, pad 1 taps
+--                SELECT (held 2 ticks, then 2 ticks with nothing pressed) instead of the generator's
+--                input; the generator's START taps then start the game. The run fails (csv line
+--                COOP_NOT_SELECTED, exit code 3) if the game starts with coopMode ~= 1 or if 4 SELECT
+--                taps did not set it. Without coop_select the input stream is unchanged.
 --
 -- CSV columns (perf.py reads columns 3 and 5, so new columns are only ever appended):
 --   tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2
@@ -131,6 +137,22 @@ local function makeGen(seed, isP1)
 end
 
 local genInput = makeGen(CFG.seed, true)
+
+-- co-op scenarios: choose the co-op line of the title menu with SELECT (see coop_select above)
+local selHold, selGap, selTaps, coopFail = 0, 0, 0, nil
+local function coopSelect(inp)
+  local cs = CFG.coop_select
+  if not cs or started then return inp end
+  if selHold > 0 then selHold = selHold - 1; return { select = true } end
+  if selGap > 0 then selGap = selGap - 1; return {} end
+  if emu.read(0x16, MT_CPU) + emu.read(0x17, MT_CPU) * 256 == cs.menu and emu.read(cs.mode, MT_CPU) ~= 1 then
+    selTaps = selTaps + 1
+    if selTaps > 4 then coopFail = "SELECT did not set coopMode" end
+    selHold, selGap = 1, 2
+    return { select = true }
+  end
+  return inp
+end
 local genInput2 = CFG.pad2 and makeGen(CFG.seed2 or ((CFG.seed or 1) + 7919), false) or nil
 
 local pokes = {}
@@ -199,7 +221,7 @@ emu.addMemoryCallback(function(addr, value)
     if pokes[tick] then
       for _, pk in ipairs(pokes[tick]) do emu.write(pk.addr, pk.val, MT_CPU) end
     end
-    curInput = genInput(tick)
+    curInput = coopSelect(genInput(tick))
     if genInput2 then curInput2 = genInput2(tick) end
     if CFG.inf_lives and started then
       for _, a in ipairs(livesAddrs) do
@@ -229,6 +251,10 @@ emu.addMemoryCallback(function(addr, value)
       local g = io.open(string.format("%s_t%05d.png", CFG.out, tick), "wb")
       g:write(png); g:close()
     end
+    if coopFail then
+      csv:write("COOP_NOT_SELECTED " .. coopFail .. "\n")
+      finish(3)
+    end
     if tick + 1 >= CFG.ticks then finish(0) end
   end
 end, emu.callbackType.write, NMI_PROGRESS, NMI_PROGRESS, emu.cpuType.nes, MT_CPU)
@@ -238,6 +264,9 @@ emu.addMemoryCallback(function(addr, value)
   if not started and value == 1 then
     started = true
     startTick = tick
+    if CFG.coop_select and emu.read(CFG.coop_select.mode, MT_CPU) ~= 1 then
+      coopFail = "game started with coopMode " .. emu.read(CFG.coop_select.mode, MT_CPU)
+    end
     -- the callback runs before the store commits, so apply the warp at the next tick start
     if CFG.start_round and CFG.start_round ~= 1 then pendingRound = CFG.start_round end
   end

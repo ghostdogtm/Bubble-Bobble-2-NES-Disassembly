@@ -112,7 +112,10 @@ TaitoLogoUpdate:
 	STA roundFlags				;C - - - - - 0x00A0CD 02:80BD: 8D 71 04
 	STA logoCycles				;C - - - - - 0x00A0D0 02:80C0: 8D 7A 07
 	STA playerInvFrames				;C - - - - - 0x00A0D3 02:80C3: 8D 77 04
-	STA multiplayer				;C - - - - - 0x00A0D6 02:80C6: 85 74
+	STA coopMode				;(R2) title: 1-player line selected (was STA multiplayer; $74 is unused now)
+.ifdef COOP_FORCE
+	INC coopMode				;manual-test build: the co-op line is pre-selected
+.endif
 	JSR SetupIntroCutscene				;C - - - - - 0x00A0D8 02:80C8: 20 44 83
 
 	LDA #FADE_OUT					;C - - - - - 0x00A0DB 02:80CB: A9 00
@@ -436,9 +439,9 @@ TitleScreenMenu:
 	BEQ CODE_0582B8				;C - - - - - 0x00A2B7 02:82A7: F0 0F
 		CMP #KEY_START				;C - - - - - 0x00A2B9 02:82A9: C9 08
 		BEQ CODE_0582BE				;C - - - - - 0x00A2BB 02:82AB: F0 11
-			LDA multiplayer				;C - - - - - 0x00A2BD 02:82AD: A5 74
+			LDA coopMode				;(R2) the second line is co-op (was: multiplayer, alternating 2P)
 			EOR #$01					;C - - - - - 0x00A2BF 02:82AF: 49 01
-			STA multiplayer				;C - - - - - 0x00A2C1 02:82B1: 85 74
+			STA coopMode
 			LDA #snMenuBrowse_ID					;C - - - - - 0x00A2C3 02:82B3: A9 02
 			STA a:soundTrigger				;C - - - - - 0x00A2C5 02:82B5: 8D E1 00
 CODE_0582B8:
@@ -504,7 +507,7 @@ CODE_058332:
 	RTS							;C - - - - - 0x00A342 02:8332: 60
 
 TitleScreenUpdateCursor:
-	LDX multiplayer				;C - - - - - 0x00A343 02:8333: A6 74
+	LDX coopMode				;(R2) 0 = 1 player, 1 = co-op
 	LDA TitleScreenCursorPositions,X			;C - - - - - 0x00A345 02:8335: BD 42 83
 	STA objY				;C - - - - - 0x00A348 02:8338: 8D 8B 05
 	JSR AnimateNonBubbles				;C - - - - - 0x00A34B 02:833B: 20 5C EE
@@ -1934,7 +1937,7 @@ CODE_058C9D:
 	BNE CODE_058CAA				;C - - - - - 0x00ACAF 02:8C9F: D0 09
 		LDA pressedP1				;C - - - - - 0x00ACB1 02:8CA1: A5 0E
 		AND #KEY_A|KEY_B|KEY_START|KEY_SELECT	;C - - - - - 0x00ACB3 02:8CA3: 29 0F
-		BNE CODE_058CC3				;C - - - - - 0x00ACB5 02:8CA5: D0 1C
+		BNE CODE_058CDB				;(R2) was CODE_058CC3 (alternating-2P hand-over test)
 			JMP CODE_058D84				;C - - - - - 0x00ACB7 02:8CA7: 4C 84 8D
 CODE_058CAA:
 	LDA globalTimer				;C - - - - - 0x00ACBA 02:8CAA: A5 14
@@ -1950,18 +1953,7 @@ CODE_058CB3:
 CODE_058CBF:
 	CMP #KEY_START				;C - - - - - 0x00ACCF 02:8CBF: C9 08
 	BEQ CODE_058D1A				;C - - - - - 0x00ACD1 02:8CC1: F0 57
-CODE_058CC3:
-		LDA multiplayer				;C - - - - - 0x00ACD3 02:8CC3: A5 74
-		CMP #$01					;C - - - - - 0x00ACD5 02:8CC5: C9 01
-		BNE CODE_058CDB				;C - - - - - 0x00ACD7 02:8CC7: D0 12
-			LDA #trSilence_ID					;C - - - - - 0x00ACD9 02:8CC9: A9 00
-			STA a:musicTrigger				;C - - - - - 0x00ACDB 02:8CCB: 8D E0 00
-
-			JSR ResetLivesAndScore				;C - - - - - 0x00ACDE 02:8CCE: 20 8B 88
-			JSR CODE_05962D				;C - - - - - 0x00ACE1 02:8CD1: 20 2D 96
-			LDA #$02					;C - - - - - 0x00ACE4 02:8CD4: A9 02
-			STA multiplayer				;C - - - - - 0x00ACE6 02:8CD6: 85 74
-			JMP CODE_058D84				;C - - - - - 0x00ACE8 02:8CD8: 4C 84 8D
+;(R2) CODE_058CC3 removed: in alternating 2P the other player took over here (multiplayer = 2)
 CODE_058CDB:
 		LDA #trSilence_ID					;C - - - - - 0x00ACEB 02:8CDB: A9 00
 		STA a:musicTrigger				;C - - - - - 0x00ACED 02:8CDD: 8D E0 00
@@ -2090,63 +2082,9 @@ CODE_058DB2:
 CODE_058DBD:
 	RTS							;C - - - - - 0x00ADCD 02:8DBD: 60
 
+;(R2) the alternating-2P "PLAYER n" announce (ANNOUNCE_PLAYER, then a $28-tick wait) is removed; the round
+;restart (updateSub set by CODE_05962D) goes straight to the former CODE_058E2B
 CODE_058DBE:
-	LDA multiplayer				;C - - - - - 0x00ADCE 02:8DBE: A5 74
-	CMP #$01					;C - - - - - 0x00ADD0 02:8DC0: C9 01
-	BNE CODE_058E2B				;C - - - - - 0x00ADD2 02:8DC2: D0 67
-		LDA playerInvFrames				;C - - - - - 0x00ADD4 02:8DC4: AD 77 04
-		BNE CODE_058E1A				;C - - - - - 0x00ADD7 02:8DC7: D0 51
-			LDA sprPrgBank				;C - - - - - 0x00ADD9 02:8DC9: AD 61 05
-			STA announceOrigSprBank				;C - - - - - 0x00ADDC 02:8DCC: 8D 62 05
-			LDA #ANNOUNCE_PLAYER					;C - - - - - 0x00ADDF 02:8DCF: A9 03
-			STA scratch0				;C - - - - - 0x00ADE1 02:8DD1: 85 00
-			STA ram_0475				;C - - - - - 0x00ADE3 02:8DD3: 8D 75 04
-			LDA #$01					;C - - - - - 0x00ADE6 02:8DD6: A9 01
-			STA scratch4				;C - - - - - 0x00ADE8 02:8DD8: 85 04
-
-			LDA #.LOBYTE(SpawnAnnounceObj)					;C - - - - - 0x00ADEA 02:8DDA: A9 76
-			STA bankedSub				;C - - - - - 0x00ADEC 02:8DDC: 85 55
-			LDA #.HIBYTE(SpawnAnnounceObj)					;C - - - - - 0x00ADEE 02:8DDE: A9 9C
-			STA bankedSub+1				;C - - - - - 0x00ADF0 02:8DE0: 85 56
-			LDA #.BANK(SpawnAnnounceObj)					;C - - - - - 0x00ADF2 02:8DE2: A9 08
-			STA bankedSubBank				;C - - - - - 0x00ADF4 02:8DE4: 85 57
-			LDA #.BANK(*)					;C - - - - - 0x00ADF6 02:8DE6: A9 05
-			STA bankedSubRetBank				;C - - - - - 0x00ADF8 02:8DE8: 85 58
-			JSR RunBankedSub				;C - - - - - 0x00ADFA 02:8DEA: 20 72 E7
-
-			LDA #$98					;C - - - - - 0x00ADFD 02:8DED: A9 98
-			STA scratch0				;C - - - - - 0x00ADFF 02:8DEF: 85 00
-			LDA #$78					;C - - - - - 0x00AE01 02:8DF1: A9 78
-			STA scratch1				;C - - - - - 0x00AE03 02:8DF3: 85 01
-			INC scratch4				;C - - - - - 0x00AE05 02:8DF5: E6 04
-			LDA currentPlayer				;C - - - - - 0x00AE07 02:8DF7: AD 99 04
-			CLC							;C - - - - - 0x00AE0A 02:8DFA: 18
-			ADC #$01					;C - - - - - 0x00AE0B 02:8DFB: 69 01
-			STA scratch2				;C - - - - - 0x00AE0D 02:8DFD: 85 02
-
-			LDA #.LOBYTE(CODE_0885FE)					;C - - - - - 0x00AE0F 02:8DFF: A9 FE
-			STA bankedSub				;C - - - - - 0x00AE11 02:8E01: 85 55
-			LDA #.HIBYTE(CODE_0885FE)					;C - - - - - 0x00AE13 02:8E03: A9 85
-			STA bankedSub+1				;C - - - - - 0x00AE15 02:8E05: 85 56
-			LDA #.BANK(CODE_0885FE)					;C - - - - - 0x00AE17 02:8E07: A9 08
-			STA bankedSubBank				;C - - - - - 0x00AE19 02:8E09: 85 57
-			LDA #.BANK(*)					;C - - - - - 0x00AE1B 02:8E0B: A9 05
-			STA bankedSubRetBank				;C - - - - - 0x00AE1D 02:8E0D: 85 58
-			JSR RunBankedSub				;C - - - - - 0x00AE1F 02:8E0F: 20 72 E7
-			LDA #$28					;C - - - - - 0x00AE22 02:8E12: A9 28
-			STA playerInvFrames				;C - - - - - 0x00AE24 02:8E14: 8D 77 04
-			JMP CODE_058E20				;C - - - - - 0x00AE27 02:8E17: 4C 20 8E
-	CODE_058E1A:
-		LDA globalTimer				;C - - - - - 0x00AE2A 02:8E1A: A5 14
-		AND #$01					;C - - - - - 0x00AE2C 02:8E1C: 29 01
-		BNE CODE_058E23				;C - - - - - 0x00AE2E 02:8E1E: D0 03
-	CODE_058E20:
-			JSR AnimateNonBubbles				;C - - - - - 0x00AE30 02:8E20: 20 5C EE
-	CODE_058E23:
-		JSR DrawObjects				;C - - - - - 0x00AE33 02:8E23: 20 E2 EE
-		DEC playerInvFrames				;C - - - - - 0x00AE36 02:8E26: CE 77 04
-		BNE CODE_058E69				;C - - - - - 0x00AE39 02:8E29: D0 3E
-CODE_058E2B:
 	LDA #01					;C - - - - - 0x00AE3B 02:8E2B: A9 01
 	STA scratch0				;C - - - - - 0x00AE3D 02:8E2D: 85 00
 	JSR SplashScreenSprSetup				;C - - - - - 0x00AE3F 02:8E2F: 20 62 82
@@ -2177,23 +2115,12 @@ CODE_058E2B:
 	STA nmiBankedSub			;C - - - - - 0x00AE73 02:8E63: 85 16
 	LDA #.HIBYTE(RunColorFader)	;C - - - - - 0x00AE75 02:8E65: A9 E8
 	STA nmiBankedSub+1			;C - - - - - 0x00AE77 02:8E67: 85 17
-CODE_058E69:
 	RTS							;C - - - - - 0x00AE79 02:8E69: 60
 
 CODE_058E6A:
-	LDA multiplayer				;C - - - - - 0x00AE7A 02:8E6A: A5 74
-	CMP #$01					;C - - - - - 0x00AE7C 02:8E6C: C9 01
-	BEQ CODE_058E73				;C - - - - - 0x00AE7E 02:8E6E: F0 03
-		JMP CODE_058CDB				;C - - - - - 0x00AE80 02:8E70: 4C DB 8C
-CODE_058E73:
-	LDA #trSilence_ID					;C - - - - - 0x00AE83 02:8E73: A9 00
-	STA a:musicTrigger			;C - - - - - 0x00AE85 02:8E75: 8D E0 00
-
-	JSR ResetLivesAndScore				;C - - - - - 0x00AE88 02:8E78: 20 8B 88
-	JSR CODE_05962D				;C - - - - - 0x00AE8B 02:8E7B: 20 2D 96
-	LDA #$02					;C - - - - - 0x00AE8E 02:8E7E: A9 02
-	STA multiplayer				;C - - - - - 0x00AE90 02:8E80: 85 74
-	RTS							;C - - - - - 0x00AE92 02:8E82: 60
+	;(R2) end of the ending: back to the title. The alternating-2P hand-over (other player's game, multiplayer = 2)
+	;is removed; the label stays because bank 7 (CODE_078026) stores it in nmiBankedSub
+	JMP CODE_058CDB				;C - - - - - 0x00AE80 02:8E70: 4C DB 8C
 
 CODE_058E83:
 	LDA roundFlags				;C - - - - - 0x00AE93 02:8E83: AD 71 04
@@ -3338,17 +3265,12 @@ CODE_0595C1:
 	BEQ CODE_059606				;C - - - - - 0x00B5DA 02:95CA: F0 3A
 		LDA currentRound				;C - - - - - 0x00B5DC 02:95CC: A5 D8
 		CMP #20					;C - - - - - 0x00B5DE 02:95CE: C9 14
-		BNE CODE_0595D7				;C - - - - - 0x00B5E0 02:95D0: D0 05
+		BNE CODE_0595E3				;(R2) was CODE_0595D7
 			LDA coopResident			;(co-op 7a) only the resident (camera) player's respawn resets the scroll
-			BNE CODE_0595D7
+			BNE CODE_0595E3
 			LDA #$01					;C - - - - - 0x00B5E2 02:95D2: A9 01
 			STA wideHScroll				;C - - - - - 0x00B5E4 02:95D4: 8D 61 07
-	CODE_0595D7:
-		JSR CoopMultiplayer			;(co-op 7a) multiplayer, or 0 in co-op: no alternating-2P switch
-		CMP #$01					;C - - - - - 0x00B5E9 02:95D9: C9 01
-		BNE CODE_0595E3				;C - - - - - 0x00B5EB 02:95DB: D0 06
-			JSR CODE_05962D				;C - - - - - 0x00B5ED 02:95DD: 20 2D 96
-			JMP CODE_059606				;C - - - - - 0x00B5F0 02:95E0: 4C 06 96
+	;(R2) CODE_0595D7 removed: with multiplayer = 1 a death switched to the other player (JSR CODE_05962D)
 	CODE_0595E3:
 		LDA #193					;C - - - - - 0x00B5F3 02:95E3: A9 C1
 		STA objY				;C - - - - - 0x00B5F5 02:95E5: 8D 8B 05
@@ -3412,26 +3334,8 @@ CODE_05962D:
 	STA playerInvFrames				;C - - - - - 0x00B63F 02:962F: 8D 77 04
 	STA a:soundTrigger				;C - - - - - 0x00B642 02:9632: 8D E1 00
 
-	LDA multiplayer				;C - - - - - 0x00B645 02:9635: A5 74
-	CMP #$01					;C - - - - - 0x00B647 02:9637: C9 01
-	BNE CODE_059657				;C - - - - - 0x00B649 02:9639: D0 1C
-		;Switch player
-		LDA currentPlayer				;C - - - - - 0x00B64B 02:963B: AD 99 04
-		EOR multiplayer				;C - - - - - 0x00B64E 02:963E: 45 74
-		STA currentPlayer				;C - - - - - 0x00B650 02:9640: 8D 99 04
-
-		LDX #$00					;C - - - - - 0x00B653 02:9643: A2 00
-	CODE_059645:
-		LDA bonusGameProgress,X				;C - - - - - 0x00B655 02:9645: B5 D6
-		STA scratch0				;C - - - - - 0x00B657 02:9647: 85 00
-		LDA ram_00D7,X				;C - - - - - 0x00B659 02:9649: B5 D7
-		STA bonusGameProgress,X				;C - - - - - 0x00B65B 02:964B: 95 D6
-		LDA scratch0				;C - - - - - 0x00B65D 02:964D: A5 00
-		STA ram_00D7,X				;C - - - - - 0x00B65F 02:964F: 95 D7
-		INX							;C - - - - - 0x00B661 02:9651: E8
-		INX							;C - - - - - 0x00B662 02:9652: E8
-		CPX #$0A					;C - - - - - 0x00B663 02:9653: E0 0A
-		BCC CODE_059645				;C - - - - - 0x00B665 02:9655: 90 EE
+	;(R2) the alternating-2P player switch is removed (multiplayer = 1: currentPlayer ^= 1 and the per-player pairs
+	;bonusGameProgress/ram_00D7 .. powerUps/ram_00DF swapped). Only caller now: the continue (CODE_058DB2).
 CODE_059657:
 	LDX currentPlayer				;C - - - - - 0x00B667 02:9657: AE 99 04
 	LDY DATA_0596B2,X			;C - - - - - 0x00B66A 02:965A: BC B2 96
