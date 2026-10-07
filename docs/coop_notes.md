@@ -1642,3 +1642,39 @@ unchanged (regress and the alternating comparison pass).
 - "Any player's death calms enemies and resets the hurry-up" makes co-op easier than 1P when one player dies often.
   It is a design choice, documented here.
 - Phase 8: a P2 respawn in round 20 puts P2 at screen (31,193) without moving the camera.
+
+## R1: JP build removed
+
+Commit `d1029b2` ("Remove the JP build: US-only sources (R1)"), starting from `868d9ff` (Phase 7a). The co-op hack targets the
+US ROM only, so everything that existed only to build the Japanese ROM is gone and the sources contain one region.
+
+What was removed
+- 369 `REGION_JP` / `REGION_US` conditionals resolved mechanically by `tmp/coop_scripts/r1/resolve_region.py` (nesting aware, errors
+  out on `.elseif`, combined expressions, region tests inside macros, unbalanced blocks; no such case occurred, no hand edits to
+  code). The US branch is kept as-is (kept lines are byte-identical, comment columns included); only directive lines and JP-only
+  lines disappear. Other conditionals (`COOP_FORCE`, `COOP_SWAPTEST`, `INCLUDE_DEBUG_MENU`, `JP_AIRFLOW`, `JP_ROUND_MAPS`, ...) are untouched.
+- Per file: bank_0F 92, bank_09 61, bank_0B 59, bank_08 42, bank_05 38, bank_07 36, bank_01 6, bank_0A 6, bank_04 3, bank_0E 4,
+  chr.asm 4, main.asm 2, prg.asm 2, ram.inc 2, defines/animation_ids.inc 2, anim/animations.asm 2, anim/images1.asm 1,
+  defines.inc 1, banks 00/02/03/06/0C/0D 1 each. Source: 2565 lines deleted, 11 inserted (a comment in `src/coop/coop.inc` and the
+  one-line newline fix where `bank_05.asm` / `bank_0D.asm` previously ended in a removed `.endif`).
+- Files deleted (19): `config_jp`, `header_jp.bin`, `assemble_jp.bat`, `compare_jp.bat`, 15 x `src/filler/*_JP.bin`.
+- `assemble_us.bat` and `tools/perf/perf.py` `cmd_build` no longer pass `-D REGION_US` (owner-approved; nothing tests it any more).
+  No other `tools/perf` change.
+- `README.md`: US-only build instructions, mentions the co-op hack and that the ROM is NES 2.0 with 8 KB PRG-RAM (MMC3 board with WRAM).
+- Not touched: the optional `JP_AIRFLOW` and `JP_ROUND_MAPS` data switches (they select Japanese flow/map data inside the US build
+  and are not region conditionals); the `src/flow`, `src/map`, `src/chr` `*_JP` data files they reference stay.
+
+Verification
+- `perf.py build r1`: `rom.nes` byte-identical to `tmp/builds/c7a/rom.nes` (US build of `868d9ff`). `labels.txt`: 5722 labels in
+  both, none disappeared (the US build never contained JP-only labels), none new, no address changed.
+- `perf.py build r1f --define COOP_FORCE` and `r1t --define COOP_SWAPTEST`: byte-identical to builds of `868d9ff` with the same define.
+- `grep -rn REGION_ src/ tools/ config_us *.bat README.md`: no hits.
+- `perf.py regress base r1 --reuse-base`: 12/12 PASS (smoke test).
+- Labels defined in shared code whose only reference sat in removed JP code (now unreferenced, left in place, nothing renamed):
+  `CODE_099D57`, `CODE_099DF1`, `CODE_0FEF9E`, `CODE_0FEFAA`, `CODE_0FF059`, `CODE_0FF079`, `CODE_0FF56D`, `ram_055D`.
+
+Retired rules
+- "Keep `.ifdef REGION_JP` untouched" and the "JP md5 unchanged" check (earlier sections, `docs/perf_notes.md`) no longer apply: there
+  is no JP side. Edits go straight into the US code; the acceptance check for refactors is a byte-identical US ROM, for
+  behaviour changes the `perf.py regress` / co-op checkers. Older sections of these notes that mention `.ifndef REGION_JP` or a US
+  `.else` branch describe history; the code they refer to now simply sits inline.
