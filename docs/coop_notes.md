@@ -1354,3 +1354,291 @@ inactive or at a round start. No writer is unexplained.
 - The holy cup, big reward and clock stay shared effects; their score goes to the collector.
 - `CODE_098191`'s power-bubble spawn side still follows P1's facing.
 - The Phase 3 sprite CHR conflict makes the P1/P2 sprites hard to read in screenshots.
+
+## Phase 7a (game flow)
+
+Build `c7a`. All edits to shared code are US branches (`.ifdef REGION_JP` keeps the original lines, or new code sits in
+`.ifndef REGION_JP`); new code is in bank E. Sizes: `COOP_CODE` $33E (was $246, 130 B free), `COOP_CODE2` $5E1 (was
+$523, 284 B free); 438 B in total. Bank free space after the phase: bank 5 158 B (was 167), bank 7 28 B (unchanged),
+bank 8 15 B (was 10), bank 9 182 B (was 206), bank B 26 B (was 46), bank F 215 B (unchanged).
+New `COOP_BSS` bytes: `coopRoles`, `coopBubOwner[20]`, `coopKiller[10]`, `coopKills[2]`, `coopHazOwner`, `coopTmp[3]`.
+
+### 7a.1 The 1P death flow, mapped
+`PlayerHandlerDead` (bank 5, player state 3), run inside the dying player's own update:
+1. First call (`objAnim` != $2A): death animation, `DEC playerLives`, `bubblesLifespanLevel` -1 (not below 0),
+   `livesCurrentPos |= 3` (HUD refresh), `ram_047B` = 0, death sound.
+2. Every later call: `ram_047B` counts to $24, waits there until the body has fallen below Y $E0, then $25.
+3. At $25 (`CODE_0595C1`): `CODE_059A0E` (state 0, `objState` 1) and `CODE_0596B4` (per-life bytes, candy/shoe bits,
+   hearts 1). Lives left: round 20 sets `wideHScroll` = 1; then `multiplayer == 1` -> `CODE_05962D` (alternating 2P:
+   other player's turn, round restart through a fade), else the in-place respawn `CODE_0595E3` ((31,193), 120 i-frames).
+   No lives left: nothing more; the player is in state 0 with 0 lives.
+4. `RoundUpdate`'s end (resident only): state 3 -> skip the end checks; else `roundFlags & $20` (bonus game), then
+   `CODE_0997C6`: lives 0 and state 0 -> game over (`CODE_058B5A`); then the bonus-prize / round-clear checks.
+
+So "out" = lives 0 and not dying. Lives only drop at step 1, so lives 0 with state != 3 can only follow step 3.
+
+**Does the alternating switch run in co-op today?** No: the harness (and any co-op start through the 1P menu entry)
+has `multiplayer` = 0, so step 3 always takes the in-place respawn. With `multiplayer` = 1 a P2 death in its window
+would have run `CODE_05962D` with P2 resident: `currentPlayer ^= 1`, bonus progress swapped, lives reloaded from the
+HUD digits, and a fade into a round restart. Now `CODE_0595D7` reads `multiplayer` through `CoopMultiplayer`, which
+returns 0 while `coopMode` != 0 (`multiplayer` itself is unchanged).
+
+### 7a.2 Design: out players
+- **P2 out.** `CoopP2Window` checks P2's lives right after P2's player update (P2 resident): lives 0 and state != 3
+  means that P2's last death has just ended. The window swaps P1 back and calls `CoopP2Deactivate`
+  (`coopP2Active` = 0, `objState+39` = 0, bubble budget 20/19), then restores `$A000` as usual. Cost: `LDA/BNE`,
+  7 cycles per window. Every co-op hook is gated by `coopP2Active`, so P2's leftover context in `ctxOther` is inert:
+  no window, no targeting (6a), no items, water, quake, capture, projectile or hazard tests for P2.
+- **P1 out: role exchange.** Keeping an out P1 resident would have needed gates in the player update, the touch
+  loop, items, collisions, the HUD, the game-over test and every slot-0 reader. Instead the partner becomes the
+  resident player for good:
+  - `RoundUpdate`'s end (after the `playerState == 3` skip, before the `roundFlags & $20` and game-over tests):
+    `LDA playerLives / BNE` -> `CoopResidentOut`. In 1P this costs 7 cycles per tick and only calls the routine on a
+    game-over tick, where it changes nothing.
+  - `CoopResidentOut` with the partner in the round: `CoopShotRestore`, `CoopSwap` (partner in slot 0 and the native
+    vars), then `coopResident` = 0 and `coopRoles` ^= 1. The out player goes to `ctxOther` / slot 39, which
+    `CoopP2Deactivate` frees. It also sets `livesCurrentPos |= 3`, so the HUD is redrawn for the new resident.
+    `RoundUpdate` then skips the rest of its end checks for this tick.
+  - From then on the game is the partner's 1-player game: slot 0 = physical P2, `currentPlayer` = 1 (pad 2, P2's
+    score/lives digit set, P2's palette colour at the next round start, P2's game-over colour), `coopP2Active` = 0
+    (enemies target slot 0 through `CoopTargetTick`, items, camera and the HUD read the resident as in 1P).
+  - `CoopSwap` / `CoopSwapCtx` set `currentPlayer = coopResident ^ coopRoles`, so `currentPlayer` always names the
+    physical player whose context is native. Nothing else changes: `coopResident` is still the swap parity (0 at
+    every tick end and window entry), so every Phase 3-6 rule stays valid.
+  - `coopRoles` is put back when the game ends: `CoopResidentOut` without a partner (both out) exchanges the contexts
+    back with `CoopSwapCtx` (new entry point: `CoopSwap` now does the object arrays first and falls into
+    `CoopSwapCtx`, the scalars + powerUps + bookkeeping, same cost), so game over and continue see physical P1
+    resident. `CoopNewGame` clears `coopRoles` too.
+- **Game over** = both out. `CoopResidentOut` returns C = 0 when no partner is in the round, and the original test
+  (`lives 0 && state 0` -> `CODE_058B5A`) follows. The game-over and continue screens are single-player screens
+  (P1's colour, one dragon sprite); see the 7b list.
+- **Continue** (`CODE_058DB2`, after `ResetLivesAndScore` for P1): `CoopContinue` runs `ResetLivesAndScore` again with
+  P2's context swapped in (`CoopResetOther`: `CoopSwapCtx` / `ResetLivesAndScore` / `CoopSwapCtx`): 3 lives, 1 heart,
+  score and extra-life accumulator 0, exactly as the original continue does for P1. The round restart then spawns
+  both players (`CoopRoundStartP2`). `CoopNewGame` uses the same routine (P2's score digits were never reset at a new
+  game before).
+- **Round starts with one player out**: `CoopRoundStartP2` returns at once when `ctxOther_playerLives` = 0. That byte
+  belongs to whichever physical player is not resident, so the rule covers both "P2 out" and "P1 out (roles
+  exchanged)". The out player stays out until a continue or a new game.
+- **Alternating-2P death switch.** `CODE_0595D7` reads `multiplayer` through `CoopMultiplayer`, which returns 0 when
+  `coopMode` != 0. 1P and alternating 2P read `multiplayer` as before.
+
+### 7a.3 Shared side effects of a death (and related)
+| effect | site | decision |
+|--------|------|----------|
+| `bubblesLifespanLevel` -1 on a death, +1 on an extra life | `PlayerHandlerDead`, `CODE_099D85` | shared: the bubbles are shared, so both players' deaths and extra lives move it (unchanged) |
+| `livesCurrentPos` HUD dirty flag | death, respawn, AddScore, extra life | shared flag; it redraws the resident's HUD. Per-player HUD is Phase 7b |
+| `wideHScroll` = 1 on a round-20 respawn | `CODE_0595C1` | only when `coopResident` = 0, i.e. the slot-0 (camera) player respawns; P2's respawn in its window no longer resets the camera under P1 (+5 B bank 5) |
+| alternating switch `CODE_05962D` | `CODE_0595D7` | never in co-op (`CoopMultiplayer`) |
+| angry enemies calmed | `CODE_0B9CB3` (per enemy) | any in-round player dying (`CoopP2Dead`, gated by `BIT coopP2Active`) |
+| hurry-up reset, SkelMonsta removed | `CODE_0B9D63` | any in-round player dying (same gate) |
+| end checks skipped while dying | `RoundUpdate` | unchanged: round clear, bonus game and game-over checks wait while the resident is dying; P2's death does not block them |
+| game-over test | `CODE_0997C6` | preceded by the out check (`CoopResidentOut`) |
+| hearts 0 -> lose a life at round setup | `CODE_088000` | unreached in the original (hearts are never 0 there); left |
+| big-coin bit | `CODE_08805D` | shared `powerUps` bit; left |
+| boss round cleared: candy removed | `CODE_088664` | both players (`CoopBossCandy`, bank 8 -5 B) |
+| secret door: pending damage cleared | `CollectSecretDoor` | both players (`CoopDoorOther`); the bonus round otherwise ran with the non-collector's pending damage |
+| extra life | `CODE_099D3B` / `CODE_099D70` | the other player's check runs too (`CoopExtraLifeOther`, below) |
+| death sound | `soundTrigger` | shared |
+
+### 7a.4 Score attribution
+Owners are physical player ids, i.e. `currentPlayer` of the player who acted. `$FF` means unknown and is credited to
+`currentPlayer`, as in the original. In 1P and alternating 2P every owner is `currentPlayer`, so all credit is
+unchanged (regress and the alternating comparison pass).
+- `coopBubOwner[20]`: the toucher on a touch pop (`CODE_0989BD` -> `CoopTouchPop`, in `UpdateBubbles` for P1 or in
+  P2's touch pass); for a chain pop in `BubblesTravelUpdate`, the owner of the popped bubble that touched it
+  (`CoopChainOwner`, after `INC ram_051B`); a water-flood piece inherits the water bubble's owner (`CoopFloodCopy`).
+- `coopKiller[10]` (per enemy index): set at the kill. Enemy bubble popped: the bubble's owner (`CoopCountKill`,
+  replaces `INC ram_051A` in `PopBubble`). Special-bubble effect (`HazardCheckEnemies`): the effect bubble's owner
+  (`CoopHazEnter` / `CoopHazKill`). Holy cup: the collector (`CoopHolyKill`). Emerging-bubble hit (`CODE_0B9AA9`):
+  the shot owner, `currentPlayer ^ coopShotSwapped` (`CoopShotHit`).
+- Direct kill scores: `CODE_0B8446` (effect / holy-cup kill) and `CODE_0B9B2F` (enemy removed with 500 points: popped
+  enemy off screen, hit-count kills, death animations) call `CoopKillScore` / `CoopKillScoreEnd` instead of
+  `AddScore`. These credit the killer via `CoopAddScoreAs`, which sets `currentPlayer` around `AddScore`. The `End`
+  variant clears the record.
+- Multi-kill bonus: `coopKills[2]` counts each player's enemy-bubble kills (`ram_051A` stays the combined total; it
+  is also the shared item statistic `ram_0549`). At the award (`CODE_099EA5`), `CoopKillSplit` gives the other
+  player's share its own award (`CoopMultiAward` = the original rule and table, including the 3+ bonus-reward flags)
+  credited to him, and returns the current player's share to the unchanged original code.
+- Records are reset at every despawn-all (`CODE_0FE36B` -> `CoopDespawnAll`), so nothing crosses a round or a turn.
+- **Extra life**: after the resident's `CODE_099D3B`, `BIT coopP2Active / BPL / JSR CoopExtraLifeOther` runs the same
+  routine for the other player. His lives are exchanged with `playerLives` and `currentPlayer` is flipped around the
+  call, which indexes his accumulator (`$049A-$04A0`). After a role exchange the resident's own check covers physical
+  P2.
+- Not changed (resident credit): boss defeat 500 (bank 8 `$92A0`), the round-clear 1000 bonus (bank B `CODE_0B82D0`).
+  Both are team events.
+
+### 7a.5 Changed sites
+| site | bank | change | bytes |
+|------|------|--------|-------|
+| `CODE_0595C1` round-20 scroll | 5 | `LDA coopResident / BNE` | +5 |
+| `CODE_0595D7` | 5 | `JSR CoopMultiplayer` for `LDA multiplayer` | +1 |
+| `CODE_058DB2` continue | 5 | `JSR CoopContinue` | +3 |
+| `CollectSecretDoor` | 7 | `JMP CoopDoorOther` for `RTS` | +2 |
+| `CollectHolyCup` | 7 | `JSR CoopHolyKill` for `ORA/STA` | -2 |
+| `CODE_088664` | 8 | `JSR CoopBossCandy` for 4 instructions | -5 |
+| `CODE_0989BD` touch pop | 9 | `JSR CoopTouchPop` | -2 |
+| `HazardCheckEnemies` entry, kill | 9 | `JSR CoopHazEnter` (TXA), `JSR CoopHazKill` (ORA/STA) | 0 |
+| `CODE_0988EC` flood | 9 | `JSR CoopFloodCopy` | -3 |
+| `BubblesTravelUpdate` chain, award | 9 | `JSR CoopChainOwner`; `JSR CoopKillSplit / BEQ` | +8 |
+| `RoundUpdate` end | 9 | extra-life gate (8 B); out check (13 B) | +21 |
+| `CODE_0B9CB3`, `CODE_0B9D63` | B | any-player-dying gates | +20 |
+| `CODE_0B8446`, `CODE_0B9B2F`, `CODE_0B9AA9` | B | `JSR CoopKillScore(End)`, `JSR CoopShotHit` | 0 |
+| `PopBubble` | F | `JSR CoopCountKill` for `INC ram_051A` | 0 |
+| `CODE_0FE36B` | F | `JSR CoopDespawnAll` (was `CoopP2Deactivate`) | 0 |
+| `CoopSwap` / `CoopSwapCtx`, `CoopP2Window`, `CoopRoundStartP2`, `CoopNewGame`, new routines | E | see above | +438 |
+
+### Verification
+1. `build c7a`, then `regress base c7a --reuse-base`: **REGRESSION PASS, 12/12**, re-run on the final build. JP md5
+   `8d2855ea5505bf094b7a40155caa92b4`.
+2. **Alternating 2P** (`tmp/coop_scripts/p7/altcmp.py c6b c7a`). `multiplayer` is poked to 1 on every tick until
+   the game starts, which is the byte the menu's SELECT toggle sets; `coopMode` = 0. The script uses `perf.run_scen`
+   with dumps and `perf.compare_runs`; `tools/perf` is unchanged.
+   - `alt2p` (seed 11): 9000 ticks, identical per tick (RAM, nametables, palette). The game was in alternating mode
+     (`multiplayer` = 1 on 8998 ticks) with 3 player switches (`currentPlayer` 1 on 1189 ticks).
+   - `alt2pb` (seed 17): 9000 ticks, identical per tick, 6 player switches (`currentPlayer` 1 on 3428 ticks).
+3. **Checker** `tmp/coop_scripts/p7/p7verify.py`. It runs every p5/p6/p6b check: p5 through a p7 copy of
+   `p5verify.py`, aware of `CoopCountKill` and `CoopSwapCtx`; p6b with its in-swap range extended over
+   `CoopSwapCtx`. On top of these it adds the 7a checks listed in its docstring.
+
+   The p5 rule "the AddScore player = the resident" became "= `CoopAddScoreAs`'s target, else
+   `coopResident ^ coopRoles`".
+
+   The test options are Lua writes only, with no ROM change:
+   - keep a physical player's lives topped up;
+   - force enemy damage on a physical player until he dies;
+   - remove all enemies (round clear);
+   - set an extra-life accumulator to 29900;
+   - set `multiplayer` = 1 before the start.
+
+   These runs have no harness top-ups, so they exercise real game overs:
+
+   | run | what | result |
+   |-----|------|--------|
+   | o1 (natural start, 9000) | P1 killed 3 times -> out at t1875 -> role exchange; P2 alone 3822 ticks (186 distinct X), P2 extra life as resident (t3916), round 2 starts without P1 (t4715) | 0 violations |
+   | o2 (round 1, 7500) | P2 out in its window (t1406); round clear at t3500 -> round 2 without P2 (t3821); P1 out -> game over (t4556); continue (t4872) lives 3/3; both spawned (t5085) | 0 |
+   | o3 (round 5, 6000) | both killed in the same tick (t1300), P2 killed during P1's death; P1 out -> role exchange (t1624); P2 out -> roles put back, game over (t1788); continue (t2877); both back (t3089) | 0 |
+   | o4 (round 20, 4000) | 4 deaths each: P1's respawns reset `wideHScroll` 4 times (resident), P2's respawns skipped the reset 4 times | 0 |
+   | o5 (natural, `multiplayer` = 1, 4500) | 3 + 4 deaths, all in-place respawns; `CoopMultiplayer` called 6 times with `multiplayer` 1 and returned 0; no `CODE_05962D` from a death; P2 extra life as the non-resident (t3991) | 0 |
+   | o6 (round 39, 4500) | P1 out (t1841); clear -> boss round 40 with P2 alone (P1 not spawned, t2768); 1774 ticks alone; boss candy cleared for both | 0 |
+
+   The 7 standard co-op scenarios and d13, d04 and d25 (thunder, water and flood special bubbles) ran with harness
+   top-ups; there the lives model is off.
+
+   Totals over all 16 runs (final build, `--profile`):
+   - play ticks 37892: both players 30402, P2 alone 5760, P1 alone 1730;
+   - deaths P1 67 / P2 57: 3 in the same tick, 26 during the other player's death animation;
+   - out events: 1 P2 out in its window, 3 role exchanges, 2 game overs, 2 continues with both back;
+   - 3 round starts with the other player out, none of them spawned him;
+   - `wideHScroll`: 5 resets by the resident, 5 skipped for P2 respawns;
+   - pops: touch P1 458 / P2 503, chain P1 6941 / P2 8558;
+   - enemy-bubble kills: P1 25, P2 20 (8 of them while P1 was resident, all credited to P2);
+   - multi-kill awards: P1 24, P2 18 (14 of P2's credited from P1's context);
+   - effect kills P1 5 / P2 2; direct kill scores credited to P2 from P1's context: 3;
+   - shot hits P1 13 / P2 14;
+   - extra lives P2: 2 (one as resident, one from `CoopExtraLifeOther`);
+   - `CoopExtraLifeOther` ran on 30401 ticks;
+   - `CoopP2Dead` was tested 30442 times (2660 true).
+
+   **Violations: p5 0, p6 0, p6b 0, p7 0.** The checks:
+   - native and other lives always equal the physical-player model;
+   - a decrement happens only from a death, never at 0;
+   - out, role exchange and game over happen only in the states described above;
+   - the player and roles invariants hold at every tick end;
+   - every owner tag and killer record matches the independent Lua model;
+   - every multi-kill award split and every direct-kill credit is as expected;
+   - no in-round player is left with an accumulator at or above 30000;
+   - no alternating switch happens from a co-op death;
+   - no `ctxOther` write comes from outside the whitelist (now including `CoopSwapCtx`, `CoopExtraLifeOther`,
+     `CoopBossCandy` and `CoopDoorOther`).
+
+   The per-run p5 lines `v_slot39_state_0B/0C` are the Phase 6a reclassification: P2 caught or stuck. They are
+   counted as info, as in 6a/6b.
+4. Screenshots (`tmp/coop_scripts/p7/runs/shots/`):
+   - `c7a_o1s_t01900.png` and `t02500.png`: P2 alone in round 1 after P1 went out at t1875. The HUD shows P2's
+     2 lives and heart; one dragon is on screen. It is still drawn in P1's green until the next round start, see the
+     7b list.
+   - `c7a_o3s_t02400.png`: the co-op continue screen ("GAME OVER / TO CONTINUE PLAY 5 / PUSH START BUTTON", one
+     dragon in P1's colour).
+   - `tmp/coop_scripts/p7/runs/p7s/c7a_o6_t03000.png` (build before the HUD refresh): boss round 40 with P2 alone,
+     in P2's blue, HUD lives 02.
+5. Cost.
+   - 1P, `stats c7a --vs c6b` (12 scenarios): +7..+48 cycles per play tick, +0.14 % in total, lag +0..+6 frames. The
+     cost is the bank-B "P2 dying" gates per enemy (`BIT/BPL`), `CoopTouchPop`, `CoopCountKill` and
+     `CoopChainOwner` on pops, and `CoopDespawnAll`.
+   - Co-op, `stats c7a --scen <7> --vs c6b`: total +1.00 %.
+
+     | scen | d_play | d_lag |
+     |------|--------|-------|
+     | c01 | +161 (+0.78 %) | +2 |
+     | c05 | +191 (+0.85 %) | +8 |
+     | c17 | +184 (+0.65 %) | +7 |
+     | c20 | +565 (+3.42 %) | 0 |
+     | c22 | +176 (+0.82 %) | +2 |
+     | c50 | +185 (+0.59 %) | +10 |
+     | c64 | +255 (+0.82 %) | +25 |
+
+   - `profile c7a --scen <7> --vs c6b` (21000 ticks):
+     - P2's extra-life check: `CODE_099D3B` +489k, `CoopExtraLifeOther` 172k;
+     - `CoopP2Dead` 172k;
+     - `CoopChainOwner` 152k;
+     - the window's out check +89k;
+     - in total about 50 cycles per tick of new code.
+
+     The rest is changed play. Any player's death now calms enemies and resets the hurry-up, so P2's deaths change
+     the enemies. In c20 this shows as +280k in `DrawObjects` and +126k in `BubblesTravelUpdate` (more bubbles).
+6. Coverage (`--profile` on the 16 final runs, plus 1P `natural`/`r01`; `tmp/coop_scripts/p6/cov.py`).
+
+   Every new or changed instruction ran except these:
+   - `CoopDoorOther` (secret door: none was entered) and `CoopHolyKill` (no holy cup was collected). Both are the
+     original `ORA/STA` or the original stores plus one store each.
+   - `CoopMultiAward`'s 3+ branch for the other player's share: the same 7 instructions as the original block, which
+     runs for the current player's share.
+   - The "unknown owner" paths: `CoopAddScoreAs` `@cur` (`JMP AddScore`) and `CoopCountKill`'s
+     `LDA currentPlayer`. They need a pop that is neither a touch nor a chain, which no run produced.
+
+   The 1P paths (`CoopMultiplayer` with `coopMode` = 0 and `CoopNewGame` `@done`) ran in `natural`/`r01`.
+7. JP unchanged (md5 above).
+
+### Phase 7b list (HUD and menu findings)
+- **HUD shows one player.** `CODE_099BE7` (driven by the shared dirty flag `livesCurrentPos`: 1 score, 2 lives,
+  3 hearts) draws `RefreshLivesDigits` (digit set `LivesDigitsPlayerOfs[currentPlayer]`, `livesDigits` refreshed from
+  the native `playerLives`) and `DrawHearts` (native `playerHearts`). So it always shows the resident: P1, or P2
+  after a role exchange.
+  - P2's deaths, food, extra lives and kills set the flag and redraw P1's numbers.
+  - P2's `livesDigits` (`$0488/$0489`) are only written by `ResetLivesAndScore` and by `RefreshLivesDigits` while P2
+    is resident (after a role exchange).
+  - The original 2P layout has only one HUD row (`HUDMapTargetsLO`, row `$2040-$2060`), so a second row or a split
+    row is new work.
+- **Player colour after a role exchange.** Palette 0 colour 3 = `PlayerSpecificColor[currentPlayer]` is set by
+  `CODE_0880C8` at round setup only, so a lone P2 keeps P1's green until the next round. 7b/9 can rewrite
+  `colorBuffer+COL_SPR+3` on the exchange (palette shared with the bubbles, Phase 3).
+- **Title menu.** `TitleScreenMenu` (bank 5): SELECT toggles `multiplayer` 0/1. The cursor Y is
+  `TitleScreenCursorPositions[multiplayer]` (US 138/154), and START goes to `CODE_0582BE`. The title map has two
+  lines. Recommendation: co-op sets `coopMode` = 1 and keeps `multiplayer` = 0.
+  - The other `multiplayer` reads are `CODE_058CC3` and `CODE_058E6A` (game over without continues: alternating
+    hand-over), `CODE_058DBE` ("PLAYER n" announce at a round restart) and `TitleScreenUpdateCursor`. They are not
+    gated; only the death switch `CODE_0595D7` is.
+  - `@advance` (bank 5) clears `multiplayer` on every title setup, but `coopMode` is only cleared at reset. The menu
+    must set `coopMode` explicitly for both choices (or clear it at `@advance`).
+- **Game-over / continue screens.** `CODE_058C2E` uses `GameOverPlayerColors[currentPlayer]` (P1, since the roles are
+  put back), and the continue screen has one player sprite (`SplashScreenSprSetup`, scratch0 = 2/3). Continue is
+  started with pad 1's START only.
+- P2's score digits were not reset at a new game in the original either (only `currentPlayer`'s set is). In co-op
+  `CoopNewGame` now resets them; alternating 2P is unchanged.
+
+### Open issues
+- Ownership is approximated in four places:
+  - a bubble popped by something other than a touch or a chain (none was seen) is credited to `currentPlayer`;
+  - simultaneous chains of both players are split by the owner of each popped bubble, not by who started the
+    chain;
+  - the boss-defeat 500 and the round-clear 1000 go to the resident;
+  - projectile kills are not attributed (no such score path was found).
+- When the resident (P1) is dying, the round-clear and bonus-game checks wait for his respawn (or role exchange),
+  as in 1P, even if P2 is alive.
+- If P2 enters the secret door while P1 is on his last death, the bonus game starts with P1 out and resident. The
+  out check then runs on the first tick of the next round (role exchange there, after P1's walk-in). This was not
+  reproduced in a run; it follows from reading the code.
+- "Any player's death calms enemies and resets the hurry-up" makes co-op easier than 1P when one player dies often.
+  It is a design choice, documented here.
+- Phase 8: a P2 respawn in round 20 puts P2 at screen (31,193) without moving the camera.
