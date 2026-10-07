@@ -2280,6 +2280,9 @@ CODE_058DB2:
 	STA a:musicTrigger				;C - - - - - 0x00ADC4 02:8DB4: 8D E0 00
 
 	JSR ResetLivesAndScore				;C - - - - - 0x00ADC7 02:8DB7: 20 8B 88
+.ifndef REGION_JP
+	JSR CoopContinue			;(co-op 7a) P2 gets the same fresh start
+.endif
 	JSR CODE_05962D				;C - - - - - 0x00ADCA 02:8DBA: 20 2D 96
 CODE_058DBD:
 	RTS							;C - - - - - 0x00ADCD 02:8DBD: 60
@@ -3541,10 +3544,18 @@ CODE_0595C1:
 		LDA currentRound				;C - - - - - 0x00B5DC 02:95CC: A5 D8
 		CMP #20					;C - - - - - 0x00B5DE 02:95CE: C9 14
 		BNE CODE_0595D7				;C - - - - - 0x00B5E0 02:95D0: D0 05
+.ifndef REGION_JP
+			LDA coopResident			;(co-op 7a) only the resident (camera) player's respawn resets the scroll
+			BNE CODE_0595D7
+.endif
 			LDA #$01					;C - - - - - 0x00B5E2 02:95D2: A9 01
 			STA wideHScroll				;C - - - - - 0x00B5E4 02:95D4: 8D 61 07
 	CODE_0595D7:
+.ifdef REGION_JP
 		LDA multiplayer				;C - - - - - 0x00B5E7 02:95D7: A5 74
+.else
+		JSR CoopMultiplayer			;(co-op 7a) multiplayer, or 0 in co-op: no alternating-2P switch
+.endif
 		CMP #$01					;C - - - - - 0x00B5E9 02:95D9: C9 01
 		BNE CODE_0595E3				;C - - - - - 0x00B5EB 02:95DB: D0 06
 			JSR CODE_05962D				;C - - - - - 0x00B5ED 02:95DD: 20 2D 96

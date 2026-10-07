@@ -62,9 +62,10 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 ;   - every COOP_CTX_SCALARS entry <-> its shadow byte ctxOther_<name>
 ;   - every COOP_CTX_ARRAYS array: slot 0 <-> slot OSLOT_P2
 ;   - powerUps: only the bits in COOP_POWERUP_MASK are exchanged with ctxOther_powerUps
-;   - coopResident ^= 1; currentPlayer = coopResident
-; Clobbers A and X; preserves Y; flags undefined. Unrolled (the lists live in coop.inc).
-; Nothing calls it in a normal build yet (Phase 2: only the COOP_SWAPTEST hook in RoundUpdate).
+;   - coopResident ^= 1; currentPlayer = coopResident ^ coopRoles (the physical id of the new resident;
+;     coopRoles = 1 after P1 went out and P2 became the resident player, Phase 7a)
+; CoopSwapCtx (Phase 7a) is the same without the object arrays (for flows where the objects do not matter:
+; continue, new game, game over). Clobbers A and X; preserves Y; flags undefined. Unrolled (lists in coop.inc).
 ; ---------------------------------------------------------------------------------------------
 .macro COOP_SWAP_SCALAR name
 	LDA name
@@ -81,8 +82,9 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 .endmacro
 
 CoopSwap:
-	COOP_CTX_SCALARS COOP_SWAP_SCALAR
 	COOP_CTX_ARRAYS COOP_SWAP_ARRAY
+CoopSwapCtx:
+	COOP_CTX_SCALARS COOP_SWAP_SCALAR
 
 	;powerUps: x = (powerUps ^ shadow) & mask; both bytes ^= x  (bits outside the mask are untouched;
 	;the shadow only ever holds mask bits, since it starts at 0 and only gets x bits flipped)
@@ -99,6 +101,7 @@ CoopSwap:
 	LDA coopResident
 	EOR #$01
 	STA coopResident
+	EOR coopRoles
 	STA currentPlayer
 	RTS
 
@@ -141,6 +144,17 @@ CoopP2Window:
 	LDA #.BANK(CODE_058E83)
 	STA bankedSubBank
 	JSR RunBankedSub
+	;Phase 7a: P2's last death has just ended (lives 0 and no longer dying: PlayerHandlerDead set state 0 and
+	;skipped the respawn). P2 is out: swap back and leave the round (slot OSLOT_P2 back to the bubbles).
+	LDA playerLives
+	BNE @in
+	LDA playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ @in
+	JSR CoopSwap
+	JSR CoopP2Deactivate
+	JMP @restore
+@in:
 	;The round intro runs the player update only (as for P1 there). Bank 9 is at $8000 again here.
 	LDA bankedSubRetBank
 	CMP #.BANK(RoundUpdate)
@@ -155,6 +169,7 @@ CoopP2Window:
 	JSR PlayerCheckEnemyCollision	;even: P2 vs enemies/food, exactly as RoundUpdate runs it for P1
 @swapback:
 	JSR CoopSwap					;P1 resident again (coopResident = 0, currentPlayer = 0)
+@restore:
 	PLA
 	CMP prgBankB					;$A000 always holds prgBankB (Rule 9), so equal = nothing to do
 	BEQ @banksok
@@ -467,6 +482,8 @@ CoopAnimateP2:
 CoopRoundStartP2:
 	LDA coopMode
 	BEQ @done
+	LDA ctxOther_playerLives		;(7a) the other player is out (no lives left): he stays out until a continue
+	BEQ @done
 	LDA roundFlags
 	PHA
 	LDA wideScrollDir
@@ -539,7 +556,23 @@ CoopSpawnP2:
 ; P1 death), bonus round start. Hides slot OSLOT_P2 and gives the slot back to the bubbles. The
 ; caller clears objState of slot 39 right after, so with coopMode = 0 this changes no console RAM.
 ; Shot bytes still exchanged by a capture are put back first (Phase 5). Clobbers A only.
+; Phase 7a: also called in the middle of a round when the non-resident player is out (P2's last death in
+; its window, or after the role exchange in CoopResidentOut); the caller then frees slot OSLOT_P2.
+; CoopDespawnAll (the CODE_0FE36B hook) also forgets the score-owner tags of the round.
 ; ---------------------------------------------------------------------------------------------
+CoopDespawnAll:
+	LDA #$FF
+	LDX #BUBBLE_SLOTS-1
+:	STA coopBubOwner,X
+	DEX
+	BPL :-
+	LDX #10-1
+:	STA coopKiller,X
+	DEX
+	BPL :-
+	LDA #$00
+	STA coopKills
+	STA coopKills+1
 CoopP2Deactivate:
 	JSR CoopShotRestore
 	LDA #$00
@@ -553,9 +586,12 @@ CoopP2Deactivate:
 
 ; ---------------------------------------------------------------------------------------------
 ; CoopNewGame: after ResetLivesAndScore at a new game (CODE_0582BE, bank 5). In co-op, P2's
-; shadow context starts clean with P1's starting lives and hearts. Clobbers A/X.
+; shadow context starts clean, then ResetLivesAndScore runs for P2 (3 lives, 1 heart, score 0).
+; Clobbers A/X/Y.
 ; ---------------------------------------------------------------------------------------------
 CoopNewGame:
+	LDA #$00
+	STA coopRoles					;(7a) physical P1 resident again (currentPlayer = 0 was set by the caller)
 	LDA coopMode
 	BEQ @done
 	LDX #CTX_OTHER_SIZE-1
@@ -564,10 +600,8 @@ CoopNewGame:
 	STA ctxOther,X
 	DEX
 	BPL @clear
-	LDA playerLives
-	STA ctxOther_playerLives
-	LDA playerHearts
-	STA ctxOther_playerHearts
+	;(7a) P2's lives, hearts and score digits as ResetLivesAndScore sets P1's (bank 5 is mapped)
+	JMP CoopResetOther
 @done:
 	RTS
 
@@ -963,3 +997,294 @@ CoopQuakeStunP2:
 	STA ctxOther_ram_0076
 @rts:
 	RTS
+
+; =============================================================================================
+; Phase 7a: death and game flow (COOP_CODE2). See docs/coop_notes.md, Phase 7a.
+;   - a player whose last death ends is OUT. P2 out (its window sees lives 0, not dying): P2 leaves the round.
+;     P1 out (RoundUpdate end, CoopResidentOut) while P2 is in the round: P2 becomes the resident player for good
+;     (role exchange, coopRoles = 1) and the game goes on as P2's 1-player game. Both out: the original game
+;     over (roles put back first); continue (CoopContinue) restarts both.
+;   - an out player is not spawned at round starts (CoopRoundStartP2) until a continue / new game.
+; =============================================================================================
+
+; ---------------------------------------------------------------------------------------------
+; CoopResidentOut: end of RoundUpdate (bank 9) when the resident player has no lives left and is not dying
+; (his last death just ended: PlayerHandlerDead set state 0 and skipped the respawn).
+;   partner in the round: the partner becomes the resident player (CoopSwap, then coopResident = 0 and
+;     coopRoles ^= 1, so currentPlayer keeps naming him), the out player's slot OSLOT_P2 goes back to the
+;     bubbles. Out: C = 1 (RoundUpdate skips the rest of its end checks this tick).
+;   no partner: the original game over follows (C = 0). Exchanged roles are put back first (contexts only; the
+;     game-over flow despawns every object), so game over and continue see physical P1 resident.
+; Clobbers A/X/Y.
+; ---------------------------------------------------------------------------------------------
+CoopResidentOut:
+	BIT coopP2Active
+	BPL @nopartner
+	JSR CoopShotRestore
+	JSR CoopSwap					;partner resident (coopResident = 1)
+	LDA #$00
+	STA coopResident
+	LDA coopRoles
+	EOR #$01
+	STA coopRoles
+	STA currentPlayer				;= coopResident (0) ^ coopRoles: still the partner's id
+	JSR CoopP2Deactivate			;the out player (now in ctxOther / slot OSLOT_P2) leaves the round
+	LDA livesCurrentPos				;HUD refresh (score, lives, hearts) for the new resident player
+	ORA #$03
+	STA livesCurrentPos
+	SEC
+	RTS
+@nopartner:
+	LDA coopRoles
+	BEQ @gameover
+	JSR CoopSwapCtx					;physical P1's context native again (coopResident 1, currentPlayer 0)
+	LDA #$00
+	STA coopResident
+	STA coopRoles
+	STA currentPlayer
+@gameover:
+	CLC
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopContinue: continue chosen (CODE_058DB2, bank 5: after ResetLivesAndScore for P1, before CODE_05962D).
+; Co-op: P2 gets the same fresh start; CoopRoundStartP2 then spawns both players again.
+; CoopResetOther: ResetLivesAndScore for the other player's context (3 lives, 1 heart, his score and extra-life
+; accumulator 0; currentPlayer = 1 while it runs). Objects untouched. Bank 5 must be mapped. Clobbers A/X/Y.
+; ---------------------------------------------------------------------------------------------
+CoopContinue:
+	LDA coopMode
+	BEQ CoopFlowRts
+CoopResetOther:
+	JSR CoopSwapCtx
+	JSR ResetLivesAndScore
+	JMP CoopSwapCtx
+
+; ---------------------------------------------------------------------------------------------
+; CoopMultiplayer (bank 5, CODE_0595D7, respawn after a death): A = multiplayer, or 0 in co-op, so the
+; alternating-2P switch (CODE_05962D: other player's turn, round restart) is never taken in co-op. X/Y kept.
+; ---------------------------------------------------------------------------------------------
+CoopMultiplayer:
+	LDA coopMode
+	BNE :+
+	LDA multiplayer
+	RTS
+:	LDA #$00
+CoopFlowRts:
+	RTS
+
+; CoopP2Dead (bank B: CODE_0B9CB3 calms angry enemies and CODE_0B9D63 resets the hurry-up while a player is
+; dying; only called while P2 is in the round): Z = 1 if P2 is dying. A clobbered, X/Y kept.
+CoopP2Dead:
+	LDA ctxOther_playerState
+	CMP #PLAYER_STATE_DEAD
+	RTS
+
+; CoopBossCandy (bank 8, CODE_088664, a boss round is cleared): the candy is taken from both players (the
+; original clears the resident's only). Replaces LDA/AND/ORA/STA powerUps. A clobbered.
+CoopBossCandy:
+	LDA powerUps
+	AND #<~POWERUP_CANDY
+	ORA #POWERUP_BOSS_BONUS
+	STA powerUps
+	LDA ctxOther_powerUps
+	AND #<~POWERUP_CANDY
+	STA ctxOther_powerUps
+	RTS
+
+; CoopDoorOther (bank 7, CollectSecretDoor, tail): the other player's pending damage is cleared as well before
+; the bonus round (the collector's is cleared by the original code). A = 0 on entry.
+CoopDoorOther:
+	STA ctxOther_ram_007B
+	STA ctxOther_playerDmgType
+	RTS
+
+; ---------------------------------------------------------------------------------------------
+; CoopExtraLifeOther (RoundUpdate end, after the resident's check CODE_099D3B, while P2 is in the round): the
+; same check for the other player's score. His lives are exchanged with the native byte and currentPlayer names
+; him while CODE_099D3B runs (it indexes the extra-life accumulator by currentPlayer and increments playerLives;
+; bubblesLifespanLevel and the HUD flag livesCurrentPos are shared). Bank 9 is mapped. Clobbers A/X/Y.
+; ---------------------------------------------------------------------------------------------
+CoopExtraLifeOther:
+	JSR @xchg
+	JSR CODE_099D3B
+@xchg:
+	LDA playerLives
+	LDX ctxOther_playerLives
+	STX playerLives
+	STA ctxOther_playerLives
+	LDA currentPlayer
+	EOR #$01
+	STA currentPlayer
+	RTS
+
+; =============================================================================================
+; Phase 7a: score attribution (COOP_CODE). Scores granted by code that runs with P1 resident go to the player
+; who earned them. Owners are physical player ids (currentPlayer of the player who acted); $FF = unknown,
+; credited to currentPlayer as in the original. In 1P / alternating 2P every owner is currentPlayer, so the
+; credit is unchanged.
+;   coopBubOwner[bubble]: the popper (touch pop, CoopTouchPop) or, for a chain pop, the owner of the popped
+;                         bubble that touched it (CoopChainOwner); copied to water-flood pieces (CoopFloodCopy)
+;   coopKiller[enemy]:    set at the kill: enemy bubble popped (CoopCountKill: bubble owner), special-bubble
+;                         effect (CoopHazKill: effect owner), holy cup (CoopHolyKill: collector), shot hit
+;                         (CoopShotHit: shot owner). Read by CODE_0B8446 / CODE_0B9B2F (CoopKillScore/End).
+;   coopKills[player]:    enemy-bubble kills since the last multi-kill award (ram_051A = their sum);
+;                         CoopKillSplit gives each player his own award.
+; =============================================================================================
+.segment "COOP_CODE"
+
+; CoopAddScoreAs: AddScore credited to physical player A (0/1; negative = currentPlayer). Clobbers A/X/Y.
+CoopAddScoreAs:
+	BMI @cur
+	LDX currentPlayer
+	STX coopTmp+2
+	STA currentPlayer
+	JSR AddScore
+	LDA coopTmp+2
+	STA currentPlayer
+	RTS
+@cur:
+	JMP AddScore
+
+; CoopTouchPop (bank 9 CODE_0989BD; replaces STX scratch1 / JSR PopBubble): the resident player pops bubble X
+; by touching it and owns the pop.
+CoopTouchPop:
+	LDA currentPlayer
+	STA coopBubOwner,X
+	STX scratch1
+	JMP PopBubble
+
+; CoopChainOwner (bank 9 BubblesTravelUpdate; the popped bubble scratch0 pops bubble X): X gets its owner.
+; A clobbered, X/Y kept.
+CoopChainOwner:
+	TYA
+	PHA
+	LDY scratch0
+	LDA coopBubOwner,Y
+	STA coopBubOwner,X
+	PLA
+	TAY
+	RTS
+
+; CoopFloodCopy (bank 9 CODE_0988EC; replaces LDA/STA bubbleProgress): the new water-flood piece Y belongs to
+; the owner of the water bubble X.
+CoopFloodCopy:
+	LDA coopBubOwner,X
+	STA coopBubOwner,Y
+	LDA bubbleProgress,X
+	STA bubbleProgress,Y
+	RTS
+
+; CoopCountKill (bank F PopBubble, an enemy bubble is popped; replaces INC ram_051A): X = enemy index,
+; scratch1 = bubble index. The bubble's owner killed the enemy and gets the kill counted.
+; Clobbers A/X/Y (PopBubble reloads X from scratch1 next).
+CoopCountKill:
+	INC ram_051A
+	LDY scratch1
+	LDA coopBubOwner,Y
+	BPL :+
+	LDA currentPlayer
+:	STA coopKiller,X
+	TAX
+	INC coopKills,X
+	RTS
+
+; CoopKillSplit (bank 9 BubblesTravelUpdate, multi-kill award; bank 4 at $A000; Y = ram_051A != 0): the kills
+; of the player who is not currentPlayer get their own award (same rule and table), credited to him. Returns
+; Y = the current player's share, Z from Y (the original code awards it to currentPlayer). Counts cleared.
+CoopKillSplit:
+	STY coopTmp
+	LDA currentPlayer
+	EOR #$01
+	TAX
+	LDA coopKills,X
+	BEQ @rest
+	CMP coopTmp
+	BCC :+
+	LDA coopTmp						;(never more than the total)
+:	STA coopTmp+1
+	TXA
+	PHA
+	LDY coopTmp+1
+	JSR CoopMultiAward
+	PLA
+	JSR CoopAddScoreAs
+	LDA coopTmp
+	SEC
+	SBC coopTmp+1
+	STA coopTmp
+@rest:
+	LDA #$00
+	STA coopKills
+	STA coopKills+1
+	LDY coopTmp
+	RTS
+
+; CoopMultiAward: the original award for Y kills (Y >= 1): bonus reward flags for 3+, score digits from the
+; bank-4 tables (mapped at $A000). AddScore is left to the caller.
+CoopMultiAward:
+	CPY #$03
+	BCC @tab
+	LDA #$01
+	STA bonusRewardEarned
+	LDA roundSkelDelay
+	BEQ @tab
+	LDA roundFlags
+	ORA #RFLAG_MULTI_REWARD
+	STA roundFlags
+@tab:
+	LDX DATA_04BF6D,Y
+	LDA DATA_04BF64,Y
+	STA scoreAdditionDigits,X
+	LDX DATA_04BF7F,Y
+	LDA DATA_04BF76,Y
+	STA scoreAdditionDigits,X
+	RTS
+
+; CoopHazEnter (bank 9 HazardCheckEnemies entry; replaces TXA): X = the special bubble whose effect is tested;
+; its owner is the owner of every kill of this test. Out: A = X.
+CoopHazEnter:
+	LDA coopBubOwner,X
+	STA coopHazOwner
+	TXA
+	RTS
+
+; CoopHazKill (HazardCheckEnemies; replaces ORA #$C0 / STA objState+OSLOT_ENEMY,X): the effect hits enemy X.
+CoopHazKill:
+	ORA #$C0
+	STA objState+OSLOT_ENEMY,X
+	LDA coopHazOwner
+	STA coopKiller,X
+	RTS
+
+; CoopHolyKill (bank 7 CollectHolyCup; replaces ORA #$E0 / STA objState+OSLOT_ENEMY,X): the collector
+; (resident during the item code) kills enemy X.
+CoopHolyKill:
+	ORA #$E0
+	STA objState+OSLOT_ENEMY,X
+	LDA currentPlayer
+	STA coopKiller,X
+	RTS
+
+; CoopShotHit (bank B CODE_0B9AA9, an emerging bubble hits enemy X; replaces LDY shootQueuedBubbles): the shot
+; owner is the resident, or the other player while his shot bytes are exchanged in (coopShotSwapped, Phase 5).
+CoopShotHit:
+	LDA currentPlayer
+	EOR coopShotSwapped
+	STA coopKiller,X
+	LDY shootQueuedBubbles
+	RTS
+
+; CoopKillScore (bank B CODE_0B8446, effect / holy-cup kill; replaces JSR AddScore): credited to the killer.
+; CoopKillScoreEnd (bank B CODE_0B9B2F, the enemy is removed with a score): the same, and the record is cleared.
+; X = enemy index. Clobbers A/X/Y (the callers restore X).
+CoopKillScore:
+	LDA coopKiller,X
+	JMP CoopAddScoreAs
+CoopKillScoreEnd:
+	LDA coopKiller,X
+	PHA
+	LDA #$FF
+	STA coopKiller,X
+	PLA
+	JMP CoopAddScoreAs

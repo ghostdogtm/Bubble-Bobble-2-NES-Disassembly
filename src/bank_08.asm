@@ -1136,10 +1136,14 @@ CODE_088664:
 	LDA #$00					;C - - - - - 0x010678 04:8668: A9 00
 	STA scratch0				;C - - - - - 0x01067A 04:866A: 85 00
 
+.ifdef REGION_JP
 	LDA powerUps				;C - - - - - 0x01067C 04:866C: A5 DE
 	AND #~POWERUP_CANDY					;C - - - - - 0x01067E 04:866E: 29 FE
 	ORA #POWERUP_BOSS_BONUS					;C - - - - - 0x010680 04:8670: 09 80
 	STA powerUps				;C - - - - - 0x010682 04:8672: 85 DE
+.else
+	JSR CoopBossCandy			;(co-op 7a) the same, and the other player's candy too
+.endif
 CODE_088674:
 	JSR CODE_088678				;C - - - - - 0x010684 04:8674: 20 78 86
 	RTS							;C - - - - - 0x010687 04:8677: 60

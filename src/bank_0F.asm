@@ -688,7 +688,7 @@ DATA_0FE34B:
 
 CODE_0FE36B:
 .ifndef REGION_JP
-	JSR CoopP2Deactivate		;(co-op) every despawn of all objects takes P2 out of the round
+	JSR CoopDespawnAll			;(co-op) every despawn of all objects takes P2 out of the round (7a: and resets the score owners)
 .endif
 	LDX #$00					;C - - - - - 0x01E37B 07:E36B: A2 00
 	LDA #240					;C - - - - - 0x01E37D 07:E36D: A9 F0
@@ -5601,7 +5601,11 @@ PopBubble:
 	STA objAnimProgress+OSLOT_ENEMY,X				;C - - - - - 0x01FCCA 07:FCBA: 9D D4 06
 	STA objAnimTimer+OSLOT_ENEMY,X				;C - - - - - 0x01FCCD 07:FCBD: 9D AC 06
 	STA ram_00AC,X				;C - - - - - 0x01FCD0 07:FCC0: 95 AC
+.ifdef REGION_JP
 	INC ram_051A				;C - - - - - 0x01FCD2 07:FCC2: EE 1A 05
+.else
+	JSR CoopCountKill			;(co-op 7a) INC ram_051A; the bubble's owner killed the enemy
+.endif
 @pop:
 	LDX scratch1				;C - - - - - 0x01FCD5 07:FCC5: A6 01
 	LDA #BUBBLE_POPPING					;C - - - - - 0x01FCD7 07:FCC7: A9 22

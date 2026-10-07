@@ -712,7 +712,11 @@ CODE_0B8454:
 	STA scoreAdditionDigits+3				;C - - - - - 0x016466 05:8456: 8D A4 04
 	TXA							;C - - - - - 0x016469 05:8459: 8A
 	PHA							;C - - - - - 0x01646A 05:845A: 48
+.ifdef REGION_JP
 	JSR AddScore				;C - - - - - 0x01646B 05:845B: 20 C7 FE
+.else
+	JSR CoopKillScore			;(co-op 7a) AddScore credited to the enemy's killer
+.endif
 	PLA							;C - - - - - 0x01646E 05:845E: 68
 	TAX							;C - - - - - 0x01646F 05:845F: AA
 	LDA #snEnemyPop_ID					;C - - - - - 0x016470 05:8460: A9 27
@@ -4240,7 +4244,11 @@ CODE_0B9AA9:
 	BCS CODE_0B9AD3				;C - - - - - 0x017ACA 05:9ABA: B0 17
 		CMP #$C0					;C - - - - - 0x017ACC 05:9ABC: C9 C0
 		BCS CODE_0B9ADB				;C - - - - - 0x017ACE 05:9ABE: B0 1B
+.ifdef REGION_JP
 			LDY shootQueuedBubbles				;C - - - - - 0x017AD0 05:9AC0: AC 16 05
+.else
+			JSR CoopShotHit				;(co-op 7a) LDY shootQueuedBubbles; killer = the shot's owner
+.endif
 			LDA enemyHits,X				;C - - - - - 0x017AD3 05:9AC3: BD BE 04
 			CLC							;C - - - - - 0x017AD6 05:9AC6: 18
 			ADC DATA_0B9AF4,Y			;C - - - - - 0x017AD7 05:9AC7: 79 F4 9A
@@ -4327,7 +4335,11 @@ CODE_0B9B2F:
 	STA scoreAdditionDigits+3				;C - - - - - 0x017B55 05:9B45: 8D A4 04
 	TXA							;C - - - - - 0x017B58 05:9B48: 8A
 	PHA							;C - - - - - 0x017B59 05:9B49: 48
+.ifdef REGION_JP
 	JSR AddScore				;C - - - - - 0x017B5A 05:9B4A: 20 C7 FE
+.else
+	JSR CoopKillScoreEnd		;(co-op 7a) AddScore credited to the enemy's killer (record cleared)
+.endif
 	PLA							;C - - - - - 0x017B5D 05:9B4D: 68
 	TAX							;C - - - - - 0x017B5E 05:9B4E: AA
 	RTS							;C - - - - - 0x017B5F 05:9B4F: 60
@@ -4550,7 +4562,16 @@ CODE_0B9CB2:
 CODE_0B9CB3:
 	LDA playerState				;C - - - - - 0x017CC3 05:9CB3: A5 75
 	CMP #$03					;C - - - - - 0x017CC5 05:9CB5: C9 03
+.ifdef REGION_JP
 	BNE CODE_0B9CCF				;C - - - - - 0x017CC7 05:9CB7: D0 16
+.else
+	BEQ :+
+	BIT coopP2Active			;(co-op 7a) any player's death calms the angry enemies
+	BPL CODE_0B9CCF
+	JSR CoopP2Dead
+	BNE CODE_0B9CCF
+:
+.endif
 		LDA objAttr+OSLOT_ENEMY,X				;C - - - - - 0x017CC9 05:9CB9: BD FC 06
 		AND #$03					;C - - - - - 0x017CCC 05:9CBC: 29 03
 		CMP #$03					;C - - - - - 0x017CCE 05:9CBE: C9 03
@@ -4638,6 +4659,13 @@ CODE_0B9D63:
 	LDA playerState				;C - - - - - 0x017D73 05:9D63: A5 75
 	CMP #$03					;C - - - - - 0x017D75 05:9D65: C9 03
 	BEQ CODE_0B9D76				;C - - - - - 0x017D77 05:9D67: F0 0D
+.ifndef REGION_JP
+	BIT coopP2Active			;(co-op 7a) any player's death resets the hurry-up
+	BPL :+
+	JSR CoopP2Dead
+	BEQ CODE_0B9D76
+:
+.endif
 		LDA #$01					;C - - - - - 0x017D79 05:9D69: A9 01
 		CMP untrappedEnemies				;C - - - - - 0x017D7B 05:9D6B: C5 CC
 		BEQ CODE_0B9D76				;C - - - - - 0x017D7D 05:9D6D: F0 07

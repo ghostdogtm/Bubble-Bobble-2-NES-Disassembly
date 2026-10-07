@@ -1689,8 +1689,12 @@ CollectHolyCup:
 	BCS @next				;C - - - - - 0x00EAC3 03:8AB3: B0 08
 
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x00EAC5 03:8AB5: BD 6C 05
+.ifdef REGION_JP
 	ORA #$E0					;C - - - - - 0x00EAC8 03:8AB8: 09 E0
 	STA objState+OSLOT_ENEMY,X				;C - - - - - 0x00EACA 03:8ABA: 9D 6C 05
+.else
+	JSR CoopHolyKill			;(co-op 7a) ORA #$E0 / STA objState+OSLOT_ENEMY,X, killer = the collector
+.endif
 @next:
 	TXA							;C - - - - - 0x00EACD 03:8ABD: 8A
 	BNE @kill				;C - - - - - 0x00EACE 03:8ABE: D0 E4
@@ -1745,7 +1749,11 @@ CollectSecretDoor:
 	LDA #$00					;C - - - - - 0x00EB05 03:8AF5: A9 00
 	STA ram_007B				;C - - - - - 0x00EB07 03:8AF7: 85 7B
 	STA playerDmgType				;C - - - - - 0x00EB09 03:8AF9: 85 7C
+.ifdef REGION_JP
 	RTS							;C - - - - - 0x00EB0B 03:8AFB: 60
+.else
+	JMP CoopDoorOther			;(co-op 7a) and the other player's pending damage
+.endif
 
 CollectPencil:
 	LDA continues				;C - - - - - 0x00EB0C 03:8AFC: A5 DC

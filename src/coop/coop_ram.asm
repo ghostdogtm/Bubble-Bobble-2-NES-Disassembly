@@ -49,3 +49,15 @@ coopItemNoOther: .res 1         ; non-zero while CoopDrinkTouch runs and the oth
                                 ; (tail of CODE_078BC5) then skips its test
 coopPopDir:     .res BUBBLE_SLOTS ; per bubble index: $80 | P2's playerDir when P2's touch pass popped this special
                                 ; bubble; consumed (cleared) by CoopPopDir in the same tick's UpdateBubbles
+
+; Phase 7a: death, out, game over / continue, score attribution (see docs/coop_notes.md, Phase 7a).
+coopRoles:      .res 1          ; 1 = the physical players are exchanged: the resident (slot 0, native vars) is P2 and
+                                ; ctxOther holds P1 (set when P1 is out while P2 plays on). currentPlayer =
+                                ; coopResident ^ coopRoles = the physical id of the resident player.
+coopBubOwner:   .res BUBBLE_SLOTS ; per bubble index: physical id of the player who popped it (touch, or chain from his
+                                ; popped bubble); $FF = unknown (credited to currentPlayer)
+coopKiller:     .res 10         ; per enemy index: physical id of the player who killed it (bubble pop, hazard, holy cup,
+                                ; shot hit); $FF = unknown (credited to currentPlayer); consumed by CODE_0B9B2F
+coopKills:      .res 2          ; enemy-bubble kills since the last multi-kill award, by physical player (ram_051A = sum)
+coopHazOwner:   .res 1          ; owner of the special bubble whose effect HazardCheckEnemies is testing
+coopTmp:        .res 3          ; CoopKillSplit (+0 total, +1 the other share), CoopAddScoreAs (+2 saved currentPlayer)

@@ -1436,8 +1436,12 @@ CODE_0988FB:
 	LDA #$00					;C - - - - - 0x012929 04:8919: A9 00
 	STA objAnimProgress+OSLOT_BUBBLE,Y				;C - - - - - 0x01292B 04:891B: 99 DF 06
 	STA objAnimTimer+OSLOT_BUBBLE,Y				;C - - - - - 0x01292E 04:891E: 99 B7 06
+.ifdef REGION_JP
 	LDA bubbleProgress,X				;C - - - - - 0x012931 04:8921: BD D5 04
 	STA bubbleProgress,Y				;C - - - - - 0x012934 04:8924: 99 D5 04
+.else
+	JSR CoopFloodCopy			;(co-op 7a) the same copy, and the flood piece gets the water bubble's owner
+.endif
 	LDA #$00					;C - - - - - 0x012937 04:8927: A9 00
 	STA objAttr+OSLOT_BUBBLE,Y				;C - - - - - 0x012939 04:8929: 99 07 07
 	LDA #$01					;C - - - - - 0x01293C 04:892C: A9 01
@@ -1525,8 +1529,12 @@ CODE_0989AB:
 		STA ram_007D				;C - - - - - 0x0129C8 04:89B8: 85 7D
 		JMP CODE_0989C2				;C - - - - - 0x0129CA 04:89BA: 4C C2 89
 CODE_0989BD:
+.ifdef REGION_JP
 	STX scratch1				;C - - - - - 0x0129CD 04:89BD: 86 01
 	JSR PopBubble				;C - - - - - 0x0129CF 04:89BF: 20 7B FC
+.else
+	JSR CoopTouchPop			;(co-op 7a) STX scratch1 / JSR PopBubble, the toucher owns the pop
+.endif
 CODE_0989C2:
 	RTS							;C - - - - - 0x0129D2 04:89C2: 60
 
@@ -1613,7 +1621,11 @@ HazardCheckEnemies:
 	;04: X
 	;05: Y
 
+.ifdef REGION_JP
 	TXA							;C - - - - - 0x012A2D 04:8A1D: 8A
+.else
+	JSR CoopHazEnter			;(co-op 7a) TXA, and the effect's owner owns its kills
+.endif
 	PHA							;C - - - - - 0x012A2E 04:8A1E: 48
 	LDX #$00					;C - - - - - 0x012A2F 04:8A1F: A2 00
 @checkslot:
@@ -1662,8 +1674,12 @@ HazardCheckEnemies:
 		CMP collH				;C - - - - - 0x012A7C 04:8A6C: C5 D1
 		BCS @next				;C - - - - - 0x012A7E 04:8A6E: B0 08
 			LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x012A80 04:8A70: BD 6C 05
+.ifdef REGION_JP
 			ORA #$C0					;C - - - - - 0x012A83 04:8A73: 09 C0
 			STA objState+OSLOT_ENEMY,X				;C - - - - - 0x012A85 04:8A75: 9D 6C 05
+.else
+			JSR CoopHazKill				;(co-op 7a) ORA #$C0 / STA objState+OSLOT_ENEMY,X, killer = effect owner
+.endif
 @next:
 	INX							;C - - - - - 0x012A88 04:8A78: E8
 	CPX roundEnemies				;C - - - - - 0x012A89 04:8A79: EC A8 04
@@ -3900,6 +3916,12 @@ CODE_099796:
 	JMP (roundAnimSub)				;C - - - - - 0x0137B4 04:97A4: 6C 59 00
 @bganimret:
 	JSR CODE_099D3B				;C - - - - - 0x0137B7 04:97A7: 20 3B 9D
+.ifndef REGION_JP
+	BIT coopP2Active			;(co-op 7a) the other player's extra life
+	BPL :+
+		JSR CoopExtraLifeOther
+:
+.endif
 	JSR CODE_099BE7				;C - - - - - 0x0137BA 04:97AA: 20 E7 9B
 	JSR CheckPause				;C - - - - - 0x0137BD 04:97AD: 20 58 9A
 	LDA playerState				;C - - - - - 0x0137C0 04:97B0: A5 75
@@ -3907,6 +3929,14 @@ CODE_099796:
 	BNE CODE_0997B9				;C - - - - - 0x0137C4 04:97B4: D0 03
 		JMP CODE_09983C				;C - - - - - 0x0137C6 04:97B6: 4C 3C 98
 CODE_0997B9:
+.ifndef REGION_JP
+	LDA playerLives				;(co-op 7a) no lives and not dying: the resident player is out
+	BNE :+
+		JSR CoopResidentOut		;partner in the round: he takes over (C = 1); else the game over below
+		BCC :+
+		JMP CODE_09983C
+:
+.endif
 	LDA roundFlags				;C - - - - - 0x0137C9 04:97B9: AD 71 04
 	AND #$20					;C - - - - - 0x0137CC 04:97BC: 29 20
 	BEQ CODE_0997C6				;C - - - - - 0x0137CE 04:97BE: F0 06
@@ -5229,6 +5259,7 @@ CODE_099E2A:
 		STA collW				;C - - - - - 0x013E48 04:9E38: 85 D0
 		STA collH				;C - - - - - 0x013E4A 04:9E3A: 85 D1
 		INC ram_051B				;C - - - - - 0x013E4C 04:9E3C: EE 1B 05
+		JSR CoopChainOwner			;(co-op 7a) bubble X is popped by bubble scratch0: same owner
 
 		LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013E4F 04:9E3F: BD 77 05
 		CMP #BUBBLE_ENEMY					;C - - - - - 0x013E52 04:9E42: C9 03
@@ -5304,6 +5335,8 @@ CODE_099EA5:
 
 	LDY ram_051A				;C - - - - - 0x013ED1 04:9EC1: AC 1A 05
 	BEQ CODE_099EF0				;C - - - - - 0x013ED4 04:9EC4: F0 2A
+	JSR CoopKillSplit			;(co-op 7a) the other player's kills: own award; Y = the current player's share
+	BEQ CODE_099EF0
 		CPY #$03					;C - - - - - 0x013ED6 04:9EC6: C0 03
 		BCC CODE_099EDB				;C - - - - - 0x013ED8 04:9EC8: 90 11
 			LDA #$01					;C - - - - - 0x013EDA 04:9ECA: A9 01
