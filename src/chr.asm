@@ -38,11 +38,11 @@
 .incbin "chr/GiantTower_CB.chr"
 ;18
 .incbin "chr/Fans_AA.chr"
-.incbin "chr/Fans_AB.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was Fans_AB.chr: 8x8 HUD glyphs in $66-$7D
 .incbin "chr/Fans_BA.chr"
-.incbin "chr/Fans_BB.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was Fans_BB.chr: 8x8 HUD glyphs in $66-$7D
 .incbin "chr/Fans_CA.chr"
-.incbin "chr/Fans_CB.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was Fans_CB.chr: 8x8 HUD glyphs in $66-$7D
 ;1E
 .incbin "chr/Boomtown_A.chr"
 .incbin "chr/Boomtown_B.chr"
@@ -70,11 +70,11 @@
 .incbin "chr/GameOver.chr"
 ;2E
 .incbin "chr/MissileTractor_AA.chr"
-.incbin "chr/MissileTractor_AB.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was MissileTractor_AB.chr: 8x8 HUD glyphs in $66-$7D
 .incbin "chr/MissileTractor_BA.chr"
-.incbin "chr/MissileTractor_BB.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was MissileTractor_BB.chr: 8x8 HUD glyphs in $66-$7D
 .incbin "chr/MissileTractor_CA.chr"
-.incbin "chr/MissileTractor_CB.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was MissileTractor_CB.chr: 8x8 HUD glyphs in $66-$7D
 ;34
 .incbin "chr/BigReward_A.chr"
 
@@ -85,7 +85,7 @@
 .incbin "chr/PlayerTravel_B.chr"
 ;38
 .incbin "chr/ShoeCar_A.chr"
-.incbin "chr/ShoeCar_B.chr"
+.incbin "chr/HudFont.chr"		;(co-op 7b-1) was ShoeCar_B.chr: 8x8 HUD glyphs in $66-$7D
 ;3A
 .incbin "chr/BonusRoom_A.chr"
 .incbin "chr/BonusRoom_B.chr"
@@ -212,3 +212,11 @@
 .incbin "chr/TitleScreen_B.chr"
 .incbin "chr/TitleScreen_C.chr"
 .incbin "chr/TitleScreen_D.chr"
+
+;(co-op 7b-1, D-7b-11) CHR ROM expanded from 128 KB to 256 KB (header byte 5, config_us). The second 128 KB
+;(ids $80-$FF) holds copies with the original 8x16 font KB for screens that show it; unused ids are $FF filler.
+.res ($98-$80)*$400, $FF
+;98 chrBonusHud_A_ID / chrBonusHud_B_ID: the bonus-game screen's HUD bank (chrFans_AA_ID | $80, NMI remap):
+;Fans_AA + the original font KB with the 8x8 HUD glyphs in $40-$4C (letters J-O, unused on the bonus screens)
+.incbin "chr/Fans_AA.chr"
+.incbin "chr/BonusHudFont.chr"

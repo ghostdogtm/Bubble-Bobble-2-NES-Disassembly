@@ -1,7 +1,7 @@
 # Bubble-Bobble-2-NES-Disassembly
 Disassembly of Bubble Bobble 2 for the NES (US version only). This branch also carries a 2-player simultaneous co-op hack (see docs/coop_notes.md).
 
-The ROM is NES 2.0 with 8 KB of PRG-RAM (MMC3 board with WRAM); use an emulator or flash cart that supports it.
+The ROM is NES 2.0 with 8 KB of PRG-RAM (MMC3 board with WRAM) and 256 KB of CHR ROM (the original has 128 KB; the second half holds the co-op HUD's bonus-screen CHR copy); use an emulator or flash cart that supports it.
 
 ## Building
 

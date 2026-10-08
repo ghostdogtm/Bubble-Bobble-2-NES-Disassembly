@@ -27,6 +27,14 @@
 --                input; the generator's START taps then start the game. The run fails (csv line
 --                COOP_NOT_SELECTED, exit code 3) if the game starts with coopMode ~= 1 or if 4 SELECT
 --                taps did not set it. Without coop_select the input stream is unchanged.
+--   icon_trace   (optional, used with dump) {starts = {A, ...}, stops = {A, ...}, slot = N}: records which OAM entries
+--                (OAMBuffer $0200-$02FF, 64 entries of 4 bytes) were last written while DrawObjects drew object slot N
+--                (the HUD icon, OSLOT_ICON = 19). An exec of a `starts` address (the per-object draw path, where
+--                scratch4 = the slot being drawn) sets the current slot from scratch4; an exec of a `stops` address
+--                (DrawObjects entry, the fill of unused entries, the exits) clears it. Every OAMBuffer write marks its
+--                entry as drawn by slot N or not. At each RAM snapshot the marked entries are written to <out>.icon
+--                as "tick e1 e2 ..." (only ticks with at least one marked entry). perf.py regress uses it for the
+--                HUD-icon OAM rule (Phase 7b-1).
 --
 -- CSV columns (perf.py reads columns 3 and 5, so new columns are only ever appended):
 --   tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2
@@ -57,6 +65,8 @@ local csv = io.open(CFG.out .. ".csv", "w")
 csv:write("tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2\n")
 local dump = nil
 if CFG.dump then dump = io.open(CFG.out .. ".dump", "wb") end
+local iconf = nil
+if CFG.dump and CFG.icon_trace then iconf = io.open(CFG.out .. ".icon", "w") end
 
 local function cycles()
   return emu.getState()["cpu.cycleCount"]
@@ -185,6 +195,7 @@ local vramSnap = nil
 local function finish(code)
   csv:close()
   if dump then dump:close() end
+  if iconf then iconf:close() end
   if CFG.profile then
     local c = emu.getAccessCounters(emu.memType.nesPrgRom, emu.counterType.execCount)
     local p = io.open(CFG.out .. ".prof", "w")
@@ -201,6 +212,23 @@ emu.addEventCallback(function()
   tNmi = cycles()
   nmisInTick = nmisInTick + 1
 end, emu.eventType.nmi)
+
+-- HUD-icon OAM trace (CFG.icon_trace, see the header)
+local iconOwner = {}
+if iconf then
+  local it = CFG.icon_trace
+  local curSlot = nil
+  for _, a in ipairs(it.starts) do
+    emu.addMemoryCallback(function() curSlot = emu.read(0x04, MT_CPU) end,
+      emu.callbackType.exec, a, a, emu.cpuType.nes, MT_CPU)
+  end
+  for _, a in ipairs(it.stops) do
+    emu.addMemoryCallback(function() curSlot = nil end, emu.callbackType.exec, a, a, emu.cpuType.nes, MT_CPU)
+  end
+  emu.addMemoryCallback(function(addr, value)
+    iconOwner[(addr - 0x200) >> 2] = (curSlot == it.slot)
+  end, emu.callbackType.write, 0x200, 0x2FF, emu.cpuType.nes, MT_CPU)
+end
 
 local lastProgress = 0
 emu.addMemoryCallback(function(addr, value)
@@ -239,6 +267,11 @@ emu.addMemoryCallback(function(addr, value)
     if dump then
       dump:write(readBlock(MT_RAM, 0, 0x800))
       dump:write(vramSnap)
+    end
+    if iconf then
+      local t = {}
+      for e = 0, 63 do if iconOwner[e] then t[#t + 1] = e end end
+      if #t > 0 then iconf:write(tick .. " " .. table.concat(t, " ") .. "\n") end
     end
   elseif value == 0 and inTick then
     inTick = false

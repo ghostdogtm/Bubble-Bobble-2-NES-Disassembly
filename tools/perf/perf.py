@@ -32,6 +32,20 @@ lag-frame dependent state (nmiProgress on ticks whose lag differs; audio-engine 
 pattern has diverged - audio triggers $E0-$E2 stay compared with bit 7 masked). RAM words that hold code pointers are compared after
 translating them through the symbol tables of both builds (label + offset), so relinking does
 not cause false mismatches.
+Phase 7b-1 (co-op HUD, owner-approved option (a), the only two HUD rules):
+  HUD nametable rule: a nametable byte (either 1 KB nametable, offset o & $3FF) is ignored iff it is in row 2 or 3,
+    column 2..29 (offsets $042-$05D, $062-$07D of each nametable), both values have the same bit 7 and both
+    (value & $7F) are HUD tiles HUD_NT_TILES ($5C/$5D = old 8x16 'X', $66-$7F = old heart / digits / blanks, new
+    8x8 glyphs, blank $7F). Any other tile there (or any other row, the attributes, the palette) is still compared.
+  HUD icon OAM rule: an OAMBuffer entry ($0200 + 4e .. +3) is ignored iff in BOTH runs it was last written by
+    DrawObjects while drawing object slot ICON_SLOT (harness icon_trace -> <scen>.icon), its tile / attribute /
+    X bytes are equal and the test run's Y byte is off screen (>= $EF): the icon is hidden in place.
+  Bonus-game screen (D-7b-11): there the HUD bank (chrFans_AA_ID) is mapped as a copy whose 8x8 glyphs are at
+    $40-$4C (the NMI remaps only the hardware register; RAM is unchanged), so in the HUD cells a test value whose
+    (value & $7F) is in HUD_BONUS_GLYPHS is accepted too, but only if in the test run's RAM of that tick or the tick
+    before the register of the cell's pattern-table half (chrBankA for bit 7 = 0, chrBankB for 1) holds
+    chrFans_AA_ID and the other one chrBonusRoom_A_ID (the same test as the NMI remap).
+  Both counts are printed per scenario. Everything else (all other RAM incl. object 19's arrays) is compared.
 """
 import argparse
 import bisect
@@ -108,6 +122,21 @@ IRQ_VOLATILE = {0x20, 0x24, 0x25}
 NMI_PROGRESS = 0x15
 AUDIO_TRIGGERS = {0xE0, 0xE1, 0xE2}
 AUDIO_PRIVATE = set(range(0xE3, 0xF2)) | set(range(0x790, 0x7F6))
+# Phase 7b-1 HUD rules (see the module docstring)
+HUD_NT_TILES = {0x5C, 0x5D} | set(range(0x66, 0x80))
+HUD_BONUS_GLYPHS = set(range(0x40, 0x4D))  # the 8x8 glyphs in the bonus-game screen's HUD bank copy (D-7b-11)
+CHR_BANK_A, CHR_BANK_B = 0x4B, 0x4C        # chrBankA / chrBankB
+CHR_FANS_AA, CHR_BONUS_ROOM_A = 0x18, 0x3A
+HUD_NT_ROWS = (2, 3)
+HUD_NT_COLS = range(2, 30)
+OAM_BUF = 0x200
+ICON_SLOT = 19                      # OSLOT_ICON
+ICON_HIDDEN_Y = 0xEF                # an OAM Y >= $EF is below the visible screen
+# DrawObjects labels for the icon trace (present in the original and in the optimized DrawObjects): per-object
+# draw path with scratch4 = slot (starts), and the entry / fill / exits (stops; only those the build has)
+ICON_TRACE_STARTS = ["CODE_0FEF43", "CODE_0FEFF5"]
+ICON_TRACE_STOPS = ["DrawObjects", "DrawObjectsBody", "CODE_0FF064", "CODE_0FF079", "DrawObjects_EvenFull",
+                    "DrawObjects_OddFull"]
 
 
 def sh(cmd, **kw):
@@ -254,6 +283,17 @@ def scen_extra(build, opts, seed):
     return extra
 
 
+def icon_trace_cfg(build):
+    """CFG field for the harness's HUD-icon OAM trace (Phase 7b-1), or '' if the build lacks the labels"""
+    starts = [build_symbol(build, n) for n in ICON_TRACE_STARTS]
+    stops = [a for a in (build_symbol(build, n) for n in ICON_TRACE_STOPS) if a is not None]
+    if None in starts or not stops:
+        print(f"NOTE: {build} lacks the DrawObjects labels for the icon trace")
+        return ""
+    return (f", icon_trace = {{starts = {{{','.join(map(str, starts))}}}, stops = {{{','.join(map(str, stops))}}}, "
+            f"slot = {ICON_SLOT}}}")
+
+
 def run_scen(build, scen, dump=False, profile=False, shots=None):
     sc = SCENARIOS[scen]
     opts = sc[-1] if isinstance(sc[-1], dict) else {}
@@ -265,6 +305,8 @@ def run_scen(build, scen, dump=False, profile=False, shots=None):
     out = os.path.join(od, scen)
     lua = lambda v: "true" if v else "false"
     extra = scen_extra(build, opts, seed)
+    if dump:
+        extra += icon_trace_cfg(build)
     cfg = (f'CFG = {{ out = [[{out}]], ticks = {ticks}, seed = {seed}, '
            f'start_round = {rnd if rnd else "nil"}, inf_lives = {lua(inf)}, start_taps = {lua(taps)}, '
            f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}}{extra} }}\n')
@@ -310,9 +352,42 @@ def ramname(addr):
     return n if v == addr else f"{n}+{addr - v}"
 
 
+def load_icon(build, scen):
+    """tick -> set of OAM entries drawn by the HUD icon (harness <scen>.icon), or None if the file is missing"""
+    p = os.path.join(RUNS, build, scen + ".icon")
+    if not os.path.exists(p):
+        return None
+    out = {}
+    for line in open(p):
+        f = list(map(int, line.split()))
+        out[f[0]] = set(f[1:])
+    return out
+
+
+def bonus_screen(ram, half):
+    """the NMI's bonus-screen CHR remap is active for pattern-table half `half` (0/1) in this RAM record"""
+    return ram[CHR_BANK_A + half] == CHR_FANS_AA and ram[CHR_BANK_A + (half ^ 1)] == CHR_BONUS_ROOM_A
+
+
+def hud_nt_ignored(o, va, vb, rb=None, rb_prev=None):
+    """Phase 7b-1 HUD nametable rule: o = offset in the 2 KB nametable dump; rb / rb_prev = test records of this
+    tick and the previous one (bonus-screen glyph class)"""
+    o &= 0x3FF
+    if not ((o >> 5) in HUD_NT_ROWS and (o & 31) in HUD_NT_COLS and (va & 0x80) == (vb & 0x80)
+            and (va & 0x7F) in HUD_NT_TILES):
+        return False
+    if (vb & 0x7F) in HUD_NT_TILES:
+        return True
+    half = vb >> 7
+    return ((vb & 0x7F) in HUD_BONUS_GLYPHS and
+            any(r is not None and bonus_screen(r, half) for r in (rb, rb_prev)))
+
+
 def compare_runs(base, test, scen, verbose=True):
     pa = os.path.join(RUNS, base, scen + ".dump")
     pb = os.path.join(RUNS, test, scen + ".dump")
+    icon_a, icon_b = load_icon(base, scen), load_icon(test, scen)
+    hud_nt = icon_oam = 0          # ignored HUD nametable bytes / hidden icon OAM entries (summed over ticks)
     sa, sb = Symbols(base), Symbols(test)
     fa, fb = open(pa, "rb"), open(pb, "rb")
     ptr_bytes = {}
@@ -325,19 +400,33 @@ def compare_runs(base, test, scen, verbose=True):
     warnings = 0
     ptr_cache = {}
     audio_desync = None   # first tick where the lag pattern differed
+    rb_cur = rb_prev = None
     while True:
         ra, rb = fa.read(REC_SIZE), fb.read(REC_SIZE)
         if not ra and not rb:
             break
         if len(ra) != len(rb):
             return False, f"tick {tick}: run length differs (base {'ended' if not ra else 'longer'})"
+        rb_prev, rb_cur = rb_cur, rb
         lag_differs = tick < len(lag_a) and tick < len(lag_b) and lag_a[tick] != lag_b[tick]
         if lag_differs and audio_desync is None:
             audio_desync = tick
         if ra != rb:
             diffs = [i for i in range(REC_SIZE) if ra[i] != rb[i]]
             hard = []
+            icon_ok = set()
+            if icon_a is not None and icon_b is not None:
+                for e in icon_a.get(tick, set()) & icon_b.get(tick, set()):
+                    j = OAM_BUF + 4 * e
+                    if ra[j] != rb[j] and rb[j] >= ICON_HIDDEN_Y and ra[j + 1:j + 4] == rb[j + 1:j + 4]:
+                        icon_ok.add(e)
+                icon_oam += len(icon_ok)
             for i in diffs:
+                if OAM_BUF <= i < OAM_BUF + 0x100 and (i - OAM_BUF) >> 2 in icon_ok:
+                    continue
+                if RAM_SIZE <= i < RAM_SIZE + 0x800 and hud_nt_ignored(i - RAM_SIZE, ra[i], rb[i], rb, rb_prev):
+                    hud_nt += 1
+                    continue
                 if i < RAM_SIZE:
                     if i in STACK or i in IRQ_VOLATILE:
                         continue
@@ -372,6 +461,10 @@ def compare_runs(base, test, scen, verbose=True):
                 return False, msg
         tick += 1
     msg = f"{tick} ticks identical"
+    if hud_nt or icon_oam:
+        msg += f" (HUD rules: {hud_nt} HUD nametable bytes, {icon_oam} hidden icon OAM entries ignored)"
+    if icon_a is None or icon_b is None:
+        msg += " (no icon trace: icon OAM rule off)"
     if audio_desync is not None:
         msg += f" (lag pattern differs from tick {audio_desync}: audio-engine RAM excluded after it)"
     if warnings:
@@ -384,7 +477,8 @@ def cmd_regress(a):
     scens = a.scen or DEFAULT_SCENS
     jobs = [(run_scen, a.test, s, True) for s in scens]
     jobs += [(run_scen, a.base, s, True) for s in scens
-             if not a.reuse_base or not os.path.exists(os.path.join(RUNS, a.base, s + ".dump"))]
+             if not a.reuse_base or not os.path.exists(os.path.join(RUNS, a.base, s + ".dump"))
+             or not os.path.exists(os.path.join(RUNS, a.base, s + ".icon"))]
     parallel(jobs)
     for s in scens:
         ok, msg = compare_runs(a.base, a.test, s)

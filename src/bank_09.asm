@@ -4251,6 +4251,7 @@ CODE_099C0E:
 CODE_099C45:
 	JSR DrawHearts				;C - - - - - 0x013C55 04:9C45: 20 62 9C
 CODE_099C48:
+	JSR CoopHudBuild			;(co-op 7b-1) the new 8x8 HUD row for this job (WRAM only)
 	DEC livesCurrentPos				;C - - - - - 0x013C58 04:9C48: CE 98 04
 	LDA #.LOBYTE(CODE_0FE93B)	;C - - - - - 0x013C5B 04:9C4B: A9 3B
 	STA nmiUnbankedSub				;C - - - - - 0x013C5D 04:9C4D: 85 35
@@ -4956,3 +4957,87 @@ CODE_099EF0:
 CODE_099EF8:
 	RTS							;C - - - - - 0x013F08 04:9EF8: 60
 
+
+; =============================================================================================
+; (co-op 7b-1) 8x8 HUD block helpers for CoopHudBuild (bank E, see src/coop/coop_engine.asm and docs/coop_notes.md,
+; Phase 7b-1). They are here because their only caller runs from CODE_099C48 (bank 9 mapped). WRAM writes only.
+; =============================================================================================
+; HudPlayerData: A = physical player (0/1) -> hudLabel, hudLives, hudHearts, hudScoreIdx. Keeps X.
+; The resident player (currentPlayer) has the native variables, the other one ctxOther_*.
+HudPlayerData:
+	TAY
+	CLC
+	ADC #HUD_G_DIGIT0+1
+	STA hudLabel
+	LDA #$00
+	CPY #$00
+	BEQ :+
+	LDA #HUD_TOTAL_DIGITS
+:	STA hudScoreIdx
+	CPY currentPlayer
+	BNE @other
+	LDA playerLives
+	LDY playerHearts
+	JMP @store
+@other:
+	LDA ctxOther_playerLives
+	LDY ctxOther_playerHearts
+@store:
+	STA hudLives
+	STY hudHearts
+	RTS
+
+; HudTop: X = block offset in hudBuf (clobbered). Label, 'x', lives as 2 digits (capped at 99 as RefreshLivesDigits),
+; up to HUD_MAX_HEARTS hearts.
+HudTop:
+	LDA hudLabel
+	STA hudBuf+2,X
+	LDA #HUD_G_P
+	STA hudBuf+3,X
+	LDA #HUD_G_X
+	STA hudBuf+5,X
+	LDA hudLives
+	CMP #100
+	BCC :+
+	LDA #99
+:	LDY #HUD_G_DIGIT0
+@tens:
+	CMP #10
+	BCC @units
+	SBC #10							;C = 1
+	INY
+	BNE @tens						;always
+@units:
+	ADC #HUD_G_DIGIT0				;C = 0
+	STA hudBuf+7,X
+	TYA
+	STA hudBuf+6,X
+	LDY hudHearts
+	CPY #HUD_MAX_HEARTS+1
+	BCC :+
+	LDY #HUD_MAX_HEARTS
+:	TYA
+	BEQ @rts
+	LDA #HUD_G_HEART
+@heart:
+	STA hudBuf+9,X
+	INX
+	DEY
+	BNE @heart
+@rts:
+	RTS
+
+; HudBottom: X = block offset in hudBuf (clobbered). The 7 score digits of hudScoreIdx's set.
+HudBottom:
+	LDY hudScoreIdx
+	LDA #SCORE_TOTAL_DIGITS
+	STA hudCnt
+:	LDA scoreDigits,Y
+	CLC
+	ADC #HUD_G_DIGIT0
+	STA hudBuf+5,X
+	INX
+	INY
+	DEC hudCnt
+	BNE :-
+	RTS

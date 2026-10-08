@@ -126,3 +126,6 @@ chrTitleScreen_A_ID =		$7C
 chrTitleScreen_B_ID =		$7D
 chrTitleScreen_C_ID =		$7E
 chrTitleScreen_D_ID =		$7F
+;(co-op 7b-1, D-7b-11) CHR expanded to 256 KB; ids $80-$FF are the second 128 KB
+chrBonusHud_A_ID =		$98	; = chrFans_AA_ID | $80: Fans_AA + BonusHudFont (bonus-game screen, NMI remap)
+chrBonusHud_B_ID =		$99

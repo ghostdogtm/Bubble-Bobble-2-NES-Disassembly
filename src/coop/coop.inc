@@ -71,3 +71,24 @@ COOP_CANARY3    = $50           ; 'P'
 
 ; Bits of powerUps that are per player (cleared on death); the other bits are shared.
 COOP_POWERUP_MASK = POWERUP_CANDY | POWERUP_SHOE
+
+; ---------------------------------------------------------------------------------------------
+; Phase 7b-1: 8x8 HUD (see docs/coop_notes.md, Phase 7b-1). Rows 2-3, columns 2-29 of the round's nametable;
+; one 14-column block per player (P1 columns 2-15, P2 columns 16-29). Glyphs live in tiles $66-$7D of the HUD
+; CHR bank's font KB (src/chr/HudFont.chr); the tile is the glyph id ORed with $80 when the HUD uses the upper
+; half of the pattern table (vNametable = 1).
+; ---------------------------------------------------------------------------------------------
+HUD_ROW_TILES   = 28            ; tiles per HUD row (columns 2-29)
+HUD_BLOCK       = 14            ; tiles per player block
+HUD_ROW_TOP     = $42           ; low byte of the PPU address of row 2, column 2 (lives, hearts)
+HUD_ROW_BOTTOM  = $62           ; low byte of the PPU address of row 3, column 2 (score)
+HUD_G_DIGIT0    = $66           ; digits 0-9 = $66-$6F
+HUD_G_HEART     = $70
+HUD_G_X         = $71           ; 'x' before the lives
+HUD_G_P         = $72           ; 'P' of the "1P" / "2P" label
+HUD_G_BLANK     = $7F           ; the original HUD blank (unchanged)
+HUD_MAX_HEARTS  = 5
+HUD_BONUS_DIGIT0 = $40          ; bonus-game screen (D-7b-11): the glyphs $66-$72 are at $40-$4C of chrBonusHud_B_ID
+HUD_ICON_HIDE_Y = $F8           ; objY of the HUD icon (slot OSLOT_ICON) while DrawObjects runs: its sprites get
+                                ; Y = $F0 (image offset -8), off screen, as the unused OAM entries
+.assert chrBonusHud_A_ID = (chrFans_AA_ID | $80), error, "NMI CHR remap: chrBonusHud_A_ID must be chrFans_AA_ID | $80"

@@ -62,3 +62,18 @@ coopKiller:     .res 10         ; per enemy index: physical id of the player who
 coopKills:      .res 2          ; enemy-bubble kills since the last multi-kill award, by physical player (ram_051A = sum)
 coopHazOwner:   .res 1          ; owner of the special bubble whose effect HazardCheckEnemies is testing
 coopTmp:        .res 3          ; CoopKillSplit (+0 total, +1 the other share), CoopAddScoreAs (+2 saved currentPlayer)
+
+; Phase 7b-1: 8x8 HUD (see docs/coop_notes.md, Phase 7b-1). Variant A: the original HUD job code (CODE_099BE7) runs
+; unchanged; CoopHudBuild builds the new row here and CoopHudUpload (head of CODE_0FE93B) uploads it instead of mapBuffer.
+hudJob:         .res 1          ; 1 = hudBuf holds the row of the HUD job queued this tick; cleared by every CoopHudUpload
+hudTarget:      .res 2          ; PPU address of the row (lo, hi): row 2 or 3, column 2 of the HUD's nametable
+hudDummy:       .res 2          ; mapTargetAdr the original job left (lo, hi): the upload replaces only that job
+hudBuf:         .res HUD_ROW_TILES ; the row's tiles, columns 2-29
+hudLabel:       .res 1          ; block inputs (HudPlayerData): label glyph ('1' / '2'), lives, hearts,
+hudLives:       .res 1          ;   index of the score digits (0 = scoreDigits, HUD_TOTAL_DIGITS = scoreDigitsP2)
+hudHearts:      .res 1
+hudScoreIdx:    .res 1
+hudCnt:         .res 1          ; temporary (digit loop; then the tile half $00/$80 in the final pass)
+hudIconY:       .res 1          ; CoopDrawObjects: objY of the HUD icon, put back after DrawObjects
+hudTmpA:        .res 1          ; CoopDrawObjects: DrawObjects' A; CoopHudBuild: glyph shift (bonus screen)
+hudStamp:       .res 1          ; globalTimer of the tick that queued hudBuf: a row is uploaded only in the next full NMI

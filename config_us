@@ -20,7 +20,7 @@ MEMORY {
     MEM_D:       start = $A000,  size = $2000,   type = ro, file = %O, bank = $0D, fill = yes, fillval = $FF;
     MEM_E:       start = $C000,  size = $2000,   type = ro, file = %O, bank = $0E, fill = yes, fillval = $FF;
     MEM_F:       start = $E000,  size = $2000,   type = ro, file = %O, bank = $0F, fill = yes, fillval = $FF;
-    CHR:         start = $0000,  size = $20000,   type = ro, file = %O, fill = yes, fillval = $FF;
+    CHR:         start = $0000,  size = $40000,   type = ro, file = %O, fill = yes, fillval = $FF;
     WRAM:        start = $6000,  size = $2000,   type = rw, file = "";
 }
 

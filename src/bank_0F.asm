@@ -348,15 +348,31 @@ CODE_0FE1B6:
 
 	INC globalTimer				;C - - - - - 0x01E226 07:E216: E6 14
 
+	;(co-op 7b-1, D-7b-11) The bonus-game screen shows the HUD and the score panel (8x16 digits $6A-$7D) from the same
+	;HUD bank (Fans, chrFans_AA_ID) while the other half holds chrBonusRoom_A_ID. Only the hardware register gets the
+	;bonus copy (chrBonusHud_A_ID = chrFans_AA_ID | $80: original font KB, 8x8 HUD glyphs in $40-$4C); chrBankA/B
+	;keep the original values, so RAM is unchanged.
 	LDA #$00					;C - - - - - 0x01E228 07:E218: A9 00
 	STA $8000				;C - - - - - 0x01E22A 07:E21A: 8D 00 80
 	LDA chrBankA				;C - - - - - 0x01E22D 07:E21D: A5 4B
-	STA $8001				;C - - - - - 0x01E22F 07:E21F: 8D 01 80
+	CMP #chrFans_AA_ID
+	BNE :+
+	LDX chrBankB
+	CPX #chrBonusRoom_A_ID
+	BNE :+
+	ORA #$80					;= chrBonusHud_A_ID
+:	STA $8001				;C - - - - - 0x01E22F 07:E21F: 8D 01 80
 
 	LDA #$01					;C - - - - - 0x01E232 07:E222: A9 01
 	STA $8000				;C - - - - - 0x01E234 07:E224: 8D 00 80
 	LDA chrBankB				;C - - - - - 0x01E237 07:E227: A5 4C
-	STA $8001				;C - - - - - 0x01E239 07:E229: 8D 01 80
+	CMP #chrFans_AA_ID
+	BNE :+
+	LDX chrBankA
+	CPX #chrBonusRoom_A_ID
+	BNE :+
+	ORA #$80					;= chrBonusHud_A_ID
+:	STA $8001				;C - - - - - 0x01E239 07:E229: 8D 01 80
 
 	LDA #$02					;C - - - - - 0x01E23C 07:E22C: A9 02
 	STA $8000				;C - - - - - 0x01E23E 07:E22E: 8D 00 80
@@ -1588,6 +1604,10 @@ BrightenColors:
 	RTS							;C - - - - - 0x01E94A 07:E93A: 60
 
 CODE_0FE93B:
+	LDA hudJob					;(co-op 7b-1) a new HUD row is queued: CoopHudUpload uploads it instead
+	BEQ HudUploadOrig
+	JMP CoopHudUpload
+HudUploadOrig:
 	LDA PPUSTATUS				;C - - - - - 0x01E94B 07:E93B: AD 02 20
 	LDA mapTargetAdr+1				;C - - - - - 0x01E94E 07:E93E: A5 4A
 	STA PPUADDR				;C - - - - - 0x01E950 07:E940: 8D 06 20
@@ -2529,6 +2549,8 @@ AnimateNonBubbles:
 	RTS							;C - - - - - 0x01EEF1 07:EEE1: 60
 
 DrawObjects:
+	JMP CoopDrawObjects			;(co-op 7b-1) hides the HUD icon (slot OSLOT_ICON) in place
+DrawObjectsBody:
 	;(Perf) US: optimized copy, see docs/perf_notes.md "Phase 5". JP keeps the original.
 	LDA #$07					;C - - - - - 0x01EEF2 07:EEE2: A9 07
 	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80

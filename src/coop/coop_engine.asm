@@ -1275,3 +1275,165 @@ CoopKillScoreEnd:
 	STA coopKiller,X
 	PLA
 	JMP CoopAddScoreAs
+
+; =============================================================================================
+; Phase 7b-1: 8x8 HUD, engine variant A (see docs/coop_notes.md, Phase 7b-1).
+; The original HUD job code (CODE_099BE7: countdown livesCurrentPos 3 -> 2 -> 1 -> 0, one job per tick, mapBuffer,
+; mapTargetAdr, livesDigits, ram_03AA/AB/AE) runs unchanged, so all internal RAM stays as in the original game.
+;   CoopHudBuild    (bank 9 CODE_099C48, before DEC livesCurrentPos): builds the new row for this job in hudBuf
+;                   (jobs 3 and 2 = top row: label, lives, hearts; job 1 = bottom row: score) and queues it.
+;                   On the bonus-game screen (D-7b-11) the glyphs are shifted to $40-$4C (the NMI maps the HUD bank
+;                   copy chrBonusHud_A_ID there, bank F; the score panel keeps the original 8x16 digits $6A-$7D).
+;   CoopHudUpload   (head of CODE_0FE93B, NMI): uploads hudBuf instead of mapBuffer when the queued job is still the
+;                   pending one (mapTargetAdr = hudDummy, globalTimer = hudStamp: the first full NMI after that tick);
+;                   else the original upload.
+;   CoopDrawObjects (head of DrawObjects): the HUD icon (slot OSLOT_ICON) is drawn with objY = HUD_ICON_HIDE_Y, so its
+;                   OAM entries get an off-screen Y in place; objY is put back right after DrawObjects.
+; Player block (14 tiles at hudBuf + b, b = 0 for P1, HUD_BLOCK for P2):
+;   top:    blank blank label 'P' blank 'x' tens units blank heart x5 (blank where no heart)
+;   bottom: blank x5, the 7 score digits, blank x2
+; 7b-1: the P2 block is blank; 7b-2 adds P2's data (HudPlayerData already reads either physical player).
+; Space: CoopHudBuild is in COOP_CODE2, CoopHudUpload / CoopDrawObjects in COOP_CODE, the block helpers at the end of
+; bank 9 (src/bank_09.asm).
+; =============================================================================================
+.segment "COOP_CODE2"
+
+; CoopHudBuild: A free; X and Y are kept (the caller's RTS path follows). Writes only WRAM (and the stack).
+; Bank 9 is mapped (the only caller is CODE_099C48): the block helpers HudPlayerData / HudTop / HudBottom are in bank 9.
+CoopHudBuild:
+	TXA
+	PHA
+	TYA
+	PHA
+	LDX #HUD_ROW_TILES-1
+	LDA #HUD_G_BLANK
+:	STA hudBuf,X
+	DEX
+	BPL :-
+	LDA mapTargetAdr+1				;the job's high byte already follows the nametable / round-20 rule
+	STA hudDummy+1
+	STA hudTarget+1
+	LDA mapTargetAdr
+	STA hudDummy
+	LDA globalTimer
+	STA hudStamp
+	LDX #$00						;P1's block
+	TXA
+	JSR HudPlayerData
+	LDA livesCurrentPos				;job: 3 lives, 2 hearts -> top row; 1 score -> bottom row
+	CMP #$02
+	LDA #HUD_ROW_BOTTOM
+	BCC :+
+	LDA #HUD_ROW_TOP
+:	STA hudTarget
+	BCC @bottom
+	JSR HudTop
+	JMP @p2
+@bottom:
+	JSR HudBottom
+@p2:
+	;(7b-2: P2's block at hudBuf + HUD_BLOCK; blank in 7b-1)
+	LDA vNametable					;HUD bank in chrBankB (as DATA_099C54): tiles + $80
+	LSR A
+	LDA #$00
+	ROR A
+	STA hudCnt						;tile half
+	LDY #$00						;glyph shift
+	LDX vNametable
+	LDA chrBankA,X					;bonus-game screen (the same test as the NMI's CHR remap, bank F): the
+	CMP #chrFans_AA_ID				;HUD bank is mapped as chrBonusHud_A_ID, whose glyphs are at $40-$4C
+	BNE @shift
+	TXA
+	EOR #$01
+	TAX
+	LDA chrBankA,X
+	CMP #chrBonusRoom_A_ID
+	BNE @shift
+	LDY #HUD_G_DIGIT0-HUD_BONUS_DIGIT0
+@shift:
+	STY hudTmpA
+	LDX #HUD_ROW_TILES-1
+@tile:
+	LDA hudBuf,X
+	CMP #HUD_G_BLANK
+	BEQ :+
+	SEC
+	SBC hudTmpA
+:	ORA hudCnt
+	STA hudBuf,X
+	DEX
+	BPL @tile
+@queue:
+	LDA #$01
+	STA hudJob
+	PLA
+	TAY
+	PLA
+	TAX
+	RTS
+
+.segment "COOP_CODE"
+
+; CoopHudUpload: JMP from the head of CODE_0FE93B (NMI, hudJob != 0). Uploads hudBuf if the queued HUD job is the one
+; CODE_0FE93B is about to upload (mapTargetAdr unchanged since CoopHudBuild, first full NMI after that tick), then
+; does what the original does after its rows: mapTargetAdr += $20 and CODE_0FE980 (attribute part: ram_03AE is 0 for
+; HUD jobs; ColorBufferToVRAM; NMISubRet). Otherwise the original upload runs. hudJob is cleared on both paths.
+CoopHudUpload:
+	LDA #$00
+	STA hudJob
+	LDA mapTargetAdr
+	CMP hudDummy
+	BNE @orig
+	LDA mapTargetAdr+1
+	CMP hudDummy+1
+	BNE @orig
+	LDA globalTimer
+	CMP hudStamp
+	BNE @orig
+	LDA PPUSTATUS
+	LDA hudTarget+1
+	STA PPUADDR
+	LDA hudTarget
+	STA PPUADDR
+	LDX #$00
+:	LDA hudBuf,X
+	STA PPUDATA
+	INX
+	CPX #HUD_ROW_TILES
+	BNE :-
+	LDA mapTargetAdr
+	CLC
+	ADC #$20
+	STA mapTargetAdr
+	BCC :+
+	INC mapTargetAdr+1
+:	JMP CODE_0FE980
+@orig:
+	JMP HudUploadOrig
+
+; CoopDrawObjects: JMP from the head of DrawObjects. While the HUD icon (slot OSLOT_ICON, animation anJrDoll, set up by
+; CODE_059DFB) is active, it is drawn with objY = HUD_ICON_HIDE_Y: its OAM entries keep their place, tile, attributes
+; and X, only Y is off screen. objY is put back after DrawObjects; A, X, Y and the flags are DrawObjects' own.
+CoopDrawObjects:
+	LDA objState+OSLOT_ICON
+	BEQ @plain
+	LDA objAnim+OSLOT_ICON
+	CMP #.LOBYTE(anJrDoll_ID)
+	BNE @plain
+	LDA objAnimHI+OSLOT_ICON
+	CMP #.HIBYTE(anJrDoll_ID)
+	BNE @plain
+	LDA objY+OSLOT_ICON
+	STA hudIconY
+	LDA #HUD_ICON_HIDE_Y
+	STA objY+OSLOT_ICON
+	JSR DrawObjectsBody
+	PHP
+	STA hudTmpA
+	LDA hudIconY
+	STA objY+OSLOT_ICON
+	LDA hudTmpA
+	PLP
+	RTS
+@plain:
+	JMP DrawObjectsBody
