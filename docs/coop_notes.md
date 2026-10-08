@@ -1780,3 +1780,250 @@ Bank 5 in detail: -109 announce, -34 pair swap, -24 `CODE_058CC3`, -22 `CODE_058
   palette after a role exchange, bonus credit (Phase 7a 7b list), `CODE_0792E8` pad read re-check.
 - Dead bytes that could go later: `ram_00D7/D9/DD` writes in `CODE_0582BE` (6 B, D-R2a keeps them), `TitleScreenCursorPositions`
   stays used; `$74` is free for reuse (perf phase, D-R2b).
+
+## Phase 7b-1: 8x8 HUD (1P path)
+
+Plan: `tmp/bb2_phase7b_plan.md` (7b-1, H1-H5) with the owner decisions at its end: D-7b-1 (glyphs derived from the
+ROM), D-7b-2 (up to 5 heart icons), D-7b-3 (same colour both sides), D-7b-4 ("1P"/"2P" labels, sprite icon hidden
+always), D-7b-5 (engine variant A, no RAM exclusion), and D-7b-11 (CHR ROM 256 KB for the bonus-game panel, see
+below). The new HUD replaces the 8x16 one in 1P and co-op; in 7b-1 the P2 block is always blank (7b-2 adds P2's data).
+
+### Layout and glyphs
+Rows 2-3, columns 2-29 of the round's nametable (high byte `$20 | vNametable << 3`, `$24` in round 20, as the original).
+One 14-tile block per player at column `b` (P1 2, P2 16):
+
+| row | b+0 b+1 | b+2 b+3 | b+4 | b+5 | b+6 b+7 | b+8 | b+9 .. b+13 |
+|-----|---------|---------|-----|-----|---------|-----|-------------|
+| 2   | blank   | `1` `P` | blank | `x` | lives (2 digits, cap 99) | blank | hearts (1 tile each, up to 5, then blank) |
+| 3   | blank   | blank   | blank | score digit 1 | digits 2-3 | digit 4 | digits 5-7 (b+9..b+11), blank b+12/b+13 |
+
+Glyph slots in the HUD bank's font KB (tile = glyph | `$80` when the HUD bank is `chrBankB`, i.e. `vNametable` = 1):
+`$66-$6F` digits 0-9 (SmallFont_A `$10-$19`), `$70` heart (the 16x16 HUD heart `$66-$69` downsampled 2x2: a pixel is
+background unless at least 2 of its 4 source pixels are not, else their majority colour), `$71` 'x' (SmallFont 'X'
+`$38`), `$72` 'P' (SmallFont `$30`), `$73-$7D` blank (copies of `$7F`), `$7E/$7F` unchanged. Letters J-Z,
+'!', '.' (`$40-$65`) are unchanged.
+
+### CHR
+- `src/chr/HudFont.chr` = `Fans_AB.chr` with `$66-$7D` replaced as above. `src/chr.asm` includes it at the 7 places
+  of the identical font-KB copies (`Fans_AB/BB/CB`, `MissileTractor_AB/BB/CB`, `ShoeCar_B`; ids `$19 $1B $1D $2F
+  $31 $33 $39`). The 7 original files stay in `src/chr/` (unused, like `MissileTractor_AC.chr`).
+- Generator (reproducible): `tmp/coop_scripts/p7b1/mkhudfont.py` (`--check` verifies both CHR files).
+- Build check: the CHR of `p7b1` differs from the original only in those 7 KB (= `HudFont.chr`) and in the new
+  second 128 KB below.
+
+### D-7b-11: the bonus-game panel and CHR ROM 256 KB
+Finding: the bonus-game screen (`currentRound` 81-83 at setup; volleyball, gems, basketball) maps the HUD bank
+`chrFans_AA_ID` (`$18`) in the HUD half and `chrBonusRoom_A_ID` (`$3A`, set by `CODE_089E8F`) in the other half, and
+its score panel (JUNIOR / TIME / BARCELON, rows 25-26) shows the 8x16 digits `$6A-$7D` of the same HUD bank. So the
+HUD (8x8 glyphs) and the panel (original 8x16 digits) need the same pattern-table half in the same frame. There is no
+IRQ on that screen (`irqEffect` 0).
+
+Inventory of screens that map one of the 7 font-KB banks (static, every store of a font bank id into
+`chrBankA`/`chrBankB` or `OpeningChrA/B`), with the evidence per screen:
+
+| site | screen | font-KB tiles shown outside the HUD cells | evidence |
+|------|--------|-------------------------------------------|----------|
+| `CODE_059EE4` (`RoundHUDChrBanks`) rounds 1-80 | normal rounds (HUD) | none | pixel comparison r01 r20 r33 r34 r40 r50 r70 camp03, natural (rounds 1-2) |
+| `CODE_059EE4` rounds 81-83 | bonus games (secret door) | 8x16 digits `$6A-$7D` (panel) | probe (`probe_font.py --full`, visible nametable) + pixel comparison vball/gems/bball |
+| bank 7 `CODE_07826D` / `CODE_07833E` / `CODE_078404`, bank 7 `$852C` cycle, bank 9 `@swapgfx` | BG animations of the fan, shoe-car and tractor rounds (`bgAnimValue`) | none | pixel comparison r33 (shoe car), r34 (fans), r50 (tractor) |
+| bank 5 `CODE_058B5A` (`chrBankB` = ShoeCar) | GAME OVER / continue splash, THANK YOU | letters only (`$42-$5F`, never changed) | pixel comparison natural, natk (forced deaths) |
+| `OpeningChrA/B` index 4 (ShoeCar + SmallFont) | story / chapter text screen | none (text is SmallFont) | pixel comparison natural |
+| ending cutscene (`CODE_058AFD`/`CODE_058B40`) and credits (`CODE_078000`) | ending | no font bank mapped (OldTitle / SmallFont) | pixel comparison `ending` (forced: `openingStage` 8 at tick 1300) |
+| bank 9 `DebugMenuDigitsSetup` | debug menu (not built, `INCLUDE_DEBUG_MENU`) | - | code reading |
+
+Only the bonus-game screen shows replaced tiles outside the HUD. Solution (no RAM change):
+- CHR ROM grows from 128 KB to 256 KB: `header_us.bin` byte 5 `$10` -> `$20`, `config_us` CHR `size = $40000`,
+  `src/chr.asm` appends `$FF` filler up to id `$98`, then `$98` = `Fans_AA.chr`, `$99` = `src/chr/BonusHudFont.chr`
+  (the ORIGINAL font KB with the 13 HUD glyphs in `$40-$4C` = letters J-O, which the bonus screens never show), then
+  `$FF` filler to 256 KB. Ids: `chrBonusHud_A_ID = $98`, `chrBonusHud_B_ID = $99` (`src/defines/chr_ids.inc`);
+  `.assert chrBonusHud_A_ID = chrFans_AA_ID | $80` in `coop.inc`.
+- NMI (bank F, the only writer of MMC3 R0/R1): when `chrBankA` = `chrFans_AA_ID` and `chrBankB` =
+  `chrBonusRoom_A_ID` (or the reverse for R1), the value written to the hardware is ORed with `$80` (=
+  `chrBonusHud_A_ID`). `chrBankA`/`chrBankB` keep the original values: 1P RAM stays identical, so no CHR-id
+  regress rule was needed. Cost: +5 cycles per register per NMI (+12 when the register is `$18`), +24 B bank F.
+- `CoopHudBuild` applies the same test from RAM and then writes the glyphs shifted by `HUD_G_DIGIT0 -
+  HUD_BONUS_DIGIT0` (`$26`): `$66-$72` -> `$40-$4C` (blank `$7F` stays).
+- Result: on all three bonus games the panel shows the original 8x16 digits and the HUD the 8x8 glyphs
+  (`shots/gems_bball_p7b1.png`, `shots/bonus_*`); pixel comparison 0 differences outside the HUD.
+
+### Engine (variant A)
+The original HUD job code (`CODE_099BE7`: countdown `livesCurrentPos` 3 -> 2 -> 1 -> 0, one job per tick, the `$C0`
+deferral shared with the bank-7 column streamer, `mapBuffer`, `mapTargetAdr`, `livesDigits`, `ram_03AA/AB/AE`) runs
+unchanged.
+- `CoopHudBuild` (COOP_CODE2): bank 9 `CODE_099C48` now starts with `JSR CoopHudBuild` before `DEC livesCurrentPos`
+  (+3 B bank 9). Job 3 or 2 -> top row, job 1 -> bottom row, 28 tiles into `hudBuf` (WRAM) from the physical P1's
+  data (`HudPlayerData`: native vars when `currentPlayer` = 0, else `ctxOther_*`; `scoreDigits`), P2 block blank,
+  tile half and bonus shift in a final pass. Records `hudTarget` (row 2 or 3, column 2, the job's own high byte),
+  `hudDummy` (= `mapTargetAdr` of the original job) and `hudStamp` (= `globalTimer`), sets `hudJob`. Keeps X/Y (stack);
+  writes no internal RAM. The block helpers `HudPlayerData`, `HudTop`, `HudBottom` are at the end of bank 9 (their
+  only caller runs with bank 9 mapped; bank E did not have room for all of it).
+- `CoopHudUpload` (COOP_CODE): bank F `CODE_0FE93B` starts with `LDA hudJob / BEQ HudUploadOrig / JMP CoopHudUpload`
+  (+8 B). It clears `hudJob`; if `mapTargetAdr` = `hudDummy` and `globalTimer` = `hudStamp` it uploads the 28 tiles to
+  `hudTarget`, adds `$20` to `mapTargetAdr` (as the original after its first row) and jumps to `CODE_0FE980`
+  (attribute part: `ram_03AE` = 0 for HUD jobs, `ColorBufferToVRAM`, `NMISubRet`); otherwise the original upload runs
+  (a later job of the same tick, or a stale row, never uploads `hudBuf`).
+- Round start: `CODE_059DFB` still draws the 8x16 'X' at column 6; the three countdown jobs that follow overwrite rows
+  2-3 before the palette is uploaded (`CODE_059E96`).
+- WRAM (`COOP_BSS`): `hudJob` 1, `hudTarget` 2, `hudDummy` 2, `hudBuf` 28, `hudLabel` `hudLives` `hudHearts`
+  `hudScoreIdx` `hudCnt` 5, `hudIconY` 1, `hudTmpA` 1, `hudStamp` 1 = 41 B.
+
+### Icon hidden in place (D-7b-4)
+The dragon icon (slot `OSLOT_ICON` = 19, anim `anJrDoll`, `objY` `$17`, set by `CODE_059DFB` / `CODE_0790A5` /
+`CODE_089EF0`) is hidden without changing object RAM: bank F `DrawObjects` starts with `JMP CoopDrawObjects`
+(+3 B; the body is `DrawObjectsBody`). While slot 19 is active with anim `anJrDoll_ID` (lo and hi), `objY+19` is set
+to `HUD_ICON_HIDE_Y` (`$F8`) for the call and put back right after it (A, X, Y and the flags are DrawObjects' own).
+The icon's two OAM entries keep their place, tile, attribute and X; only Y becomes `$F0` (off screen, as the unused
+entries). At every RAM snapshot object 19 is exactly as in the original. (The image `imgJrDoll` could not be changed
+instead: the JrDoll item uses the same animation.) Slot 19 holds only the icon (items use slot 18).
+Visible side effect: the two hidden sprites no longer count toward the 8-sprites-per-scanline limit on scanlines
+16-31 (the HUD rows), so a 9th sprite on those lines can now show (seen once, r20 t2064, x 240-252).
+
+### Regress rules (`tools/perf/perf.py`, owner approval (a); the only exclusions added)
+1. HUD nametable rule: a nametable byte at dump offset `o` (either 1 KB nametable, `o & $3FF`) is ignored iff its row
+   `(o & $3FF) >> 5` is 2 or 3 and its column `o & 31` is 2..29 (offsets `$042-$05D`, `$062-$07D`, `$442-$45D`,
+   `$462-$47D`), both values have the same bit 7, the original value `& $7F` is in `HUD_NT_TILES` = {`$5C`, `$5D`,
+   `$66-$7F`}, and the new value `& $7F` is in `HUD_NT_TILES`, or in `HUD_BONUS_GLYPHS` = `$40-$4C` only if in the
+   new run's RAM of that tick or the tick before the cell's half register (`chrBankA` for bit 7 = 0, `chrBankB` for 1)
+   is `$18` and the other one `$3A` (the NMI remap condition).
+2. HUD icon OAM rule: an `OAMBuffer` entry (`$0200 + 4e`, 4 bytes) is ignored iff in BOTH runs it was last written by
+   `DrawObjects` while it drew object slot 19 (new harness option `icon_trace`: exec hooks on `CODE_0FEF43` /
+   `CODE_0FEFF5`, where scratch4 = the slot, cleared at `DrawObjects`/`DrawObjectsBody`/`CODE_0FF064`/`CODE_0FF079`/
+   the full exits; every OAMBuffer write marks its entry; `<scen>.icon` per tick), its tile, attribute and X bytes
+   are equal and the new Y is >= `$EF`.
+Nothing else: no attribute, palette or RAM exclusion (the NMI remap keeps `chrBankA/B` original, so no CHR-id rule).
+`regress --reuse-base` re-runs a base scenario whose `.icon` file is missing; base dumps are unchanged by the trace
+(cmp of `base/r01.dump` before/after).
+
+### Space and cost
+| segment | before (r2) | after |
+|---------|-------------|-------|
+| COOP_CODE | 130 | 8 |
+| COOP_CODE2 | 294 | 165 |
+| bank 9 | 182 | 42 (36 with `COOP_SWAPTEST`) |
+| bank F | 215 | 180 |
+| bank 5 | 356 | 356 (353 with `COOP_FORCE`) |
+| CHR ROM | 128 KB | 256 KB (2 KB used in the new half) |
+
+`perf.py stats p7b1 --vs r2` (1P, play ticks): total play-mean +1617 cycles (+0.81 %), per scenario +88 .. +162 cycles (+0.65 % .. +1.14 %), lag +0 .. +8 NMIs. Per tick: the icon hide ~75 cycles while the icon is
+active (profile r70: `CoopDrawObjects` 52 cycles/tick averaged over all ticks), the NMI remap ~10-24, HUD jobs (~1 %
+of ticks, ~800 cycles build + ~430 NMI upload each) ~10. Trimming the icon hide is left to the perf phase (owner).
+
+### Verification
+1. Builds: `p7b1`, `p7b1f --define COOP_FORCE`, `p7b1t --define COOP_SWAPTEST` assemble (ROM 393232 B).
+2. `perf.py regress base p7b1 --reuse-base`: REGRESSION PASS 12/12. Ignored per scenario (HUD nametable bytes /
+   hidden icon OAM entries, summed over ticks):
+
+   | scenario | result | HUD NT bytes | icon OAM entries |
+   |----------|--------|--------------|------------------|
+   | natural | PASS | 144585 | 7180 |
+   | r01 | PASS | 61550 | 4210 |
+   | r08 | PASS | 61941 | 4210 |
+   | r17 | PASS | 62742 | 4210 |
+   | r20 | PASS | 63649 | 4260 |
+   | r33 | PASS | 62554 | 4202 |
+   | r40 | PASS | 63484 | 4268 |
+   | r50 | PASS | 62183 | 4198 |
+   | r64 | PASS | 62081 | 4210 |
+   | r69 | PASS | 61883 | 4210 |
+   | r70 | PASS | 64549 | 4334 |
+   | camp03 | PASS | 152127 | 10210 |
+
+   Extra scenarios (`tmp/coop_scripts/p7b1/regress_extra.py`, same `compare_runs`; secret-door pokes through
+   `CFG.pokes`: `roundFlags` = `$20`, `currentRound` = 2, `bonusGameProgress` = 1/3/4 at tick 1300): r34 (fan round)
+   PASS 62201 / 4202, vball PASS 60070 / 3802, gems PASS 60070 / 3802, bball PASS 60070 / 3802.
+3. Negative builds (`tmp/coop_scripts/p7b1/negbuilds.py`, sources patched temporarily and restored):
+
+   | build | change | scenarios | result |
+   |-------|--------|-----------|--------|
+   | `neg_row4` | one HUD-class tile (blank) written to row 4, column 2 after each HUD upload | r01, r20 | FAIL (NT `$2482`: `70` vs `FF`) |
+   | `neg_tile` | 'P' glyph = `$01` (non-HUD tile in a HUD cell) | r01, r20 | FAIL (NT `$2445`: `FF` vs `81`) |
+   | `neg_col` | top row starts at column 0 (wall columns) | r01, r20 | FAIL (NT `$2440/41`) |
+   | `neg_digit` | lives units digit + 1 | r01, r20 | PASS (tile-class rule); `hudcheck.py`: 17 job errors, FAIL |
+   | `neg_iconx` | icon hidden by moving X instead of Y | r01, r20 | FAIL (OAM X bytes) |
+   | `neg_iconslot` | slot 0 (player) hidden instead of the icon | r01, r20 | FAIL (OAM Y bytes, not icon entries) |
+   | `neg_bonus_always` | bonus glyph shift applied on every screen | r01, r20, vball | FAIL (NT `$2444..`: `C1` etc. outside the bonus screen) |
+   | `neg_bonus_off` | bonus glyph shift `$25` ('P' -> `$4D`) | vball | FAIL (NT `$2045`: `7F` vs `4D`) |
+   | `neg_bonus_ram` | bonus bank selected through RAM (`chrBankA` = `$98`) instead of the NMI remap | vball | FAIL (RAM `$004B chrBankA`: `18` vs `98`) |
+
+4. HUD checker `tmp/coop_scripts/p7b1/hudcheck.py`: every HUD job's 28-tile row is computed independently in Lua from
+   the game's values at the job (physical P1, lives cap 99, hearts cap 5, score digits, tile half, bonus shift) and
+   compared tile for tile with the nametable after the upload (PPU address space); on every idle tick (no job pending)
+   both rows are decoded (well-formed cells, no non-HUD tile, P2 block blank) and compared with the game's lives /
+   hearts / score; a stale value counts as an error unless the original build's HUD shows the same stale value at
+   that tick ("inherited": 1-tick score lags of the original).
+   | scenario | jobs | job errors | idle ticks checked | cell errors | stale | inherited |
+   |----------|------|------------|--------------------|-------------|-------|-----------|
+   | natural | 19 | 0 | 4817 | 0 | 0 | 6 |
+   | r01 | 27 | 0 | 2084 | 0 | 0 | 3 |
+   | r08 | 25 | 0 | 2084 | 0 | 0 | 1 |
+   | r17 | 27 | 0 | 2084 | 0 | 0 | 3 |
+   | r20 | 17 | 0 | 2116 | 0 | 0 | 0 |
+   | r33 | 11 | 0 | 2094 | 0 | 0 | 1 |
+   | r40 | 42 | 0 | 2095 | 0 | 0 | 0 |
+   | r50 | 59 | 0 | 2043 | 0 | 0 | 0 |
+   | r64 | 47 | 0 | 2063 | 0 | 0 | 2 |
+   | r69 | 17 | 0 | 1906 | 0 | 0 | 2 |
+   | r70 | 25 | 0 | 2142 | 0 | 0 | 0 |
+   | camp03 | 87 | 0 | 5021 | 0 | 0 | 0 |
+   | vball | 20 | 0 | 1993 | 0 | 0 | 0 |
+   | gems | 20 | 0 | 1993 | 0 | 0 | 0 |
+   | bball | 20 | 0 | 1993 | 0 | 0 | 0 |
+   | r34 | 5 | 0 | 2101 | 0 | 0 | 2 |
+
+   Total: 0 errors (HUDCHECK PASS) on the 12 regress scenarios and the bonus games; `neg_digit`: FAIL (17 job errors).
+5. Co-op: `tmp/coop_scripts/r2/r2verify.py p7b1` on all 15 runs (c01 c05 c17 c20 c22 c50 c64, d13 d04 d25, o1 o2 o3
+   o4 o6): violations p5 0, p6 0, p6b 0, p7 0, every event counter identical to `final_r2`. `menutest.py p7b1 p7b1f`:
+   PASS a-f. The co-op HUD shows physical P1's data on the left and a blank P2 block (expected in 7b-1).
+6. Pixel comparison `tmp/coop_scripts/p7b1/pixcmp.py` (original `base` vs `p7b1`, same input and ticks): every 4th
+   tick the frame rendered right after the next tick's NMI (identical game state in both builds whatever their lag) is
+   hashed with the HUD cells of both nametables (scroll geometry) plus the band y 16-31 x 16-239 and a 19x19 box at
+   the icon object masked; differing samples are re-run with raw frame dumps and classified.
+
+   | scenario | screens (`nmiBankedSub`) | samples | differing |
+   |----------|--------------------------|---------|-----------|
+   | natural (6000) | Taito logo, intro, title + menu, story text, round intro, rounds 1-2, pause, round transition | 1500 | 0 |
+   | natk (6000, forced deaths) | as natural + GAME OVER / continue screens (`CODE_058C9D` 506 samples), continue | 1500 | 0 |
+   | r01 | round 1 | 750 | 0 |
+   | r34 | fan round (bank `$18/$1A/$1C` cycling) | 750 | 0 |
+   | r70 | special round | 750 | 0 |
+   | camp03 (6000) | round 3, camper | 1500 | 0 |
+   | vball / gems / bball | the three bonus games (~415 bonus-screen samples each) | 750 each | 0 |
+   | ending (5200) | forced ending: cutscene (`CODE_058B40` 474), credits (`CODE_078000` 456) | 1300 | 0 |
+   | r20 (IRQ 5, wide) | round 20 | 750 | 22: 21 split-line, 1 sprite-limit (t2064) |
+   | r33 (IRQ 1, shoe car) | round 33 | 750 | 37: all split-line |
+   | r40 (IRQ 3, boss) | round 40 | 750 | 2: lag/timing (same in the R2 control) |
+   | r50 (IRQ 1, tractor) | round 50 | 750 | 67: all split-line |
+
+   Differences seen, all explained:
+   - split-line: 1-2 scanlines at the IRQ split (r20 y 32, r33 y 207, r50 y 208): the raster split's exact pixel
+     depends on CPU timing. The control run `pixcmp.py r2` (R2 build: original HUD, only timing differs) shows the
+     same class: r20 31, r33 36, r50 53 samples.
+   - r40 t2264 / t2268, 21347 / 21343 pixels below the split: identical ticks and counts in the R2 control; `regress`
+     shows the lag pattern diverging at tick 2264 in r40 (timing).
+   - r20 t2064, 50 pixels at x 240-252, y 25-31 (+5 split-line pixels): a sprite on the HUD scanlines that the
+     original drops (8-sprites-per-line limit; 11 sprites on line 30 including the icon's 2) is shown now that the
+     icon is hidden (OAM dumps of both runs). Not seen in the R2 control.
+7. Font-KB usage probe (`probe_font.py`, `--full` = tiles `$40-$7D`; visible nametable, palette not black):
+   original build: Fans bank outside the HUD only in the bonus panel (`$6A-$7D`), ShoeCar only the GAME OVER /
+   THANK YOU letters; sprite CHR registers never hold a font-KB id.
+8. Screenshots `tmp/coop_scripts/p7b1/shots/`: `r01_hud_t01200.png`, `r20_hud_t02500.png`, `rounds_p7b1.png`
+   (r33 shoe car, r40 boss, r50 tractor, r70, co-op c01 and c20, natural round 1 and round 2 = NT0 half),
+   `gems_bball_p7b1.png` + `bonus_p7b1_t01800.png` / `bonus_base_t01800.png` (bonus games, panel correct),
+   `go_natural_p7b1_sheet.png` (Taito, title, menu, story, round intro, round 1 with deaths, GAME OVER / continue,
+   THANK YOU), `font_cnat_r2_vs_p7b1.png` (round 1 -> 2 transition, NT0 HUD). HUD correct, icon gone, no stray tiles.
+
+### Deviations from the plan
+- The plan's "only the HUD uses the font-KB digits/heart" was wrong (bonus-game panel): D-7b-11 (CHR 256 KB, NMI-time
+  CHR remap, bonus glyph slots `$40-$4C`, the regress rule's bonus clause).
+- The block helpers are in bank 9, not bank E (space). The engine is about 350 B, not ~200 B.
+- `CoopHudUpload` also checks `hudStamp` (row queued in the previous tick), not only `hudDummy`.
+- The icon is hidden by a temporary `objY` around `DrawObjects` (object RAM identical at every snapshot), not by a
+  change in its draw.
+- Scripts are in `tmp/coop_scripts/p7b1/` (the plan said `p7b/`).
+
+### For 7b-2
+- P2 block: in `CoopHudBuild` after the P1 block, `LDX #HUD_BLOCK / LDA #1 / JSR HudPlayerData` and `HudTop` /
+  `HudBottom` when `coopMode` (the bank-9 helpers already read either physical player).
+- Space left: COOP_CODE 8 B, COOP_CODE2 165 B, bank 9 42 B, bank F 180 B.
+- `hudcheck.py` reads physical P1 data; extend its expected rows / decoder to the P2 block.
+- The regress HUD rule already covers columns 16-29.
