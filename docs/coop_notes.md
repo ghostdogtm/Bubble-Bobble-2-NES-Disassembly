@@ -2027,3 +2027,158 @@ of ticks, ~800 cycles build + ~430 NMI upload each) ~10. Trimming the icon hide 
 - Space left: COOP_CODE 8 B, COOP_CODE2 165 B, bank 9 42 B, bank F 180 B.
 - `hudcheck.py` reads physical P1 data; extend its expected rows / decoder to the P2 block.
 - The regress HUD rule already covers columns 16-29.
+
+## Phase 7b-2: co-op HUD, lone-P2 colour
+
+Code commit `85439b5`. Plan: `tmp/bb2_phase7b_plan.md` (7b-2, H3/H4) and the owner decisions at its end (decision A on
+the lone-P2 colour, D-7b-2/3/4). 1P is unchanged: RAM, nametables and palette are identical to 7b-1 at every tick
+(see below).
+
+### Co-op HUD
+- `CoopHudBuild` (COOP_CODE2) now picks the row first (`hudTarget`: job 3/2 top, job 1 bottom). It then builds physical
+  P1's block (`LDX #0 / TXA / JSR HudBlock`) and, when `coopMode` != 0, physical P2's block (`LDX #HUD_BLOCK / LDA #1 /
+  JSR HudBlock`). In 1P the P2 block stays blank (unchanged).
+- New bank-9 helper `HudBlock` (A = physical player, X = block offset): calls `HudPlayerData`, then falls into `HudTop`
+  or branches to `HudBottom` by `hudTarget`.
+- `HudPlayerData` already reads the physical player:
+  - the native variables when he is `currentPlayer` (= `coopResident ^ coopRoles`; the HUD job never runs inside the
+    P2 window), else `ctxOther_*`;
+  - the score set `scoreDigits` / `scoreDigitsP2` (`+HUD_TOTAL_DIGITS`) by physical id.
+
+  So the blocks do not move at a role exchange. After P1 is out, the left block shows physical P1 from `ctxOther` and
+  the right block shows the resident P2.
+- Out rule (plan H3, co-op only): a player with 0 lives (out, or dying on his last life) shows `00` and no hearts.
+  - `HudPlayerData` now loads the hearts first and the lives last (Z = lives 0), then runs `BNE / LDA coopMode / BEQ /
+    LDY #0`.
+  - The rule needs code because an out player keeps `playerHearts` = 1: `CODE_0596B4` resets it at the end of every
+    death.
+- Label "2P" = `HUD_G_DIGIT0+2` (already in `HudPlayerData`). The bonus-game glyph shift and the tile half apply to the
+  whole 28-tile row as before, so the P2 block gets them too.
+
+### Redraw design: no protocol change
+`livesCurrentPos` is not in `COOP_CTX_SCALARS`: it is shared and never swapped. So every setter marks the one shared HUD
+as dirty, whichever player is resident:
+
+| event | setter |
+|-------|--------|
+| P2's deaths, respawns, hurt | bank 5, run in the P2 window |
+| hearts | `CollectHeart` (in the item swap), `ProjOp_Heart` |
+| scores | `CoopAddScoreAs` -> `AddScore` (`|= 1`), scores made in the P2 window |
+| extra lives | `CoopExtraLifeOther` -> `CODE_099D91` (`= 3`) |
+| role exchange | `CoopResidentOut` (`|= 3`) |
+| continue, round start | HUD init (`= 3`) |
+
+Every job redraws its whole row for both players, so it does not matter who requested it.
+
+The countdown is unchanged in 1P and co-op: 3 -> 2 -> 1 -> 0, one job per tick, with the `$C0` deferral of the bank-7
+column streamer `CODE_07874B`. No setter was added and nothing re-arms the countdown.
+
+The only co-op effect on the streamer is the one 7a already had: P2's events request HUD jobs, which hold the streamer
+(as P1's do) while `livesCurrentPos & $3F` != 0. Round 20 (`c20`, `o4`: 59 jobs, 8 deaths) shows a max lag of 2.
+
+Note (original behaviour, unchanged): `ProjOp_Heart` (`= 2`) and `CODE_099D91` (`= 3`) store instead of OR. If one of
+them hits a streamer sequence in round 20, it clears the streamer's `$C0` bits. This can now also happen for P2's extra
+life or heart projectile. Not changed: it is 1P code and does the same for P1 as the original.
+
+### Lone-P2 colour (owner decision A)
+The per-player sprite colour (sprite palette 0 colour 3, `colorBuffer+COL_SPR+3`) is loaded by `currentPlayer` in three
+places. Each `LDX currentPlayer` became `LDX #$00` (-1 B each, no bank-E code):
+
+| site | bank | when | note |
+|------|------|------|------|
+| `CODE_0880C8` (`PlayerSpecificColor`) | 8 | every round setup, incl. the round restart after a continue | the 7a case: after a role exchange `currentPlayer` = 1 loaded `$21` |
+| `CODE_078FD0` (`DATA_079001`) | 7 | bonus game setup | X is reloaded by `CODE_079204` right after |
+| ending palette (`DATA_058B3E`, `CODE_058AFD` path) | 5 | ending cutscene | jump-table entry, X unused after |
+
+In 1P `currentPlayer` is always 0 (its only 1P writer is `CODE_0582BE`, which stores 0), so the 1P value is the same.
+
+Not changed: `GameOverPlayerColors` (`CODE_058C2E`). The game-over screen stays as today, and the roles are put back
+before it anyway.
+
+Other places checked:
+- respawns do not touch the palette (in-place `CODE_0595E3`);
+- `SetRoundPalette` copies only `colorBuffer+0..$10`;
+- the item palettes (`BigRewardPalettes`) write `COL_SPR+4..`;
+- the HUD icon is hidden (7b-1).
+
+Visible side effect: the potion item, and anything else drawn with sprite palette 0, also keeps P1's green after a role
+exchange (as in 1P).
+
+### Space
+| segment | 7b-1 | 7b-2 |
+|---------|------|------|
+| bank 5 | 356 | 357 (354 with `COOP_FORCE`) |
+| bank 7 | 28 | 29 |
+| bank 8 | 15 | 16 |
+| bank 9 | 42 | 23 (17 with `COOP_SWAPTEST`): out rule +9, `HudBlock` +10 |
+| COOP_CODE | 8 | 8 |
+| COOP_CODE2 | 165 | 164 |
+| bank F | 180 | 180 |
+
+### Verification
+Build `p7b2`. `p7b2f --define COOP_FORCE` and `p7b2t --define COOP_SWAPTEST` also assemble.
+
+1. Regress and 1P identity.
+   - `perf.py regress base p7b2 --reuse-base`: REGRESSION PASS 12/12. The HUD-rule counts are identical to 7b-1
+     (natural 144585 / 7180 ... camp03 152127 / 10210).
+   - Direct dump comparison `p7b1` vs `p7b2` (`tmp/coop_scripts/p7b2/dumpcmp.py`, no HUD rule), all 12 scenarios: 0
+     nametable, 0 palette and 0 other-RAM differences, and an identical lag pattern. The only differences are stack
+     bytes, pointer words (return addresses and code pointers moved by the -1 B in banks 5/7/8) and a few scratch
+     bytes.
+   - `perf.py stats p7b2 --vs p7b1`: every 1P scenario +0 play cycles, lag +0 (total +2 cycles).
+2. `tmp/coop_scripts/p7b2/hudcheck.py` (p7b1's checker, extended):
+   - the job check computes both blocks from the physical players (co-op), or P1 plus a blank block (1P);
+   - the idle check decodes both blocks and compares each with its physical player (lives, hearts with the out rule,
+     score);
+   - an idle tick now also needs that no job was queued in that tick (7b-1 counted those 1-tick score lags as
+     "inherited");
+   - Lua writes to the HUD values (harness top-ups, r2verify test options) are tracked by wrapping `emu.write` and
+     counted as "harness";
+   - for each player and field, the lag is measured: tick ends from the first mismatch to the first match.
+
+   Results (`hudcheck_p7b2.txt`): 0 job errors, 0 cell errors and 0 stale values on every run.
+
+   | set | runs | jobs | max lag | notes |
+   |-----|------|------|---------|-------|
+   | co-op | c01 c05 c17 c20 c22 c50 c64 c40 c70 cvball (co-op volleyball bonus game) | 513 | 2 | P2 block decoded on every idle tick (20580) |
+   | r2verify runs, with its test options | d13 d04 d25 o1 o2 o3 o4 o6 | 535 | 3 | see below |
+   | 1P | the 12 regress scenarios + vball gems bball r34 | | 3 (r08) | P2 block blank, 0 inherited |
+
+   In the r2verify runs:
+   - the two lag-3 cases (o1 t3919, o3 t4941) are a score change behind a running lives countdown;
+   - o1 has 200 "harness" ticks: the `top2` option writes P2's lives at t5300 without a job, as the harness does;
+   - 108 P2-side changes were displayed.
+
+   The checker caught one bug during the work, fixed before the commit. The first out-rule version tested the hearts'
+   Z flag instead of the lives' (job errors in o1/o2/o3/o6).
+3. `r2verify.py p7b2` (15 runs): violations p5 0, p6 0, p6b 0, p7 0, every rc 0. Without the log lines, the output is
+   identical to `p7b1`: all event counters are equal, so the games are the same.
+4. Colour probe `tmp/coop_scripts/p7b2/colorprobe.py`: r2verify's Lua, plus a log of the three colour loaders and of
+   the PPU palette `$3F13` at every play tick end. Runs o1 o2 o3 o6:
+   - `p7b2`: every write is `$2A`. This includes the round setups after a role exchange with `currentPlayer` 1 (o1
+     round 2 t4589, o6 round 40 t2699) and the two continues (o2 t4903, o3 t2907). `$3F13` = `$2A` on all 13238 play
+     ticks (P2 alone: o1 3822, o3 164, o6 1774).
+   - `p7b1`: the same two round setups wrote `$21`; P2 alone was blue on 2148 (o1) and 975 (o6) ticks.
+5. `menutest.py p7b2 p7b2f`: PASS a-f. `pixcmp.py p7b2` (natural, r01, vball): 0 differing samples.
+6. Co-op cost (`stats p7b2 --scen <7> --vs p7b1`): +2 .. +13 play cycles per tick (+0.01 .. +0.05 %), total +43
+   (+0.02 %). A job with both blocks costs ~300 cycles more, and jobs run on ~1-3 % of the ticks.
+7. Screenshots in `tmp/coop_scripts/p7b2/shots/`:
+   - `p7b2_sheet1.png`: c01 round 1, c20 round 20, c40 boss, co-op volleyball bonus game with the original panel;
+   - `p7b2_sheet2.png`: o2 P2 out ("2P x00", no hearts); o1 after the role exchange ("1P x00" with P1's score, "2P
+     x02" with P2's); o2 and o3 after a continue (both x03);
+   - `r40_lone_p2_before_after.png` (o6 t3000): in 7b-1 the lone P2 is blue and the out P1 shows a heart; in 7b-2 P2
+     is green, "1P x00" has no hearts, and P2's block is filled.
+
+   Checked by eye: blocks in place, values as in the game, no stray tiles.
+
+### Deviations from the plan
+- The plan's out-player rule needed a code change (hearts are 1 for an out player); applied in co-op only.
+- Colour: three `LDX #$00` edits instead of co-op code in bank E (same 1P value, no space cost). The bonus-game and
+  ending loaders are included (decision A says "always").
+- No `livesCurrentPos` setter was added (plan task 2: none was missing).
+
+### For 7b-3
+- Space: COOP_CODE 8, COOP_CODE2 164, bank 9 23, bank 5 357, bank 7 29, bank 8 16, bank B 26, bank F 180.
+- `hudcheck.py --scen coop|r2|1p` can check the team-bonus scores in both blocks once `CoopAddScoreTeam` exists.
+- The colour probe also hooks the bank-7 bonus loader and the ending loader, but no run reached them after a role
+  exchange.
