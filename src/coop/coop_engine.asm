@@ -1439,3 +1439,46 @@ CoopDrawObjects:
 	RTS
 @plain:
 	JMP DrawObjectsBody
+
+; =============================================================================================
+; Phase 7b-3: either pad continues, team bonuses (COOP_CODE2).
+; =============================================================================================
+.segment "COOP_CODE2"
+
+; CoopPadsPressed (bank 5, game-over / continue screen CODE_058C9D and CODE_058CB3; replaces LDA pressedP1): A =
+; pressedP1, or pressedP1 | pressedP2 in co-op (either player may continue). X/Y kept; the caller ANDs next.
+CoopPadsPressed:
+	LDA coopMode
+	BEQ :+
+	LDA pressedP2
+:	ORA pressedP1
+	RTS
+
+; CoopAddScoreTeam (replaces JSR AddScore at the three team-bonus sites: boss defeated, bank 8 CODE_08928E; round-clear
+; bonus, bank B CODE_0B82D0; boss bonus-game prize BONUS 100000, bank 7 CODE_079C10): in co-op every player who is not
+; out gets the full award (the resident via AddScore for currentPlayer, the other one via CoopAddScoreAs; each one's
+; extra-life accumulator counts it). "Not out" = the other player's lives byte (ctxOther_playerLives, whichever
+; physical player that is) is non-zero: it also covers the bonus game, where P2 is not spawned (coopP2Active = 0) but
+; still in the game. 1P (coopMode 0) and a game with the other player out: plain AddScore. Clobbers A/X/Y; the stack
+; use is that of AddScore (the caller's return address is the only extra frame).
+CoopAddScoreTeam:
+	LDA coopMode
+	BEQ @one
+	LDA ctxOther_playerLives
+	BEQ @one
+	LDX #SCORE_TOTAL_DIGITS-1
+:	LDA scoreAdditionDigits,X
+	STA coopTeamDigits,X
+	DEX
+	BPL :-
+	JSR AddScore					;the resident (currentPlayer); clears scoreAdditionDigits
+	LDX #SCORE_TOTAL_DIGITS-1
+:	LDA coopTeamDigits,X
+	STA scoreAdditionDigits,X
+	DEX
+	BPL :-
+	LDA currentPlayer				;and the other player
+	EOR #$01
+	JMP CoopAddScoreAs
+@one:
+	JMP AddScore

@@ -77,3 +77,6 @@ hudCnt:         .res 1          ; temporary (digit loop; then the tile half $00/
 hudIconY:       .res 1          ; CoopDrawObjects: objY of the HUD icon, put back after DrawObjects
 hudTmpA:        .res 1          ; CoopDrawObjects: DrawObjects' A; CoopHudBuild: glyph shift (bonus screen)
 hudStamp:       .res 1          ; globalTimer of the tick that queued hudBuf: a row is uploaded only in the next full NMI
+
+; Phase 7b-3: team bonus.
+coopTeamDigits: .res SCORE_TOTAL_DIGITS ; CoopAddScoreTeam: scoreAdditionDigits kept for the second player's award

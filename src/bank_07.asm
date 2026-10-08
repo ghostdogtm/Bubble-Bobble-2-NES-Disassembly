@@ -4195,7 +4195,7 @@ CODE_079C05:
 CODE_079C10:
 	LDA #$01					;C - - - - - 0x00FC20 03:9C10: A9 01
 	STA scoreAdditionDigits+1				;C - - - - - 0x00FC22 03:9C12: 8D A2 04
-	JSR AddScore				;C - - - - - 0x00FC25 03:9C15: 20 C7 FE
+	JSR CoopAddScoreTeam		;(co-op 7b-3) team bonus: every player who is not out (was JSR AddScore)
 	LDX #BONUS_ANNOUNCE_100000					;C - - - - - 0x00FC28 03:9C18: A2 0A
 CODE_079C1A:
 	JSR DisplayBonusGameText				;C - - - - - 0x00FC2A 03:9C1A: 20 C4 9C

@@ -1935,7 +1935,7 @@ GameOverPlayerColors:
 CODE_058C9D:
 	LDA continues				;C - - - - - 0x00ACAD 02:8C9D: A5 DC
 	BNE CODE_058CAA				;C - - - - - 0x00ACAF 02:8C9F: D0 09
-		LDA pressedP1				;C - - - - - 0x00ACB1 02:8CA1: A5 0E
+		JSR CoopPadsPressed			;(co-op 7b-3) pad 1, or either pad in co-op (was LDA pressedP1)
 		AND #KEY_A|KEY_B|KEY_START|KEY_SELECT	;C - - - - - 0x00ACB3 02:8CA3: 29 0F
 		BNE CODE_058CDB				;(R2) was CODE_058CC3 (alternating-2P hand-over test)
 			JMP CODE_058D84				;C - - - - - 0x00ACB7 02:8CA7: 4C 84 8D
@@ -1946,7 +1946,7 @@ CODE_058CAA:
 		JSR AnimateNonBubbles				;C - - - - - 0x00ACC0 02:8CB0: 20 5C EE
 CODE_058CB3:
 	JSR DrawObjects				;C - - - - - 0x00ACC3 02:8CB3: 20 E2 EE
-	LDA pressedP1				;C - - - - - 0x00ACC6 02:8CB6: A5 0E
+	JSR CoopPadsPressed			;(co-op 7b-3) START on pad 1, or on either pad in co-op (was LDA pressedP1)
 	AND #KEY_START				;C - - - - - 0x00ACC8 02:8CB8: 29 08
 	BNE CODE_058CBF				;C - - - - - 0x00ACCA 02:8CBA: D0 03
 		JMP CODE_058D84				;C - - - - - 0x00ACCC 02:8CBC: 4C 84 8D

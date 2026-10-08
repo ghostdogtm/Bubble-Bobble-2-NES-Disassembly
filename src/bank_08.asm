@@ -2703,7 +2703,7 @@ CODE_08928E:
 	STA scoreAdditionDigits+3				;C - - - - - 0x0112AB 04:929B: 8D A4 04
 	TXA							;C - - - - - 0x0112AE 04:929E: 8A
 	PHA							;C - - - - - 0x0112AF 04:929F: 48
-	JSR AddScore				;C - - - - - 0x0112B0 04:92A0: 20 C7 FE
+	JSR CoopAddScoreTeam		;(co-op 7b-3) team bonus: every player who is not out (was JSR AddScore)
 	PLA							;C - - - - - 0x0112B3 04:92A3: 68
 	TAX							;C - - - - - 0x0112B4 04:92A4: AA
 	JMP CODE_0892CD				;C - - - - - 0x0112B5 04:92A5: 4C CD 92

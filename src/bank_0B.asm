@@ -409,7 +409,7 @@ CODE_0B82B5:
 			BNE CODE_0B82DC				;C - - - - - 0x0162E2 05:82D2: D0 08
 				LDA #$01					;C - - - - - 0x0162E4 05:82D4: A9 01
 				STA scoreAdditionDigits+2				;C - - - - - 0x0162E6 05:82D6: 8D A3 04
-				JSR AddScore				;C - - - - - 0x0162E9 05:82D9: 20 C7 FE
+				JSR CoopAddScoreTeam		;(co-op 7b-3) team bonus: every player who is not out (was JSR AddScore)
 CODE_0B82DC:
 CODE_JP_0B82C0:
 	RTS							;C - - - - - 0x0162EC 05:82DC: 60
