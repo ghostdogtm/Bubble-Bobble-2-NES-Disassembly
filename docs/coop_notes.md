@@ -2182,3 +2182,145 @@ Build `p7b2`. `p7b2f --define COOP_FORCE` and `p7b2t --define COOP_SWAPTEST` als
 - `hudcheck.py --scen coop|r2|1p` can check the team-bonus scores in both blocks once `CoopAddScoreTeam` exists.
 - The colour probe also hooks the bank-7 bonus loader and the ending loader, but no run reached them after a role
   exchange.
+
+## Phase 7b-3: either-pad continue, team bonuses
+
+Code commit `9d90797`. Plan: `tmp/bb2_phase7b_plan.md` (7b-3) and the owner decisions at its end: D-7b-6 (either pad may
+continue in co-op), D-7b-7 (the game-over screen keeps ONE dragon: no two-dragon task), D-7b-8 (every player who is in
+the round gets the FULL team bonus at 3 sites), D-7b-9 (menu line 2 stays "2 PLAYERS": no task). 1P is unchanged: the
+12 regress scenarios pass and the pixel comparison of the game-over / continue screens against the original is
+identical (below). The stash (`stash@{0}`) was only read: `CoopPadsPressed` and `CoopAddScoreTeam` were re-typed by hand
+and differ from it (see "Differences from the stash").
+
+### Game-over / continue screens (bank 5)
+`CODE_058C9D` is the game-over `updateSub`: no continues left (`continues` = 0) -> A, B, START or SELECT of the pad leave
+for the title (`CODE_058CDB`); continues left -> `CODE_058CAA` draws the dragon and `CODE_058CB3` reads START ->
+`CODE_058D1A` (continue). Both pad reads were `LDA pressedP1` (2 B); each is now `JSR CoopPadsPressed` (3 B, +1 B each):
+
+    CoopPadsPressed:  LDA coopMode / BEQ :+ / LDA pressedP2 / :  ORA pressedP1 / RTS      ; 10 B, COOP_CODE2
+
+In 1P (`coopMode` = 0) A = `pressedP1` (the same value and flags the caller needs, `AND #mask` follows); pad 2 is never
+read. In co-op A = `pressedP1 | pressedP2`. The other pad reads of bank 5 (intro `IntroUpdate`, logo wait, title menu,
+ending skip `CODE_05894D`) are not part of the decision and stay pad 1 (for Phase 8: the ending cutscene's START skip
+and the intro cannot be skipped from pad 2).
+There is no separate "THANK YOU" input: the text is the continue screen's second line (`CODE_058D1A` reaction).
+`CODE_058E6A` (end of the ending, back to the title) has no input.
+The continue itself is unchanged (7a: `CoopContinue` restores both players, `CODE_05962D` restarts the round).
+
+### Team bonuses: `CoopAddScoreTeam` (COOP_CODE2, 46 B) replaces `JSR AddScore` at 3 sites (0 B in banks 7/8/B)
+    CoopAddScoreTeam:  coopMode = 0, or ctxOther_playerLives = 0  ->  JMP AddScore (plain, as in the original)
+                       else: save scoreAdditionDigits in coopTeamDigits (7 B WRAM), JSR AddScore (the resident,
+                       currentPlayer; it clears scoreAdditionDigits), restore, CoopAddScoreAs(currentPlayer ^ 1)
+"In the round" is "not out": `ctxOther_playerLives` is the lives byte of the player who is not resident (physical P2, or
+physical P1 after a role exchange), so the rule is the same in both role states and covers a player who is alive but
+not spawned. `coopP2Active` is NOT used: the plan's gate would have denied the bonus-game prize (the bonus game runs
+with P2 inactive, 7a: `CODE_0FE36B` deactivates P2 at every bonus-round start). A player who is dying on his last life
+has 0 lives and gets nothing (the resident gets it anyway: it is `currentPlayer`). Each player's own score digits and
+extra-life accumulator count the award (`AddScore` adds to both); the extra-life check runs at the next `RoundUpdate`
+end (resident: `CODE_099D3B`; the other player: `CoopExtraLifeOther`, which needs `coopP2Active`, so a player who was
+not spawned at the award (bonus game) gets his lives when he is spawned again at the next round start: seen in the
+prize run, P1's 3 lives at t5855, P2's at t6324).
+
+| site | bank, label (original address) | award (digit index, 7 internal digits) | when it fires (from the code) |
+|------|--------------------------------|----------------------------------------|-------------------------------|
+| boss defeat | 8, `CODE_08928E` tail (`$92A0`) | 5 in digit 3 (5000) | `BlueSkullUpdate` state 6 (enemy type `$1D`, tested in round 70): the boss has left the screen; `roundFlags` = 1 |
+| round-clear bonus | B, `CODE_0B82D0` (`$82D9`) | 1 in digit 2 (10000) | every enemy type is 0 and `roundFlags & 8` = 0, and `roundSkelDelay` = 0: only the rounds of `DATA_088542` (10, 20, 30, 40, 50, 60, 70, 79, 80) |
+| boss bonus-game prize | 7, `CODE_079C10` (`$9C15`) | 1 in digit 1 (100000) | `CODE_079BE2` (end of a bonus game) with `POWERUP_BOSS_BONUS` held and `enemyDir+1 < enemyDir`. The bit is set by `CoopBossCandy` (`CODE_088664`) when the NEXT round is 20/40/60/79, i.e. at the clear of rounds 19/39/59/78, and cleared at `CODE_079C1A` |
+
+Plan corrections (follow the code): "boss defeat" is the Blue Skull only (the other bosses die in their own handlers, e.g. Mad Monkey
+sets `RFLAG_BIG_REWARD`; they pay their normal kill scores); the 10000 round-clear bonus exists only in the rounds above,
+not in every round; the boss-bonus bit is set one round before the boss, not at the boss clear.
+`AddScore`'s digit weights: digit 0 = 1,000,000 ... digit 6 = 1 (the HUD shows the 7 digits as they are).
+
+`CODE_0792E8` (bank 7, bonus-game element 0 input): confirmed correct for co-op, no change. The bonus game runs with the
+resident only (P2 inactive); element 0 reads `heldP1/heldP2[currentPlayer]` = the resident's pad: pad 1, or pad 2 after a
+role exchange (`currentPlayer` = 1). `CODE_07930A` (element 1, the other pad) is the unreached dormant two-player bonus
+game (needs `enemyDir+2` != 0); out of scope (Phase 9 idea).
+
+### Space and cost
+| segment | 7b-2 | 7b-3 |
+|---------|------|------|
+| bank 5 | 357 (354 with `COOP_FORCE`) | 355 (352) |
+| bank 7 / 8 / B | 29 / 16 / 26 | 29 / 16 / 26 (the `JSR` is the same size) |
+| bank 9 | 23 (17 with `COOP_SWAPTEST`) | 23 (17) |
+| COOP_CODE / COOP_CODE2 | 8 / 164 | 8 / 108 (`CoopPadsPressed` 10 + `CoopAddScoreTeam` 46) |
+| bank F | 180 | 180 |
+| WRAM | | +7 (`coopTeamDigits`) |
+
+`COOP_FORCE` and `COOP_SWAPTEST` builds assemble.
+Cycles: 1P: `perf.py stats p7b3 --vs p7b2`: every scenario +0 play cycles, lag +0 (the three sites run on a few ticks per
+game; +10 cycles each: `LDA coopMode / BEQ / JMP`); the game-over screen costs +19 cycles per tick for the two reads.
+Co-op: one award with both players ~700 cycles (2 `AddScore` + 2 x 7-byte copy), a few times per game.
+
+### Verification (build `p7b3`)
+1. `regress base p7b3 --reuse-base`: REGRESSION PASS 12/12, the HUD-rule counts and the lag pattern identical to 7b-2.
+   `pixcmp.py p7b3 --scen natk,natural,vball`: PIXCMP PASS, 3750 samples (natk 1500, natural 1500, vball 750), 0 differing; `natk` (forced deaths) contains 506
+   samples of `CODE_058C9D` (game-over / continue screen): 1P pixels identical to the original.
+   `perf.py stats p7b3 --vs p7b2`: total 0 cycles. `menutest.py p7b3 p7b3f`: PASS a-f.
+2. Pad tests `tmp/coop_scripts/p7b3/padtest.py p7b3` (standalone Lua: title keys on pad 1, the players are killed, then
+   ONLY the given pad presses; `pressedP1`/`pressedP2` are logged at `CODE_058D1A` / `CODE_058CDB`). 11 cases PASS:
+   - cA co-op, continues left, pad 2 START only: continue taken (`pressedP1` 00, `pressedP2` 08), `CoopContinue` returns with
+     lives 3/3 and `coopRoles` 0, round 1 in play with both players (`coopP2Active` $80) 200 ticks later;
+   - cBa/cBb/cBs/cBl co-op, no continues, pad 2 A / B / START / SELECT only: each goes to the title (`CODE_058CDB`),
+     `pressedP1` 00;
+   - cC 1P, continues left: pad 2 START for 500 ticks: nothing (still on the screen, `CODE_058D1A` not taken); then pad 1
+     START: continue, lives 3;
+   - cDa/cDs/cDb/cDl 1P, no continues: pad 2 A / START / B / SELECT for 500 ticks: nothing; then pad 1 A: title;
+   - cE co-op, pad 1 START only: continue, both players back (the old behaviour is kept).
+3. `p7b3verify.py` (copy of `r2verify.py`, same checks plus the team model): 22 runs c01 c05 c17 c20 c22 c50 c64, d13 d04
+   d25, o1 o2 o3 o4 o6 and the new b2 b70 b70o b70p b40 o6b o7b: **violations p5 0, p6 0, p6b 0, p7 0**, every rc 0.
+   - The team model: at the `JSR CoopAddScoreTeam` of each site (PRG exec hook) it snapshots both physical players' 7-digit
+     score and extra-life accumulator and, at the return, checks: the resident has exactly +award in both; the other player
+     exactly +award iff `coopMode` and his lives > 0, else nothing; `scoreAdditionDigits` cleared; the same `currentPlayer`.
+   - 14 of the 15 old runs have event counters identical to `r2verify p7b2`; o2 differs only because my `clear` option now
+     fires at the first in-play tick after the given tick (7b-2's silently skipped a tick that was not in play): the old
+     `r2verify.py p7b3 o2` is identical to the 7b-2 run.
+   - The xlife check (accumulator < 30000 at a `RoundUpdate` tick end) now needs 2 consecutive ticks: the tick that installs
+     `RoundUpdate` as the next NMI sub sees a pending accumulator after a bonus-game prize (counted as
+     `info_xlife_pending_first_tick`).
+
+   Team events (counters; the model passed on every one):
+
+   | site | both in the round | other player out | run |
+   |------|-------------------|------------------|-----|
+   | round clear | 2 (b2 round 10: 0->10000 / 0->10000; b40: same) | 2 (o6b: P1 out, P2 +10000; o7b: P2 out, P1 +10000) | b2 b40 o6b o7b |
+   | boss defeat | 1 (b70 t1501: 0->5000 / 0->5000) | 2 (b70o P2 out: P1 +5000, P2 0; b70p P1 out: P2 +5000, P1 0) | b70 b70o b70p |
+   | prize 100000 | 1 (b40 t5673: 10000->110000 for both, P2 not spawned) | 2 (o6b: P2 +100000, P1 0; o7b: P1 +100000, P2 0) | b40 o6b o7b |
+
+   Extra lives from the award: b2 (both accumulators put at 29900 before the clear): both got +1 life (HUD x03 -> x04 on both
+   sides, `hud_roundclear_before_after.png`); the 100000 prize gave P1 3 lives and P2 3 lives in b40, P2 3 lives in o6b
+   (lone P2 after a role exchange), P1 3 lives in o7b.
+   Test aids (Lua writes, no ROM change): `clearr`/`clear` remove every enemy (a round clear), `boss` puts the boss in its
+   defeat state (`objState` 6, `objY` $F8; the real code takes over: `roundFlags`, candy, the 5000 award), `prize` sets the
+   bonus-game result to a win (`enemyDir+1` = 0, `enemyDir` = 1 at `CODE_079C05`) and, if the bit is not held, sets
+   `POWERUP_BOSS_BONUS` at `CODE_079BE2` (b40 starts at round 40, so the bit was never set by the round-39 clear; o6b/o7b
+   have it set naturally by `CoopBossCandy`, which was logged). The natural bonus-game RESULT was not reproduced (random
+   input).
+4. `hudcheck.py` (7b-2's checker; `p7b3/hudcheck.py` imports `p7b3verify` for the r2 set): `--scen coop` (c01 c05 c17 c20
+   c22 c50 c64 c40 c70 cvball) and `--scen r2` (d13 d04 d25 o1 o2 o3 o4 o6 and b2 b70 b70o b70p b40 o6b): **0 job errors, 0
+   cell errors, 0 stale values**, both blocks decoded on every idle tick. Max lag 2-3 ticks; the exception is the
+   100000 prize (b40: 185 ticks): `AddScore` sets `livesCurrentPos`, but the HUD job runs from `RoundUpdate`, which is
+   not running during the bonus-game end, so the new score appears when the next round starts (P1's score behaves the same
+   in the original).
+5. Screenshots `tmp/coop_scripts/p7b3/shots/`: `hud_roundclear_before_after.png` (b2, t940 / t980: both blocks 0000000 ->
+   0010000, x03 -> x04), `hud_bossdefeat_before_after.png` (b70, t1490 / t1540: 0000000 -> 0005000 on both sides),
+   `coop_continue_screen_before_pad2.png` and `coop_continue_after_pad2_start.png` (the continue screen, one dragon, then
+   after pad 2's START: "TO CONTINUE PLAY 4" and the dragon with hearts), `1p_continue_screen.png`.
+
+### Differences from the stash
+- `CoopPadsPressed` is the stash's routine without `.ifdef REGION_JP` (R1), in COOP_CODE2 instead of bank 5 (the bank-5
+  hook is a plain `JSR` into the fixed bank).
+- `CoopAddScoreTeam` gates on `ctxOther_playerLives` instead of `coopP2Active` (bonus game, see above), calls
+  `CoopAddScoreAs` (7a) for the partner, and covers the third site (bank 7).
+- Not taken from the stash: the 3-way menu, the 8x16 `CoopHud`, `CoopResidentOut` colour.
+
+### Deviations from the plan
+- Two-dragon game-over screen and menu text: dropped by D-7b-7 / D-7b-9 (nothing done).
+- `coopP2Active` gate -> `ctxOther_playerLives` gate (above); "boss defeat" and "round clear" fire only in the rounds listed.
+
+### Open items for Phase 8 / 9
+- Intro (`IntroUpdate`), ending skip (`CODE_05894D`) and the title menu read pad 1 only; in co-op the second player cannot
+  skip the ending. Not part of D-7b-6.
+- A bonus-game prize (and any score earned while P2 is not spawned) shows on the HUD only when the next round starts; the
+  other player's extra life from it follows at his next spawn.
+- `CODE_07930A` (dormant two-player bonus game element) still unreached.
