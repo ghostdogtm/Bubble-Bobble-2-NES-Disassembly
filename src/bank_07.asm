@@ -2433,7 +2433,7 @@ CODE_078F90:
 		CPX #$20					;C - - - - - 0x00EFDC 03:8FCC: E0 20
 		BCC CODE_078FC5				;C - - - - - 0x00EFDE 03:8FCE: 90 F5
 	CODE_078FD0:
-		LDX currentPlayer				;C - - - - - 0x00EFE0 03:8FD0: AE 99 04
+		LDX #$00					;(co-op 7b-2) was LDX currentPlayer: bonus game, P2 keeps P1's colour (decision A)
 		LDA DATA_079001,X			;C - - - - - 0x00EFE3 03:8FD3: BD 01 90
 		STA colorBuffer+COL_SPR+3				;C - - - - - 0x00EFE6 03:8FD6: 8D 13 03
 		JSR CODE_079204				;C - - - - - 0x00EFE9 03:8FD9: 20 04 92

@@ -4976,16 +4976,30 @@ HudPlayerData:
 :	STA hudScoreIdx
 	CPY currentPlayer
 	BNE @other
-	LDA playerLives
 	LDY playerHearts
+	LDA playerLives					;(7b-2) lives loaded last: Z = (lives = 0) at @store
 	JMP @store
 @other:
-	LDA ctxOther_playerLives
 	LDY ctxOther_playerHearts
+	LDA ctxOther_playerLives
 @store:
 	STA hudLives
+	BNE @hearts						;(7b-2) co-op: a player with 0 lives (out, or on his last death) shows no hearts
+	LDA coopMode
+	BEQ @hearts
+	LDY #$00
+@hearts:
 	STY hudHearts
 	RTS
+
+; HudBlock: A = physical player (0/1), X = block offset in hudBuf (0 or HUD_BLOCK). Builds that player's block of the
+; row in hudTarget (top: label, lives, hearts; bottom: score). Clobbers A/X/Y.
+HudBlock:
+	JSR HudPlayerData
+	LDA hudTarget
+	CMP #HUD_ROW_TOP
+	BNE HudBottom
+	;fall through
 
 ; HudTop: X = block offset in hudBuf (clobbered). Label, 'x', lives as 2 digits (capped at 99 as RefreshLivesDigits),
 ; up to HUD_MAX_HEARTS hearts.

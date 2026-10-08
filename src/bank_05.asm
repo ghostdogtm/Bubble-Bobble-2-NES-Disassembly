@@ -1702,7 +1702,7 @@ CODE_058AFD:
 	STA colorBuffer+COL_SPR+1				;C - - - - - 0x00AB3C 02:8B2C: 8D 11 03
 	LDA #$30					;C - - - - - 0x00AB3F 02:8B2F: A9 30
 	STA colorBuffer+COL_SPR+2				;C - - - - - 0x00AB41 02:8B31: 8D 12 03
-	LDX currentPlayer				;C - - - - - 0x00AB44 02:8B34: AE 99 04
+	LDX #$00					;(co-op 7b-2) was LDX currentPlayer: ending, P2 keeps P1's colour (decision A)
 	LDA DATA_058B3E,X			;C - - - - - 0x00AB47 02:8B37: BD 3E 8B
 	STA colorBuffer+COL_SPR+3				;C - - - - - 0x00AB4A 02:8B3A: 8D 13 03
 	RTS							;C - - - - - 0x00AB4D 02:8B3D: 60

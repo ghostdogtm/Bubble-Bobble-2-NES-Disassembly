@@ -1292,7 +1292,10 @@ CoopKillScoreEnd:
 ; Player block (14 tiles at hudBuf + b, b = 0 for P1, HUD_BLOCK for P2):
 ;   top:    blank blank label 'P' blank 'x' tens units blank heart x5 (blank where no heart)
 ;   bottom: blank x5, the 7 score digits, blank x2
-; 7b-1: the P2 block is blank; 7b-2 adds P2's data (HudPlayerData already reads either physical player).
+; 1P: the P2 block is blank. Co-op (7b-2): both blocks, each from its PHYSICAL player's data (native variables if he
+; is resident = currentPlayer, else ctxOther_*; his own score digit set), so the blocks stay put after a role exchange.
+; A player with 0 lives shows "00" and no hearts (co-op only). Any player's change sets the shared livesCurrentPos
+; (not part of the swapped context), and every job redraws its row for both players, so the countdown is unchanged.
 ; Space: CoopHudBuild is in COOP_CODE2, CoopHudUpload / CoopDrawObjects in COOP_CODE, the block helpers at the end of
 ; bank 9 (src/bank_09.asm).
 ; =============================================================================================
@@ -1317,22 +1320,21 @@ CoopHudBuild:
 	STA hudDummy
 	LDA globalTimer
 	STA hudStamp
-	LDX #$00						;P1's block
-	TXA
-	JSR HudPlayerData
 	LDA livesCurrentPos				;job: 3 lives, 2 hearts -> top row; 1 score -> bottom row
 	CMP #$02
 	LDA #HUD_ROW_BOTTOM
 	BCC :+
 	LDA #HUD_ROW_TOP
 :	STA hudTarget
-	BCC @bottom
-	JSR HudTop
-	JMP @p2
-@bottom:
-	JSR HudBottom
-@p2:
-	;(7b-2: P2's block at hudBuf + HUD_BLOCK; blank in 7b-1)
+	LDX #$00						;physical P1's block
+	TXA
+	JSR HudBlock
+	LDA coopMode					;(7b-2) co-op: physical P2's block (1P: blank)
+	BEQ @tiles
+	LDX #HUD_BLOCK
+	LDA #$01
+	JSR HudBlock
+@tiles:
 	LDA vNametable					;HUD bank in chrBankB (as DATA_099C54): tiles + $80
 	LSR A
 	LDA #$00

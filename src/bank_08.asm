@@ -111,7 +111,8 @@ CODE_0880C8:
 	LDA #$30					;C - - - - - 0x0100DD 04:80CD: A9 30
 	STA colorBuffer+COL_SPR+2				;C - - - - - 0x0100DF 04:80CF: 8D 12 03
 
-	LDX currentPlayer				;C - - - - - 0x0100E2 04:80D2: AE 99 04
+	LDX #$00					;(co-op 7b-2) was LDX currentPlayer: P2 keeps P1's colour after a role exchange
+								;(owner decision A); 1P: currentPlayer is always 0, so the same value
 	LDA PlayerSpecificColor,X			;C - - - - - 0x0100E5 04:80D5: BD F7 80
 	STA colorBuffer+COL_SPR+3				;C - - - - - 0x0100E8 04:80D8: 8D 13 03
 
