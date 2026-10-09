@@ -2496,3 +2496,135 @@ The owner confirmed this in chat on 2026-10-09. It replaces D1's "no code in WRA
 - The tools/perf change needed for code at `$6xxx` is approved: profile and coverage attribution, plus a guard that
   nothing writes into the code area of WRAM.
 - Done as the first step of Phase 9 ("9.0").
+
+## Phase 9.0: PRG 256 KB, co-op code in WRAM
+
+Code commit `7f8680c`. Task: the owner decision above. Build `p90a` (`p90af` = `COOP_FORCE`, `p90at` = `COOP_SWAPTEST`).
+Scripts: `tmp/coop_scripts/p90/`. 1P is unchanged: regress 12/12, power-on timing cycle-identical.
+
+### Bank-register finding (task a)
+- Static: no `.BANK()` in the source names a bank E/F label. Every literal bank load before an `$8001` write is below
+  `$0E` (the largest is `LDA #$0D` in the IRQ path); the dynamic sources (`prgBankB`, `nmiPrgBankA/B`, `sprPrgBank`,
+  `terrainBank`, `newPrgBank`, `bankedSubBank`, `updateSubBankA`) are filled from `.BANK()` tables or immediates.
+- Dynamic: `p90/banktrace.py` logs every write to `$8000-$9FFF` (select value, register, value, PC) in harness runs.
+  Build p8a, 23 scenarios (12 regress + c01 c05 c17 c20 c22 c50 c64 c40 c70 cnat cgo), and the original ROM (`base`),
+  12 regress scenarios: R6 gets only 5, 7, 8, 9, B; R7 gets only 0, 1, 2, 3, 4, 6, 8, A, C, D. **No value >= $0E reaches
+  R6/R7, and no select byte has bit 6 set (PRG mode 1)**. Results: `p90/banktrace_p8a.txt`, `banktrace_base.txt`.
+- So the game never maps bank E/F (or a wrapped high number) into a switchable window, and nothing needs duplicating.
+  Residual risk: paths no scenario reaches (the ending was not traced). If one ever writes `$0E`/`$0F`, the fix is to fill
+  file banks `$0E`/`$0F` (now free, `$FF`) with copies of E/F.
+
+### Layout (task a)
+- `header_us.bin`: byte 4 `$08` -> `$10` (16 x 16 KB). Now `4E 45 53 1A 10 20 40 08 00 00 07 00 ...`. ROM 524304 bytes
+  = 16 + 256 KB PRG + 256 KB CHR.
+- `config_us`, file order: MEM_0 .. MEM_D (banks 0-D, unchanged), MEM_X0E (2 free banks `$0E-$0F`), MEM_X10 (bank `$10`:
+  co-op code image + CoopBoot), MEM_X11 (13 free banks `$11-$1D`), MEM_E (file bank `$1E`), MEM_F (file bank `$1F`), CHR.
+  The free areas are plain `$FF` fill without a `bank` attribute; split them into per-bank areas when they get used.
+- MEM_E / MEM_F keep `bank = $0E / $0F` (the logical numbers the labels and tools use, e.g. `0F:Begin` in profiles);
+  only their file position changed. Since nothing switches them, the number only matters for a future `.BANK()` of a
+  bank E/F label, which would give `$0E`/`$0F` (wrong as a physical number): do not use `.BANK()` on fixed-bank labels.
+- PRG-RAM: `WRAM` = `$6000-$6FFF` (4 KB data, `COOP_BSS`, 162 B used), `WRAMCODE` = `$7000-$7FFF` (4 KB code,
+  `COOP_WRAM_CODE`, `bank = $10` so the debug file and the tools put its labels in the image bank).
+- `src/prg.asm` needed no change: the new segments are in `src/coop/coop_engine.asm`.
+
+### Boot copy (task b)
+- Begin's power-on delay (`LDY #0 / LDX #0 / 256 x 256 x NOP NOP DEX BNE`, 590851 cycles, NMI and IRQ off, stack set)
+  is replaced by `LDA #.BANK(CoopBoot) / STA newPrgBank / JSR SwapPrgBankB / JSR CoopBoot` (Rule 9 order; 2 bytes less).
+- `CoopBoot` (bank `$10`, `$B000`, segment `COOP_BOOT`, 57 B): `$A001 = $80`, copies all 16 pages `$A000-$AFFF` ->
+  `$7000-$7FFF` (always the whole code area, so the copy time is a constant; the bytes after the image are `$FF` fill),
+  then waits out the rest of the 590851 cycles with two exact loops and 0-6 cycles of padding. The counts are computed by
+  the assembler (`COOP_BOOT_*` in coop_engine.asm) with `.assert`s on ranges, on the page-aligned copy bases and on the
+  routine not crossing a page (branch timing); link-time asserts check the image / run addresses.
+- Measured (`p90/boottime.py`, Mesen cycle counter): the vblank wait is reached at cycle 590885 in base, p8a and p90a;
+  MemInit at 623045 in all three; the first five NMIs at the same cycles as p8a. The WRAM code area equals the image
+  when MemInit starts. The 1P csv lag column is identical to p8a's on every tick of all 12 regress scenarios.
+- PRG-RAM stays enabled: the only `$A001` writes are CoopBoot's and CoopReset's (both `$80`); the harness guard below
+  checks every `$A000-$BFFF` odd-address write in every run. CoopReset's COOP_BSS clear is bounded by the 4 KB data area.
+- `prgBankB` is `$10` between CoopBoot and MemInit (MemInit clears the zero page, then Begin maps bank D as before).
+
+### What moved (task c)
+| routine | from | to | bytes |
+|---------|------|----|-------|
+| `CoopCamera` | bank 5 | `COOP_WRAM_CODE` `$7000` | 149 |
+| `CoopCamWant`, `CoopCamLeash` | bank 5 | `COOP_WRAM_CODE` | 29, 13 |
+| `CoopRuckusWrap` | bank F | `COOP_WRAM_CODE` `$70BF` | 138 |
+| `CoopRunB5` | COOP_CODE2 | removed (no caller) | -13 |
+| `CODE_0788CC_coop` | bank 7 | `JMP CoopCamera` (was LDA/LDX/LDY/JMP CoopRunB5) | -6 |
+| Begin | bank F | CoopBoot call instead of the delay loop | -2 |
+| `CoopBoot` | | bank `$10` `$B000` | +57 |
+
+`COOP_WRAM_CODE` = 329 B. `CoopMoveX` / `CoopRespawnX` stay in bank 5 (`CODE_0594EB` reaches `CoopMoveX` with a branch).
+CoopRuckusWrap moved too: it frees 138 B of the fixed bank F (the scarcest space for hooks); risk is low, because it is
+entered by `JMP` from bank 8 with bank 8 mapped and leaves by `JMP CODE_088857` / `JSR CODE_088AA2` (absolute, bank 8
+still mapped), so nothing depends on where it runs. Its behaviour is unchanged (checker counters identical, below).
+
+### Tool change (task d, owner-approved; `tools/perf/perf.py`, `tools/perf/harness.lua`)
+- `perf.py`: PRG size from the header (`prg_rom()`; was a fixed 128 KB slice in profile / cover). File offsets already
+  came from the dbg file's `ooffs`, so banks E/F at `$3C010` / `$3E010` needed nothing else. `load_prof` adds the PRG-RAM
+  exec counters (`<scen>.wprof`) at the load-image offset of the segment running there (`COOP_WRAM_CODE`), so profile and
+  cover name the routines (`10:CoopCamera`, cover shows `$7000..` addresses). `cover` now uses `load_prof`. `build`
+  prints the free bytes of the WRAM code area. On a failed run `run_scen` prints the csv's last line.
+- `harness.lua`: with `profile` it also writes `emu.getAccessCounters(nesWorkRam, execCount)` to `<scen>.wprof`.
+  New `CFG.wram_guard = {lo, len, img}` (perf.py adds it to every run of a build that has `COOP_WRAM_CODE`, via
+  `scen_extra`, so regress and the co-op checkers built on it get it too): before the first logic tick the area may only
+  be written once in order (the boot copy); at the first tick start the copy must be complete and equal to the image;
+  after that any write into `$7000-$7FFF`, or an `$A001` write other than `$80`, ends the run with a csv line
+  (`WRAM_CODE_WRITE` / `WRAM_CODE_COPY` / `PRG_RAM_A001`, address, value, PC, tick) and exit code 4. The guard is two
+  write callbacks on ranges that the game (normally) never writes, plus one 4 KB compare at tick 0.
+- Base needed no rebuild: the tool reads the old 128 KB ROMs (base, p8a) as before (`regress base p90a --reuse-base`).
+- Checkers: the exec hooks of the verifiers are registered by PRG offset, which never fires for code running in PRG-RAM.
+  `p90/mkverify90.py` generates `p90/p90verify.py` from `p8/p8verify.py` with a PRG-RAM aware `on()` (an offset inside
+  the `COOP_WRAM_CODE` image is hooked at its run address on the CPU bus; counter `w90_hooks`), and with the two bank-F
+  PCs that p6 turns into info (`E0C2`, `E387`, hard-coded for p8a) derived from labels, since Begin is 2 bytes shorter.
+  `p90/hudcheck.py` = `p8/hudcheck.py` importing p90verify. `p8/p8verify.py` itself would run with vacuous camera / Ruckus
+  hooks on p90a; use p90verify from now on (generate later checkers from it).
+
+### Verification (build `p90a`)
+1. Builds `p90a`, `p90af` (`COOP_FORCE`), `p90at` (`COOP_SWAPTEST`) assemble; ROM 524304 bytes.
+2. `regress base p90a --reuse-base`: REGRESSION PASS 12/12, no new exclusion; the lag column equals p8a's on every tick.
+3. `p90/p90verify.py p90a` (the 32 runs of Phase 8): every rc 0, **violations p5 0, p6 0, p6b 0, p7 0, Phase 8 0**; every
+   counter identical to p8a's run (cam_calls 22501, stalls 695, leash blocks 1458, world end 5325, scrolls 506 / 740,
+   falls 5+4 / 14+14, camera moved by a fall 4, bonus completed 7, ...), plus `w90_hooks` 128 (4 hooks x 32 runs).
+4. `p90/hudcheck.py p90a`, sets coop (10), p8 (9), r2 (14), 1p (16): HUDCHECK PASS x4, 0 job / cell / stale errors,
+   max lag 185 (b40, the 7b-3 prize case, as in p8).
+5. `r2/menutest.py p90a p90af`: PASS a-f.
+6. `p7b2/pixcmp.py`: natural 1500 samples 0 differing (vs base and vs p8a). r20 (750): vs base 28 = 27 split-line + t2064
+   (the known sprite-limit area, now with 5 split-line pixels at the same tick); vs p8a 8, all split-line. Nothing outside
+   the known 7b-1 classes.
+7. WRAM-code guard: silent on all runs above. Throwaway builds (not committed): `g90w` (`STA $7FF0` at CODE_0788CC):
+   regress scenario r20 fails "Mesen exit code 4 ['WRAM_CODE_WRITE $7FF0 = $4F pc $88D1 tick 872']", p90verify c20 rc=4,
+   `v_run_failed_rc4 1`; `g90p` (`$A001 = $C0` there): "PRG_RAM_A001 $A001 = $C0 pc $88D3 tick 872"; `g90b` (`STA $7123`
+   in CoopReset): "WRAM_CODE_WRITE $7123 = $80 pc $CF48 tick -1". (`p90/guardtest.txt`)
+8. `perf.py profile p90a --scen c20`: `10:CoopCamera`, `10:CoopCamWant`, `10:CoopCamLeash`, `10:CoopRuckusWrap` by name;
+   `cover p90a CoopCamera` lists `$7000-$7057` with the same exec counts as bank 5 in p8a. `10:CoopBoot` (528388 cycles,
+   once per run, before tick 0) is the power-on delay that `0F:Begin` carried before.
+
+### Cost (`stats p90a --vs p8a`)
+- 1P: -3 .. -10 play cycles per tick (total -71, -0.04 %), lag +0 everywhere (relink effect of the moved bank E/F
+  code; no 1P code path changed).
+- Co-op c01 c05 c17 c22 c50 c64: -6 .. -12 (-0.03 %), lag -2 .. 0. **c20: -147 per tick (-0.87 %), p95 -148, lag +0.**
+  w20n -147 (-0.84 %), w20r -148, w20k -81, w20x -28, w20y -20, w20b -43 (p95 -146 .. -157 everywhere, lag -2 .. 0);
+  bonus runs bn1-bn4 -2 .. -3. Profile c20 (2128 ticks): `SwapPrgBankA` -136192, `RunBankedSub` -123424, `CoopRunB5`
+  -36176: the nested bank call is gone (~140 cycles per co-op tick of round 20). The camera itself is unchanged
+  (exec counts identical; the profile shows `CoopCamera` 79 cycles per tick against 59 in p8a only because p8a's
+  attribution split it at a JSR target of another bank in the same window).
+
+### Free space after the phase
+bank 5 262 (was 71; 259 with `COOP_FORCE`), bank 7 21 (15), bank 8 8, bank 9 23 (17 with `COOP_SWAPTEST`), bank B 26,
+bank F 182 (42), COOP_CODE 8, COOP_CODE2 108 (95), banks 1 572, D 492, 2 231, 6 134 (unchanged).
+PRG-RAM: code area 3767 of 4096 B free; data area 3934 of 4096 B free.
+Bank `$10`: `$A000-$AFFF` is the code image slot (copied whole), `$B039-$BFFF` 4039 B free (in the window only while
+CoopBoot runs; usable for more boot-time code or data). Free banks: `$0E`, `$0F`, `$11-$1D` (15 x 8 KB = 120 KB).
+
+### Deviations
+- "While the game waits for the PPU" is taken as the power-on warm-up delay loop (before the vblank waits): the copy
+  replaces part of it with the same total cycle count (exact timing, independent of the image size). The whole 4 KB
+  area is always copied.
+- MEM_E / MEM_F keep their logical bank numbers `$0E` / `$0F` (see Layout).
+- The checkers needed a PRG-RAM aware copy (`p90verify.py`, `p90/hudcheck.py`); `p8/` scripts are unchanged.
+
+### Open items
+- The ending sequence was not covered by the bank trace (no scenario reaches it in the trace set).
+- Rule for new co-op code: put it in `COOP_WRAM_CODE` (callable from any bank, no switching); keep fixed-bank hooks
+  minimal. Code that writes the area at run time would trip the guard by design (no self-modifying code).
+- Phase 8 open items are unchanged.
