@@ -2324,3 +2324,148 @@ Co-op: one award with both players ~700 cycles (2 `AddScore` + 2 x 7-byte copy),
 - A bonus-game prize (and any score earned while P2 is not spawned) shows on the HUD only when the next round starts; the
   other player's extra life from it follows at his next spawn.
 - `CODE_07930A` (dormant two-player bonus game element) still unreached.
+
+## Phase 8: wide rounds, camera, bonus games
+
+Code commit `d3e0718`. Plan: `tmp/bb2_coop_implementation_plan.md`, Phase 8 (8.1-8.6; 8.6 = owner decision 2026-10-08 on
+bonus games). Build `p8a` (`p8af` = `COOP_FORCE`, `p8at` = `COOP_SWAPTEST`). 1P is unchanged: regress 12/12.
+
+### Which rounds are wide (re-derived)
+- `wideRound` = 1 only in round 20: `CODE_0882xx` (round setup, `CPY #20`) and `CODE_0FE5F0` (map `mapRound20B`); every
+  other round setup and the bonus room store 0.
+- The camera `CODE_0788CC` is installed only by `CODE_078216`, entry `$0D` of `DATA_0781DE`, and `DATA_0ABF39` has `$0D` only
+  at round 20. IRQ effect 5 (`IRQRoundsParams` effect 4, +1) is round 20 only.
+- `wideScrollDir` consumers: `CODE_0594EB` (player X step), `CODE_0FFD89` (object shifter, round 20 only), Ruckus
+  (`CODE_08891D`, `CODE_08896E`), `ProjOp_WideScroll` (unreached). Writers: `CODE_0788CC`/`WideScrollLeft/Right`,
+  `CODE_08812A` and `CODE_079CBD` (0).
+- The other `wideHScroll` users are IRQ parallax arrays (`wideHScroll,Y` per split: rounds 8, 13, 17, 28, 33, 38, 43, 48,
+  50, 57, 60, 72) and the round-50 missile tractor (`CODE_078462`); none of them moves objects or players. So 8.4 has
+  nothing to patch. Found in passing: the tractor's reaction to the player (`CODE_078549`: turns / fires when the player
+  stands on the floor near it) reads slot 0 only, i.e. P1 (row 58 of the 6a table called it "opening"). Phase 9 item.
+
+### Design
+Every co-op path runs only while `coopP2Active` (both players in the round). 1P, and a game where one player is out
+(role exchange or P2 out), keep the original code byte for byte in behaviour.
+
+**Camera (8.1, 8.2).** `CODE_0788CC` (bank 7, every RoundUpdate tick of round 20, before P1's update, P1 resident) jumps
+through `CoopRunB5` (COOP_CODE2: a nested `RunBankedSub`, which keeps the outer return bank on the stack) to
+`CoopCamera` in bank 5:
+- each player pushes by the 1P rule (`playerHeld` of his last update: LEFT, or LEFT+RIGHT, at X < 80 pushes left; RIGHT
+  at X >= 176 pushes right); a dying player (state 3) does not push (`CoopCamWant`);
+- opposite pushes: no scroll (the camera stalls, no jitter);
+- leash: the scroll is made only if every player who does not push stays within the screen edges after it
+  (`COOP_EDGE_L` 16 .. `COOP_EDGE_R` 240; `CoopCamLeash` tests X >= 18 / X <= 238);
+- world ends as in 1P (`wideHScroll` 1 / 255, odd, step 2);
+- the pusher holds still on screen, as P1 does in 1P (`coopCamHold` bit = `coopResident` at his update, read by
+  `CoopMoveX`); the other player moves with the world by exactly 2 px in the same tick (his world X stays constant).
+**Screen edges.** `CODE_0594EB` (bank 5, X step of every player update) -> `CoopMoveX`: in round 20 a step that would end
+past 16 / 240 is not taken (moving away from an edge always is). With the leash this keeps both players on screen; two
+players pulling apart end up at the two edges (max separation 224 px) with the camera still.
+**Shifter (8.3).** `CODE_0FFD89` (even tick) skips slot `OSLOT_P2` entirely while P2 is in the round (no shift, no cull):
+the camera moves P2. The Phase 3 cull-only exemption is removed. (P1's slot 0 was never in its list.)
+**Ruckus wrap (Phase 8 list).** `CODE_08882A` -> `CoopRuckusWrap` (bank F) for both players (slot 0, then 39):
+- top clamp Y < 8 -> 8 (P2 used to rise above the top, Y 249-255, invisible);
+- fall through the floor (Y >= $E8): the 1P exit is Y 0, X $A0, camera $FF. In co-op the camera moves right by
+  min($FF - camera, partner X - 16), even, so the partner stays on screen (he moves with the world); the faller lands
+  at min($A0 + $FF - camera, 240), Y 0. A dying faller does not move the camera. With the partner far enough right the
+  result is exactly the 1P exit.
+- `CODE_088AA2` (bubbles 20-39 and item 18 to Y 0, 1P behaviour on the camera jump) runs only when the camera moved, and
+  P2's Y is saved/restored around it (it zeroed slot 39 = P2: the 6a/Phase 3 finding).
+**Respawn (8.5).** `CODE_0595C1`: with the partner in the round neither player's respawn resets `wideHScroll` (7a reset it
+for the resident P1, which moved P2 on screen). `CoopRespawnX` (bank 5) places the in-place respawn at screen X 31 when
+the camera is at 1 (the 1P spot), else at 128: the floor has a hole at about world X 63-96, so screen X 31 can be over the
+hole; the bottom centre is floor at every camera position > 1. Y stays 193.
+
+### 8.6 bonus games: verified, no change
+`StartBonusRound` -> `CODE_0FE36B` -> `CoopDespawnAll` deactivates P2 (Phase 3), so the bonus game is the resident's
+one-player game: physical P1 with both in the round, P2 after a role exchange (P1 out; P1's colours since 7b-2). No P2
+window runs, pad 2 is not read (bonus element 0 reads `currentPlayer`'s pad; element 1 `CODE_07930A` stays dormant), and
+`ctxOther` is untouched. The next round start (`CoopRoundStartP2`) spawns the partner with his lives and hearts.
+Scoring: a normal bonus game scores nothing directly (`CODE_079BE2` only sets `bigRewardCategory`, which round setup
+clears anyway); the only bonus-game score is the boss bonus prize 100000, the 7b-3 team bonus (left as it is).
+
+### Sites
+| site | bank | change | bytes |
+|------|------|--------|-------|
+| `CODE_0788CC` | 7 | `BIT coopP2Active / BMI` -> `CODE_0788CC_coop` (`LDA/LDX/LDY`, `JMP CoopRunB5`) | +14 |
+| `CODE_0594EB` | 5 | `BIT coopP2Active / BMI CoopMoveX`; label `CODE_0594EF` | +5 |
+| `CoopMoveX`, `CoopRespawnX` | 5 | new (63, 27) | +90 |
+| `CODE_0595C1` | 5 | `LDA coopResident / BNE` -> `BIT coopP2Active / BMI`; `LDA #31 / STA objX` -> `JSR CoopRespawnX` | -2 |
+| `CoopCamera`, `CoopCamWant`, `CoopCamLeash` | 5 | new (149, 29, 13) | +191 |
+| `CODE_08882A` | 8 | `BIT coopP2Active / BPL / JMP CoopRuckusWrap` (returns to `CODE_088857`) | +8 |
+| `CODE_0FFD89` | F | slot-39 skip moved before the shift (`BMI CODE_0FFDEE`); old cull exemption removed | 0 |
+| `CoopRuckusWrap` | F | new | +138 |
+| `CoopRunB5` | E (COOP_CODE2) | new | +13 |
+| WRAM | | `coopCamHold`, `coopCamWant[2]`, `coopCamTmp` | +4 |
+
+Free space after the phase: bank 5 71 (was 355; 68 with `COOP_FORCE`), bank 7 15 (29), bank 8 8 (16), bank 9 23
+(unchanged; 17 with `COOP_SWAPTEST`), bank B 26, bank F 42 (180), COOP_CODE 8, COOP_CODE2 95 (108).
+Bank E has no other free space: `PRG_BANK_E` + COOP_CODE end at `$D2F8` (`$D300` = tracks), COOP_CODE2 ends at `$DFA1`.
+The camera (191 B) did not fit the fixed banks, so it went to bank 5 behind `CoopRunB5` (a banked call, Rule 9: the
+switch is `SwapPrgBankA` inside `RunBankedSub`; `$A000` is not touched). For later phases: `CoopRunB5` is generic
+(A/X = routine, Y = caller bank), and the switchable banks with room are 1 (572), D (492), 2 (231), 6 (134); bank 5's
+71 B are the last room in a bank the player code runs in.
+
+### Cost
+- 1P, `stats p8a --vs p7b3`: +2 .. +7 play cycles per tick (r20 +17), total +84 cycles (+0.04 %), lag +0 everywhere.
+  (`BIT/BMI` gates in `CODE_0594EB` per player update, `CODE_0788CC`, Ruckus; the shifter's slot-39 test.)
+- Co-op, `stats p8a --vs p7b3 --scen c01 c05 c17 c20 c22 c50 c64`: non-wide rounds +33 .. +40 (+0.10 .. +0.17 %; the
+  `CoopMoveX` round test twice per tick), lag +0 .. +6. c20: -338 (-1.96 %), lag +1: the camera rules change the
+  game; the new code itself costs about 180 cycles per co-op tick of round 20 (profile c20, 2128 ticks: `CoopCamera` 59,
+  `CoopCamWant` 36, `CoopMoveX` 47, `CoopRunB5` 17, `CoopRuckusWrap` 15, `CoopCamLeash` 5) plus one nested
+  `RunBankedSub` (~60), about 1.4 % of c20's 16.9k play mean.
+
+### Verification (build `p8a`)
+1. Builds `p8a`, `p8af` (`COOP_FORCE`), `p8at` (`COOP_SWAPTEST`) assemble. `regress base p8a --reuse-base`: REGRESSION
+   PASS 12/12, HUD-rule counts identical to 7b-3.
+2. `tmp/coop_scripts/p8/p8verify.py` (generated by `mkverify.py` from `p7b3verify.py` + `p8lua.py`): all p5/p6/p6b/p7/7b-3
+   checks plus the Phase 8 checks listed in `p8lua.py` (camera model at every `CoopCamera` call checked at P1's next
+   update: hs, dir, hold bits, both X; both players 8 <= X <= 248 at every round-20 tick end; hs odd and steps of 0/2
+   except a co-op fall; the shifter never writes P2's X/state; P2's Y kept across `CODE_088AA2`; fall placement and
+   camera move; respawn X; bonus-game rules of 8.6). Test options (Lua only): `pull` (pad 1 / pad 2 hold a direction),
+   `fall` (Y := $EC, optionally only while dying), `ruckus` (boss to state 5), `door` (secret door).
+   32 runs: the 22 of 7b-3 + w20n (pulls, 7 forced falls), w20r (8000 ticks random), w20k (deaths after camera moves,
+   dying falls), w20x (P1 out in round 20, role exchange), w20y (P2 out in round 20), w20b (Ruckus defeated: round-clear
+   team bonus, round 21's bonus), bn1 (bonus, both in), bn2 (bonus, P1 out), bn3 (bonus, P2 out), bn4 (bonus with the
+   prize). **Violations: p5 0, p6 0, p6b 0, p7 0, Phase 8 0**, every rc 0.
+   Round 20 totals: 22501 co-op ticks; scrolls by the slot-0 player 506, by the P2-slot player 740; stalls (opposite
+   pushes) 695; leash blocks 1458; world end 5325; ticks with the players >= 200 px apart 2947 (max 224, X range 16-240
+   for both); falls P1 5 (+4 dying) / P2 14 (+14 dying), camera moved by a fall 4 times (e.g. w20n t1251: camera 29 -> 253,
+   partner 240 -> 16); 47 respawns with the partner in the round (23 at camera 1 -> X 31, 24 elsewhere -> X 128), no
+   camera reset; 6 resets when alone (1P path). Info: repeated "falls" of a player moving up at Y 0 (the forced fall in
+   w20n hit a jumping P2): the same as P1 in 1P, where the clamp also runs only on even ticks.
+   8.6: 8 bonus starts (P1 plays 6, P2 plays after a role exchange 2), 7 completed (w20b ends during the bonus):
+   P2 never in the round, no P2 window, partner lives/hearts/score and all of `ctxOther` unchanged, the partner back at the
+   next round start (3 cases with lives); bn4: prize 100000 to both (team bonus, P2 not spawned), the only partner score.
+3. `p8/hudcheck.py` (7b-3's, importing p8verify): sets coop (10 runs), p8 (9), r2 (14), 1p (16): **0 job errors, 0 cell
+   errors, 0 stale values**, max lag 3 (b40: 185, the 7b-3 prize case).
+4. `r2/menutest.py p8a p8af`: PASS a-f.
+5. `p7b2/pixcmp.py`: natural 1500 samples 0 differing (vs base, and p8a vs p7b3). r20 (750 samples): p8a vs base 27
+   (26 split-line y 32 + t2064 sprite-limit), control p7b3 vs base 21 (20 split-line + t2064), p8a vs p7b3 35, all
+   split-line. Nothing outside the known 7b-1 classes.
+6. Screenshots `tmp/coop_scripts/p8/shots/`: `r20_players_far_apart_t1240.png`, `r20_leash_limit_t1290.png` (both at the
+   edges, camera stalled), `r20_after_respawn_t2095.png` / `_t2310.png` (respawn at the screen centre, camera 193 / 63),
+   `bonus_both_in_p1_plays_t3000.png` (volleyball, one dragon), `bonus_p1_out_p2_plays_t5000.png` (gems, P2 in P1's
+   colours, HUD "1P x00"), `bonus_after_both_back_t9800.png` (round 2 after the bonus, both players).
+
+### Deviations from the plan
+- 8.1 is not "run `CODE_0788CC` once per player": one routine decides from both players (two runs would scroll twice and
+  could jitter). The camera lives in bank 5 (space), reached through a nested `RunBankedSub`.
+- 8.2 leash margin: the edges are 16 / 240 (sprite fully visible) instead of "$F0 - 16"; the plan had no screen-edge rule
+  for a player who walks while the camera is held, so `CoopMoveX` was added.
+- 8.3 was mostly done in Phase 3 (cull); now P2 is not shifted by the shifter either (exact 2 px per tick by the camera,
+  so P2's world position never drifts by the shifter's 4-px even-tick steps).
+- 8.4: no other wide round exists.
+- 8.5: respawn X 128 instead of "clamp 31" (the hole).
+- Fall-through: the camera move is limited by the partner (no owner rule existed; see open items).
+
+### Open items for Phase 9 (and owner)
+- Fall-through exit with a partner far left: the faller lands at most at screen X 240 (not world 415). Alternatives if
+  the owner wants: always the 1P exit with the partner dragged to the left edge; or a plain vertical wrap in place.
+- Respawn spot: screen centre (128,193) when the camera is not at the start; an alternative is next to the partner.
+- Round-50 missile tractor (`CODE_078549`) reacts to P1 only (slot 0).
+- Pad 2 cannot skip the intro / ending (7b-3 item, unchanged).
+- Normal bonus games give no score; the reward category is reset at round setup, so no post-bonus reward exists to
+  attribute (nothing to do unless the owner wants one).
+- Space: bank 5 71, F 42, COOP_CODE2 95, COOP_CODE 8; further co-op code should use `CoopRunB5`-style calls into banks
+  1 / D / 2.
