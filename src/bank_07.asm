@@ -1343,10 +1343,7 @@ CODE_0788CC:
 @end:
 	RTS							;C - - - - - 0x00E901 03:88F1: 60
 CODE_0788CC_coop:
-	LDA #.LOBYTE(CoopCamera)	;(co-op 8) the co-op camera is in bank 5
-	LDX #.HIBYTE(CoopCamera)
-	LDY #.BANK(*)
-	JMP CoopRunB5
+	JMP CoopCamera				;(co-op 8; 9.0) the co-op camera runs from PRG-RAM (COOP_WRAM_CODE)
 
 WideScrollLeft:
 	LDA wideHScroll				;C - - - - - 0x00E902 03:88F2: AD 61 07

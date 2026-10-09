@@ -46,6 +46,20 @@ Phase 7b-1 (co-op HUD, owner-approved option (a), the only two HUD rules):
     before the register of the cell's pattern-table half (chrBankA for bit 7 = 0, chrBankB for 1) holds
     chrFans_AA_ID and the other one chrBonusRoom_A_ID (the same test as the NMI remap).
   Both counts are printed per scenario. Everything else (all other RAM incl. object 19's arrays) is compared.
+
+Phase 9.0 (PRG ROM 256 KB, co-op code in PRG-RAM; owner-approved tool change):
+  - The ROM may have any PRG size (header byte 4); file offsets come from the build's dbg file (ooffs), so the
+    256 KB layout (original banks E/F at file banks $1E/$1F) needs nothing else. A segment that runs in PRG-RAM
+    ($6000-$7FFF, e.g. COOP_WRAM_CODE: load image in ROM, run address $7xxx) is listed in Symbols.prg with its run
+    address and the file offset of its load image.
+  - profile / cover: the harness also writes the PRG-RAM exec counters (<scen>.wprof, offsets from $6000); they are
+    added to the PRG counters at the load-image offset of the segment that runs there, so routines in PRG-RAM are
+    attributed by name (bank = the image bank).
+  - WRAM-code guard: for a build with a COOP_WRAM_CODE segment every run gets CFG.wram_guard (the code area
+    $7000-$7FFF and the image's PRG offset). The boot copy must write the area exactly once in order before the first
+    logic tick, the area must then equal the image, and after that ANY CPU write into the area, or an MMC3 $A001 write
+    other than $80 (PRG-RAM enabled, writable), stops the run with exit code 4 and a csv line WRAM_CODE_WRITE /
+    WRAM_CODE_COPY / PRG_RAM_A001. run / regress fail on it (Mesen exit code), and so do the co-op checkers.
 """
 import argparse
 import bisect
@@ -62,6 +76,9 @@ MESEN_DIR = os.path.join(TMP, "mesen")
 BUILDS = os.path.join(TMP, "builds")
 RUNS = os.path.join(TMP, "runs")
 HARNESS = os.path.join(ROOT, "tools", "perf", "harness.lua")
+WRAM_LO, WRAM_HI = 0x6000, 0x8000               # PRG-RAM window
+WRAM_CODE_SEG = "COOP_WRAM_CODE"                # Phase 9.0: code copied to PRG-RAM at power-on
+WRAM_CODE_AREA = (0x7000, 0x1000)               # the code area of PRG-RAM (config_us WRAMCODE), guarded
 
 JOBS = max(1, min(8, (os.cpu_count() or 2) - 2))
 RAM_SIZE = 0x800
@@ -178,7 +195,8 @@ def cmd_build(a):
             print(f"  {seg:18s} size=${size:04X} free={0x2000 - size if seg != 'PRG_BANK_E' else 0x1300 - size}")
     for seg, (start, size, bank) in sorted(syms.segs.items()):
         if seg.startswith("COOP"):
-            print(f"  {seg:18s} size=${size:04X}")
+            extra = f" free={WRAM_CODE_AREA[1] - size}" if seg == WRAM_CODE_SEG else ""
+            print(f"  {seg:18s} size=${size:04X}{extra}")
 
 
 # ---------------------------------------------------------------------------------------- symbols
@@ -280,7 +298,20 @@ def scen_extra(build, opts, seed):
         extra += ", pokes = {" + ",".join(f"{{tick={p['tick']},addr={p['addr']},val={p['val']}}}" for p in pokes) + "}"
     if lives:
         extra += ", lives_addrs = {" + ",".join(map(str, lives)) + "}"
+    extra += wram_guard_cfg(build)
     return extra
+
+
+def wram_guard_cfg(build):
+    """CFG field of the harness's WRAM-code guard (Phase 9.0) for a build with a COOP_WRAM_CODE segment, else ''"""
+    if not os.path.exists(os.path.join(BUILDS, build, "rom.dbg")):
+        return ""
+    for lo, hi, start, bank, name in Symbols(build).prg:
+        if name == WRAM_CODE_SEG:
+            a, n = WRAM_CODE_AREA
+            assert start == a and hi - lo <= n, "COOP_WRAM_CODE is not inside the WRAM code area"
+            return f", wram_guard = {{lo = {a}, len = {n}, img = {lo}}}"
+    return ""
 
 
 def icon_trace_cfg(build):
@@ -315,7 +346,8 @@ def run_scen(build, scen, dump=False, profile=False, shots=None):
     r = subprocess.run([os.path.join(MESEN_DIR, "Mesen.exe"), "--testrunner", rom, script],
                        cwd=MESEN_DIR, capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
-        raise SystemExit(f"{build}/{scen}: Mesen exit code {r.returncode} {r.stdout} {r.stderr}")
+        tail = open(out + ".csv").read().splitlines()[-1:] if os.path.exists(out + ".csv") else []
+        raise SystemExit(f"{build}/{scen}: Mesen exit code {r.returncode} {tail} {r.stdout} {r.stderr}")
     return out
 
 
@@ -558,7 +590,10 @@ def oplen(op):
 
 
 def load_prof(build, scens):
+    """PRG offset -> exec count, summed over scens. PRG-RAM exec counters (<scen>.wprof, Phase 9.0) are added at the
+    load-image offset of the segment that runs at that address."""
     cnt = {}
+    wram = [(start, lo, hi) for lo, hi, start, bank, name in Symbols(build).prg if WRAM_LO <= start < WRAM_HI]
     for s in scens:
         p = os.path.join(RUNS, build, s + ".prof")
         if not os.path.exists(p):
@@ -566,7 +601,26 @@ def load_prof(build, scens):
         for line in open(p):
             o, c = line.split()
             cnt[int(o, 16)] = cnt.get(int(o, 16), 0) + int(c)
+        p = os.path.join(RUNS, build, s + ".wprof")
+        if not os.path.exists(p):
+            continue
+        for line in open(p):
+            w, c = line.split()
+            cpu = WRAM_LO + int(w, 16)
+            for start, lo, hi in wram:
+                if start <= cpu < start + hi - lo:
+                    o = lo + cpu - start
+                    cnt[o] = cnt.get(o, 0) + int(c)
+                    break
+            else:
+                print(f"NOTE: {build}/{s}: code executed at ${cpu:04X} (PRG-RAM) outside any segment")
     return cnt
+
+
+def prg_rom(build):
+    """the PRG ROM of a build (any size, from the iNES header)"""
+    rom = open(os.path.join(BUILDS, build, "rom.nes"), "rb").read()
+    return rom[16:16 + rom[4] * 0x4000]
 
 
 def instructions(cnt, rom):
@@ -587,7 +641,7 @@ def profile_table(build, scens):
     """estimated exclusive cycles per routine. Routine entries = named labels that are JSR targets
     (taken from executed JSR instructions) plus all non-CODE_/DATA_/@ labels."""
     syms = Symbols(build)
-    rom = open(os.path.join(BUILDS, build, "rom.nes"), "rb").read()[16:16 + 0x20000]
+    rom = prg_rom(build)
     cnt = load_prof(build, scens)
     insts = list(instructions(cnt, rom))
     # bank -> prg offset range
@@ -640,15 +694,8 @@ def cmd_profile(a):
 def cmd_cover(a):
     """exec counts (summed over all profiled scenarios) for every instruction of the given routines"""
     syms = Symbols(a.name)
-    rom = open(os.path.join(BUILDS, a.name, "rom.nes"), "rb").read()[16:16 + 0x20000]
-    cnt = {}
-    for s in a.scen or DEFAULT_SCENS:
-        p = os.path.join(RUNS, a.name, s + ".prof")
-        if not os.path.exists(p):
-            continue
-        for line in open(p):
-            o, c = line.split()
-            cnt[int(o, 16)] = cnt.get(int(o, 16), 0) + int(c)
+    rom = prg_rom(a.name)
+    cnt = load_prof(a.name, a.scen or DEFAULT_SCENS)
     for lab in a.labels:
         found = False
         for lo, hi, start, bank, segname in syms.prg:

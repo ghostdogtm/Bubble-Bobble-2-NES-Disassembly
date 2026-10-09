@@ -102,3 +102,13 @@ COOP_CAM_STEP   = 2             ; wideHScroll step per tick (WideScrollLeft / Wi
 COOP_CAM_LZONE  = 80            ; CODE_0788CC: holding LEFT at X < 80 pushes the camera left,
 COOP_CAM_RZONE  = 176           ;   holding RIGHT at X >= 176 pushes it right
 COOP_RESPAWN_XMID = 128         ; in-place respawn X in round 20 while the camera is not at the round start
+
+; ---------------------------------------------------------------------------------------------
+; Phase 9.0: co-op code in PRG-RAM. PRG-RAM $6000-$6FFF = data (COOP_BSS), $7000-$7FFF = code (COOP_WRAM_CODE).
+; The code image is linked at $A000 of bank $10 (MEM_X10, page-aligned) to run at $7000; CoopBoot (bank $10, $B000)
+; copies all COOP_WRAM_CODE_PAGES pages once at power-on (from Begin, NMI off). Nothing else may write $7000-$7FFF
+; (the perf harness flags any such write). Code there runs from any bank without bank switching.
+; ---------------------------------------------------------------------------------------------
+COOP_WRAM_CODE_RUN   = $7000    ; run address of COOP_WRAM_CODE (config_us WRAMCODE)
+COOP_WRAM_CODE_IMG   = $A000    ; the image in bank $10 (COOP_WRAM_CODE is the first segment of MEM_X10)
+COOP_WRAM_CODE_PAGES = 16       ; always the whole 4 KB area: a constant copy time (CoopBoot's delay is fixed)

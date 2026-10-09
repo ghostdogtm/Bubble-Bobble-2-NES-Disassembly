@@ -35,6 +35,12 @@
 --                entry as drawn by slot N or not. At each RAM snapshot the marked entries are written to <out>.icon
 --                as "tick e1 e2 ..." (only ticks with at least one marked entry). perf.py regress uses it for the
 --                HUD-icon OAM rule (Phase 7b-1).
+--   wram_guard   (optional) {lo = A, len = N, img = O}: Phase 9.0 WRAM-code guard. The boot copy must write A .. A+N-1
+--                exactly once, in order, before the first logic tick; at the first tick start the area must equal the
+--                N bytes of PRG ROM at offset O (the code image). Afterwards ANY CPU write into A .. A+N-1, or an MMC3
+--                $A001 write other than $80 (PRG-RAM enabled, writable), fails the run: csv line WRAM_CODE_WRITE /
+--                WRAM_CODE_COPY / PRG_RAM_A001 at the end of that tick, exit code 4.
+--   profile      also writes the PRG-RAM exec counters to <out>.wprof (offsets from $6000) if Mesen has them
 --
 -- CSV columns (perf.py reads columns 3 and 5, so new columns are only ever appended):
 --   tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2
@@ -192,6 +198,33 @@ end
 
 local vramSnap = nil
 
+-- WRAM-code guard (CFG.wram_guard, Phase 9.0; see the header)
+local wgFail, wgCheck = nil, nil
+if CFG.wram_guard then
+  local g = CFG.wram_guard
+  local copied = 0
+  emu.addMemoryCallback(function(addr, value)
+    if tick < 0 and copied < g.len and addr == g.lo + copied then copied = copied + 1; return end
+    if not wgFail then
+      wgFail = string.format("WRAM_CODE_WRITE $%04X = $%02X pc $%04X tick %d", addr, value, emu.getState()["cpu.pc"], tick)
+    end
+  end, emu.callbackType.write, g.lo, g.lo + g.len - 1, emu.cpuType.nes, MT_CPU)
+  emu.addMemoryCallback(function(addr, value)
+    if (addr & 1) == 1 and value ~= 0x80 and not wgFail then
+      wgFail = string.format("PRG_RAM_A001 $%04X = $%02X pc $%04X tick %d", addr, value, emu.getState()["cpu.pc"], tick)
+    end
+  end, emu.callbackType.write, 0xA000, 0xBFFF, emu.cpuType.nes, MT_CPU)
+  wgCheck = function()   -- at the first tick start: the copy is complete and the area holds the image
+    local bad = 0
+    for i = 0, g.len - 1 do
+      if emu.read(g.lo + i, MT_CPU) ~= emu.read(g.img + i, emu.memType.nesPrgRom) then bad = bad + 1 end
+    end
+    if (copied ~= g.len or bad > 0) and not wgFail then
+      wgFail = string.format("WRAM_CODE_COPY %d of %d bytes copied, %d differ from the image", copied, g.len, bad)
+    end
+  end
+end
+
 local function finish(code)
   csv:close()
   if dump then dump:close() end
@@ -204,6 +237,15 @@ local function finish(code)
       if v and v > 0 then p:write(string.format("%05X %d\n", i, v)) end
     end
     p:close()
+    if emu.memType.nesWorkRam then
+      c = emu.getAccessCounters(emu.memType.nesWorkRam, emu.counterType.execCount)
+      p = io.open(CFG.out .. ".wprof", "w")
+      for i = 0, #c do
+        local v = c[i]
+        if v and v > 0 then p:write(string.format("%04X %d\n", i, v)) end
+      end
+      p:close()
+    end
   end
   emu.stop(code)
 end
@@ -239,6 +281,7 @@ emu.addMemoryCallback(function(addr, value)
     -- full NMI entered: new logic tick
     tick = tick + 1
     tStart = cycles()
+    if tick == 0 and wgCheck then wgCheck() end
     vblankCyc = 0
     nmisInTick = 1
     inTick = true
@@ -287,6 +330,10 @@ emu.addMemoryCallback(function(addr, value)
     if coopFail then
       csv:write("COOP_NOT_SELECTED " .. coopFail .. "\n")
       finish(3)
+    end
+    if wgFail then
+      csv:write(wgFail .. "\n")
+      finish(4)
     end
     if tick + 1 >= CFG.ticks then finish(0) end
   end

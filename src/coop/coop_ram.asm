@@ -1,5 +1,6 @@
 ; Co-op variables. They live in PRG-RAM ($6000-$7FFF, 8 KB, enabled by CoopReset).
 ; Segment COOP_BSS is mapped to the WRAM memory area in config_us; CoopReset zeroes all of it at reset.
+; (Phase 9.0) The data area is $6000-$6FFF (4 KB); $7000-$7FFF holds the co-op code copied at power-on (COOP_WRAM_CODE).
 
 .segment "COOP_BSS"
 

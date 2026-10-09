@@ -17,16 +17,13 @@ CODE_0FE001:
 	LDX #$00					;C - - - - - 0x01E01F 07:E00F: A2 00
 	DEX							;C - - - - - 0x01E021 07:E011: CA
 	TXS							;C - - - - - 0x01E022 07:E012: 9A
-	LDY #$00					;C - - - - - 0x01E023 07:E013: A0 00
-	LDX #$00					;C - - - - - 0x01E025 07:E015: A2 00
-CODE_0FE017:
-	NOP							;C - - - - - 0x01E027 07:E017: EA
-	NOP							;C - - - - - 0x01E028 07:E018: EA
-	DEX							;C - - - - - 0x01E029 07:E019: CA
-	BNE CODE_0FE017				;C - - - - - 0x01E02A 07:E01A: D0 FB
-
-	DEY							;C - - - - - 0x01E02C 07:E01C: 88
-	BNE CODE_0FE017				;C - - - - - 0x01E02D 07:E01D: D0 F8
+	;(Co-op 9.0) The power-on delay (originally LDY #0 / LDX #0 / 256 x 256 x NOP NOP DEX BNE here, 590851 cycles) now
+	;runs in CoopBoot (bank $10), which first copies the co-op WRAM code image to $7000-$7FFF and then waits out the
+	;rest: this sequence takes exactly as many cycles, so everything after it is cycle-identical. Ends with X = Y = 0.
+	LDA #.BANK(CoopBoot)
+	STA newPrgBank
+	JSR SwapPrgBankB			;Rule 9 order; NMI is off here
+	JSR CoopBoot
 
 	LDX #$02					;C - - - - - 0x01E02F 07:E01F: A2 02
 CODE_0FE021:

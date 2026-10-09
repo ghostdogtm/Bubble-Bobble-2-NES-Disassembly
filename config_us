@@ -18,10 +18,19 @@ MEMORY {
     MEM_B:       start = $8000,  size = $2000,   type = ro, file = %O, bank = $0B, fill = yes, fillval = $FF;
     MEM_C:       start = $A000,  size = $2000,   type = ro, file = %O, bank = $0C, fill = yes, fillval = $FF;
     MEM_D:       start = $A000,  size = $2000,   type = ro, file = %O, bank = $0D, fill = yes, fillval = $FF;
+    # (Phase 9.0) PRG ROM 256 KB = 32 x 8 KB. File positions $00-$0D: the original banks 0-D. $0E-$1D: new banks.
+    # $1E/$1F: the original banks E and F (MMC3 PRG mode 0 maps the second-last bank at $C000 and the last at $E000).
+    # MEM_E / MEM_F keep bank = $0E / $0F (the logical numbers used by the tools and labels): the game never writes a
+    # bank number >= $0E to R6/R7 (docs/coop_notes.md, Phase 9.0) and no .BANK() names a bank E/F label.
+    MEM_X0E:     start = $0000,  size = $4000,   type = ro, file = %O, fill = yes, fillval = $FF;  # banks $0E-$0F: free
+    MEM_X10:     start = $A000,  size = $2000,   type = ro, file = %O, bank = $10, fill = yes, fillval = $FF;  # bank $10: co-op WRAM code image + boot copy
+    MEM_X11:     start = $0000,  size = $1A000,  type = ro, file = %O, fill = yes, fillval = $FF;  # banks $11-$1D: free
     MEM_E:       start = $C000,  size = $2000,   type = ro, file = %O, bank = $0E, fill = yes, fillval = $FF;
     MEM_F:       start = $E000,  size = $2000,   type = ro, file = %O, bank = $0F, fill = yes, fillval = $FF;
     CHR:         start = $0000,  size = $40000,   type = ro, file = %O, fill = yes, fillval = $FF;
-    WRAM:        start = $6000,  size = $2000,   type = rw, file = "";
+    # PRG-RAM $6000-$7FFF: $6000-$6FFF co-op data (COOP_BSS), $7000-$7FFF co-op code (COOP_WRAM_CODE, copied at power-on)
+    WRAM:        start = $6000,  size = $1000,   type = rw, file = "";
+    WRAMCODE:    start = $7000,  size = $1000,   type = rw, file = "", bank = $10;  # bank = the image bank (tools)
 }
 
 
@@ -49,6 +58,8 @@ SEGMENTS {
 	COOP_CODE:   load = MEM_E, type = ro, optional = yes;
 	PRG_BANK_E_TRACKS: load = MEM_E, type = ro, start = $D300;
 	COOP_CODE2:  load = MEM_E, type = ro, optional = yes;
+	COOP_WRAM_CODE: load = MEM_X10, run = WRAMCODE, type = rw, define = yes;  # image at $A000 of bank $10, runs at $7000
+	COOP_BOOT:   load = MEM_X10, type = ro, start = $B000;
 	PRG_BANK_F:  load = MEM_F, type = ro;
     VECTORS:     load = MEM_F, type = ro, start = $FFFA;
     CHR_ROM:     load = CHR, type = ro;

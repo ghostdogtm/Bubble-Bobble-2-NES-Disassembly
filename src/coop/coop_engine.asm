@@ -1495,24 +1495,12 @@ CoopAddScoreTeam:
 ;   edges      CoopMoveX (bank 5): an X step past the screen edges is not taken.
 ;   Ruckus     CoopRuckusWrap (CODE_08882A): both players get the top clamp and the fall-through exit.
 ;   respawn    CODE_0595C1 / CoopRespawnX (bank 5): no camera reset; X relative to the camera.
+; (Phase 9.0) CoopCamera / CoopCamWant / CoopCamLeash (were bank 5, reached through the nested bank call CoopRunB5, now
+; removed) and CoopRuckusWrap (was bank F) run from PRG-RAM: segment COOP_WRAM_CODE, see coop.inc and CoopBoot.
 ; =============================================================================================
-.segment "COOP_CODE2"
+.segment "COOP_WRAM_CODE"
 
-; CoopRunB5: run the bank-5 routine A/X (lo/hi) through RunBankedSub (bank 5 at $8000 with SwapPrgBankA, $A000 kept) and
-; come back to the caller's bank Y at $8000. RunBankedSub keeps the outer bankedSubRetBank on the stack, so this nests
-; inside a banked sub (the camera runs inside RoundUpdate's CODE_078247 call, the Ruckus wrap inside the enemy AI).
-; JMP here from the banked caller: the RTS of RunBankedSub returns to the caller's caller. Clobbers A/X/Y.
-CoopRunB5:
-	STA bankedSub
-	STX bankedSub+1
-	STY bankedSubRetBank
-	LDA #.BANK(CoopCamera)
-	STA bankedSubBank
-	JMP RunBankedSub
-
-.segment "PRG_BANK_5"
-
-; CoopCamera: from CODE_0788CC (bank 7) through CoopRunB5 (every RoundUpdate tick of round 20, P1 resident). Inputs are the
+; CoopCamera: JMP from CODE_0788CC (bank 7; every RoundUpdate tick of round 20, P1 resident). Inputs are the
 ; players' playerHeld of their last update (as for the 1P camera). Writes wideScrollDir, wideHScroll, coopCamHold,
 ; coopCamWant and the X of a player who does not push. Clobbers A/X/Y.
 CoopCamera:
@@ -1617,10 +1605,8 @@ CoopCamLeash:
 	CMP #<(256-(COOP_EDGE_L+COOP_CAM_STEP))
 	RTS
 
-.segment "PRG_BANK_F"
-
 ; ---------------------------------------------------------------------------------------------
-; CoopRuckusWrap: JMP from CODE_08882A (Ruckus, round 20 boss; enemy AI, even tick, bank 8 at $8000, P1 resident) while
+; CoopRuckusWrap (COOP_WRAM_CODE since Phase 9.0): JMP from CODE_08882A (Ruckus, round 20 boss; enemy AI, even tick, bank 8 at $8000, P1 resident) while
 ; both players are in the round; the 1P code there clamps P1 at the top (Y < 8 -> 8) and sends a P1 who fell through
 ; the floor (Y >= $E8) to the exit: Y 0, X $A0, camera $FF (the right end), bubbles and item to Y 0 (CODE_088AA2).
 ; Here each player (slot 0, then OSLOT_P2) gets the same: the top clamp, and on a fall the exit, with the camera moved
@@ -1696,3 +1682,86 @@ CoopRuckusWrap:
 :	STA objX,X
 @rts:
 	RTS
+
+; =============================================================================================
+; Phase 9.0: CoopBoot (bank $10, $B000; COOP_BOOT segment). Called once from Begin with bank $10 mapped at $A000 (Rule 9
+; order, through SwapPrgBankB), NMI and IRQ off, stack set. It replaces Begin's original power-on delay loop and takes
+; exactly as many cycles, so the rest of the reset path (vblank waits, MemInit, CoopReset, ...) is cycle-identical:
+;   1. PRG-RAM enable ($A001 = $80; CoopReset writes it again later, nothing ever writes another value),
+;   2. copy COOP_WRAM_CODE_PAGES pages $A000.. -> $7000.. (the COOP_WRAM_CODE image; the rest of the 4 KB is $FF fill),
+;   3. wait out the rest of the original delay (two exact loops + padding computed below).
+; Uses scratch0-3 (MemInit clears the zero page after this). Leaves X = Y = 0, as the original loop did.
+; =============================================================================================
+COOP_BOOT_TOTAL = 2+2+256*(255*9+8+2+3)-1	;Begin's original LDY #0 / LDX #0 / NOP NOP DEX BNE / DEY BNE (590851)
+COOP_BOOT_CALL  = 2+3+6+22+6+6			;Begin: LDA # / STA zp / JSR SwapPrgBankB (its body + RTS 22) / JSR CoopBoot; RTS
+COOP_BOOT_SETUP = 2+4+4*(2+3)+2+2			;CoopBoot up to @page
+COOP_BOOT_COPY  = COOP_WRAM_CODE_PAGES*(256*16-1+5+5+2+3)-1	;@page loop (no page crossing: both bases are page-aligned)
+COOP_BOOT_REST  = COOP_BOOT_TOTAL-COOP_BOOT_CALL-COOP_BOOT_SETUP-COOP_BOOT_COPY
+COOP_BOOT_N     = COOP_BOOT_REST/2308			;@outer: 2 + N*2308 - 1 cycles (X = 0 on entry)
+COOP_BOOT_R2    = COOP_BOOT_REST-(COOP_BOOT_N*2308+1)
+COOP_BOOT_M0    = (COOP_BOOT_R2-1)/5			;@fine: 2 + M*5 - 1 cycles
+.if COOP_BOOT_R2-1-COOP_BOOT_M0*5 = 1
+COOP_BOOT_M     = COOP_BOOT_M0-1				;(a 1-cycle remainder cannot be padded: 6 instead)
+.else
+COOP_BOOT_M     = COOP_BOOT_M0
+.endif
+COOP_BOOT_PAD   = COOP_BOOT_R2-1-COOP_BOOT_M*5	;0, 2..6 cycles of NOP (2) / JMP (3) padding
+.assert COOP_BOOT_N >= 1 && COOP_BOOT_N <= 255, error, "CoopBoot: outer delay count out of range"
+.assert COOP_BOOT_M >= 1 && COOP_BOOT_M <= 255, error, "CoopBoot: fine delay count out of range"
+.assert COOP_BOOT_PAD <> 1 && COOP_BOOT_PAD <= 6, error, "CoopBoot: padding out of range"
+
+.segment "COOP_BOOT"
+
+CoopBoot:
+	LDA #$80						;MMC3 $A001: PRG-RAM enable, writes allowed
+	STA $A001
+	LDA #<COOP_WRAM_CODE_IMG
+	STA scratch0
+	LDA #>COOP_WRAM_CODE_IMG
+	STA scratch1
+	LDA #<COOP_WRAM_CODE_RUN
+	STA scratch2
+	LDA #>COOP_WRAM_CODE_RUN
+	STA scratch3
+	LDY #$00
+	LDX #COOP_WRAM_CODE_PAGES
+@page:
+	LDA (scratch0),Y
+	STA (scratch2),Y
+	INY
+	BNE @page
+	INC scratch1
+	INC scratch3
+	DEX
+	BNE @page
+	LDY #COOP_BOOT_N				;X = 0, Y = 0 here
+@outer:
+	NOP
+	NOP
+	DEX
+	BNE @outer
+	DEY
+	BNE @outer
+	LDX #COOP_BOOT_M
+@fine:
+	DEX
+	BNE @fine
+.if (COOP_BOOT_PAD = 3) || (COOP_BOOT_PAD = 5)
+	JMP :+
+:
+	.repeat (COOP_BOOT_PAD-3)/2
+	NOP
+	.endrepeat
+.else
+	.repeat COOP_BOOT_PAD/2
+	NOP
+	.endrepeat
+.endif
+	RTS
+CoopBootEnd:
+.assert >CoopBoot = >(CoopBootEnd-1), error, "CoopBoot must not cross a page (branch timing)"
+.assert <COOP_WRAM_CODE_IMG = 0 && <COOP_WRAM_CODE_RUN = 0, error, "CoopBoot: the copy bases must be page-aligned"
+.import __COOP_WRAM_CODE_LOAD__, __COOP_WRAM_CODE_RUN__
+.assert __COOP_WRAM_CODE_LOAD__ = COOP_WRAM_CODE_IMG, lderror, "COOP_WRAM_CODE image is not at COOP_WRAM_CODE_IMG"
+.assert __COOP_WRAM_CODE_RUN__ = COOP_WRAM_CODE_RUN, lderror, "COOP_WRAM_CODE does not run at COOP_WRAM_CODE_RUN"
+.assert .bank(CoopBoot) = .bank(CoopCamera), lderror, "CoopBoot must be in the bank of the WRAM code image"
