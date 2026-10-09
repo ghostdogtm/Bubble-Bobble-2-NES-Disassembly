@@ -2483,3 +2483,16 @@ The owner chose these "for now" and asked to keep the alternatives on record in 
   centre (X 128), or to X 31 when the camera is at 1 (`CoopRespawnX`, bank 5).
   Alternative not taken:
   - (b) next to the partner. Its risk: it can put the player over the floor hole at about world X 63-96.
+
+## Owner decision (2026-10-09): co-op code runs from WRAM; PRG ROM 256 KB
+The owner confirmed this in chat on 2026-10-09. It replaces D1's "no code in WRAM" from now on, because bank E
+(COOP_CODE / COOP_CODE2) is nearly full.
+- PRG ROM grows from 128 KB to 256 KB (32 x 8 KB). MMC3 maps the last two banks at `$C000` / `$E000`, so the
+  original banks E and F move to the end of the ROM.
+- The co-op code image lives in ROM. It is copied once at power-on into PRG-RAM `$6000-$7FFF`, where the game already
+  waits for the PPU. Then it runs from there and can be called from any bank without bank switching.
+- First users: the Phase 8 camera, which drops the `CoopRunB5` nested bank call, and any further co-op code. Existing
+  bank-E co-op code may stay where it is.
+- The tools/perf change needed for code at `$6xxx` is approved: profile and coverage attribution, plus a guard that
+  nothing writes into the code area of WRAM.
+- Done as the first step of Phase 9 ("9.0").
