@@ -2469,3 +2469,17 @@ switch is `SwapPrgBankA` inside `RunBankedSub`; `$A000` is not touched). For lat
   attribute (nothing to do unless the owner wants one).
 - Space: bank 5 71, F 42, COOP_CODE2 95, COOP_CODE 8; further co-op code should use `CoopRunB5`-style calls into banks
   1 / D / 2.
+
+### Owner decisions (2026-10-09) - provisional, may be revisited
+The owner chose these "for now" and asked to keep the alternatives on record in case they are revisited later.
+- **Fall-through with the partner far left: (a) keep the Phase 8 behaviour.** The camera moves right by
+  min($FF - camera, partner X - 16), so the partner stays on screen. The faller lands at min($A0 + $FF - camera, 240),
+  Y 0, which is at most screen X 240 rather than the 1P world exit (X 415).
+  Alternatives not taken:
+  - (b) always use the 1P exit (camera $FF, faller at X $A0) and drag the partner to the left screen edge;
+  - (c) a plain vertical wrap: the faller reappears at Y 0 at its current X, and the camera does not move.
+  Code: `CoopRuckusWrap` (bank F).
+- **Respawn spot when the camera is not at the start: (a) keep the Phase 8 behaviour.** The respawn goes to the screen
+  centre (X 128), or to X 31 when the camera is at 1 (`CoopRespawnX`, bank 5).
+  Alternative not taken:
+  - (b) next to the partner. Its risk: it can put the player over the floor hole at about world X 63-96.
