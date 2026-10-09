@@ -3148,8 +3148,11 @@ DATA_0594E8:
 	.byte $34					;- D 0 - - - 0x00B4FA 02:94EA: 34
 
 CODE_0594EB:
+	BIT coopP2Active			;(co-op 8) both players in the round: CoopMoveX decides about the X step
+	BMI CoopMoveX
 	LDA wideScrollDir				;C - - - - - 0x00B4FB 02:94EB: A5 31
 	BNE CODE_0594F8				;C - - - - - 0x00B4FD 02:94ED: D0 09
+CODE_0594EF:
 		LDA objX				;C - - - - - 0x00B4FF 02:94EF: AD B3 05
 		CLC							;C - - - - - 0x00B502 02:94F2: 18
 		ADC ram_00D4				;C - - - - - 0x00B503 02:94F3: 65 D4
@@ -3160,6 +3163,65 @@ CODE_0594F8:
 	ADC ram_00D5				;C - - - - - 0x00B50C 02:94FC: 65 D5
 	STA objY				;C - - - - - 0x00B50E 02:94FE: 8D 8B 05
 	RTS							;C - - - - - 0x00B511 02:9501: 60
+
+; (co-op 8) The X step of a player update while both players are in the round (CODE_0594EB). Round 20 (wideRound):
+; the player who pushed the camera this tick holds still on screen, as the 1P camera holds P1 (CoopCamera sets bit
+; coopResident of coopCamHold: 0 = the tick's resident, 1 = the player in the P2 window); a step that would end past
+; the screen edges COOP_EDGE_L / COOP_EDGE_R is not taken (the partner leash keeps the camera from following).
+; Other rounds: the original test (wideScrollDir). X/Y are free here (the player update returns next).
+CoopMoveX:
+	LDA wideRound
+	BEQ @orig
+	LDA wideScrollDir
+	BEQ @edge
+	LDA coopCamHold
+	LDX coopResident
+	BEQ :+
+	LSR A
+:	LSR A
+	BCS CODE_0594F8				;this player pushed the camera
+@edge:
+	LDA ram_00D4
+	BEQ CODE_0594F8				;no X step
+	BMI @left
+	CLC
+	ADC objX
+	BCS CODE_0594F8				;past 255
+	CMP #COOP_EDGE_R+1
+	BCS CODE_0594F8
+	STA objX
+	BCC CODE_0594F8				;(C = 0)
+@left:
+	CLC
+	ADC objX
+	BCC CODE_0594F8				;below 0
+	CMP #COOP_EDGE_L
+	BCC CODE_0594F8
+	STA objX
+	BCS CODE_0594F8				;(C = 1)
+@orig:
+	LDA wideScrollDir
+	BNE CODE_0594F8
+	BEQ CODE_0594EF
+
+; (co-op 8) X of the in-place respawn (CODE_0595E3; was LDA #31 / STA objX). Both players in round 20 and the camera
+; not at the round start (the camera stays where it is, see CODE_0595C1): the bottom centre of the screen, which is
+; floor at every camera position but the start (the hole in the floor is at world X 64-96). Else 31, as in 1P.
+CoopRespawnX:
+	BIT coopP2Active
+	BPL @p31
+	LDA wideRound
+	BEQ @p31
+	LDA wideHScroll
+	CMP #$01
+	BEQ @p31
+	LDA #COOP_RESPAWN_XMID
+	BNE @set
+@p31:
+	LDA #31
+@set:
+	STA objX
+	RTS
 
 CODE_059502:
 	LDA objState				;C - - - - - 0x00B512 02:9502: AD 63 05
@@ -3266,16 +3328,15 @@ CODE_0595C1:
 		LDA currentRound				;C - - - - - 0x00B5DC 02:95CC: A5 D8
 		CMP #20					;C - - - - - 0x00B5DE 02:95CE: C9 14
 		BNE CODE_0595E3				;(R2) was CODE_0595D7
-			LDA coopResident			;(co-op 7a) only the resident (camera) player's respawn resets the scroll
-			BNE CODE_0595E3
+			BIT coopP2Active			;(co-op 8) both players in the round: the camera stays (7a: only the resident's
+			BMI CODE_0595E3				;respawn reset it, which moved the partner on screen)
 			LDA #$01					;C - - - - - 0x00B5E2 02:95D2: A9 01
 			STA wideHScroll				;C - - - - - 0x00B5E4 02:95D4: 8D 61 07
 	;(R2) CODE_0595D7 removed: with multiplayer = 1 a death switched to the other player (JSR CODE_05962D)
 	CODE_0595E3:
 		LDA #193					;C - - - - - 0x00B5F3 02:95E3: A9 C1
 		STA objY				;C - - - - - 0x00B5F5 02:95E5: 8D 8B 05
-		LDA #31					;C - - - - - 0x00B5F8 02:95E8: A9 1F
-		STA objX				;C - - - - - 0x00B5FA 02:95EA: 8D B3 05
+		JSR CoopRespawnX			;(co-op 8) was LDA #31 / STA objX: 31, or the screen centre in round 20
 		LDA #anPlayerR_ID					;C - - - - - 0x00B5FD 02:95ED: A9 02
 		STA objAnim				;C - - - - - 0x00B5FF 02:95EF: 8D 7B 06
 		JSR CODE_0599FF				;C - - - - - 0x00B602 02:95F2: 20 FF 99

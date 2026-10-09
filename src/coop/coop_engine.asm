@@ -1482,3 +1482,217 @@ CoopAddScoreTeam:
 	JMP CoopAddScoreAs
 @one:
 	JMP AddScore
+
+; =============================================================================================
+; Phase 8: round 20 (the only wide round: wideRound, camera CODE_0788CC, IRQ effect 5) with both players in the round.
+; See docs/coop_notes.md, Phase 8. Every routine here runs only while coopP2Active (the hooks gate with BIT / BPL);
+; 1P and a game with one player out keep the original code.
+;   camera     CoopCamera (from CODE_0788CC, before P1's update): either player pushes the camera (the 1P rule per
+;              player: LEFT at X < 80, RIGHT at X >= 176). Opposite pushes: no scroll. A scroll is made only if the
+;              player(s) who do not push stay within [COOP_EDGE_L, COOP_EDGE_R] after it (the leash). The pusher holds
+;              still on screen (CODE_0594EB / CoopMoveX, as P1 in 1P); the other player moves with the world, exactly
+;              COOP_CAM_STEP px per scrolled tick (the even-tick object shifter CODE_0FFD89 skips P2's slot).
+;   edges      CoopMoveX (bank 5): an X step past the screen edges is not taken.
+;   Ruckus     CoopRuckusWrap (CODE_08882A): both players get the top clamp and the fall-through exit.
+;   respawn    CODE_0595C1 / CoopRespawnX (bank 5): no camera reset; X relative to the camera.
+; =============================================================================================
+.segment "COOP_CODE2"
+
+; CoopRunB5: run the bank-5 routine A/X (lo/hi) through RunBankedSub (bank 5 at $8000 with SwapPrgBankA, $A000 kept) and
+; come back to the caller's bank Y at $8000. RunBankedSub keeps the outer bankedSubRetBank on the stack, so this nests
+; inside a banked sub (the camera runs inside RoundUpdate's CODE_078247 call, the Ruckus wrap inside the enemy AI).
+; JMP here from the banked caller: the RTS of RunBankedSub returns to the caller's caller. Clobbers A/X/Y.
+CoopRunB5:
+	STA bankedSub
+	STX bankedSub+1
+	STY bankedSubRetBank
+	LDA #.BANK(CoopCamera)
+	STA bankedSubBank
+	JMP RunBankedSub
+
+.segment "PRG_BANK_5"
+
+; CoopCamera: from CODE_0788CC (bank 7) through CoopRunB5 (every RoundUpdate tick of round 20, P1 resident). Inputs are the
+; players' playerHeld of their last update (as for the 1P camera). Writes wideScrollDir, wideHScroll, coopCamHold,
+; coopCamWant and the X of a player who does not push. Clobbers A/X/Y.
+CoopCamera:
+	LDA #$00
+	STA wideScrollDir
+	STA coopCamHold
+	LDA playerHeld
+	LDX objX
+	LDY playerState
+	JSR CoopCamWant
+	STA coopCamWant
+	LDA ctxOther_playerHeld
+	LDX objX+OSLOT_P2
+	LDY ctxOther_playerState
+	JSR CoopCamWant
+	STA coopCamWant+1
+	ORA coopCamWant
+	BEQ @rts						;nobody pushes
+	CMP #DIR_LEFT|DIR_RIGHT
+	BEQ @rts						;opposite pushes: the camera stalls
+	TAY								;Y = direction
+	LDA coopCamWant					;the leash: a player who does not push must stay on screen
+	BNE :+
+	LDX objX
+	JSR CoopCamLeash
+	BCS @rts
+:	LDA coopCamWant+1
+	BNE :+
+	LDX objX+OSLOT_P2
+	JSR CoopCamLeash
+	BCS @rts
+:	LDA wideHScroll
+	CPY #DIR_LEFT
+	BNE @right
+	CMP #$01						;as WideScrollLeft: the left end
+	BEQ @rts
+	SBC #COOP_CAM_STEP				;(C = 1)
+	LDX #COOP_CAM_STEP				;the world moves right on screen
+	BNE @scroll
+@right:
+	CMP #$FF						;as WideScrollRight: the right end
+	BEQ @rts
+	ADC #COOP_CAM_STEP				;(C = 0)
+	LDX #<(-COOP_CAM_STEP)
+@scroll:
+	STA wideHScroll
+	STY wideScrollDir
+	STX coopCamTmp					;the shift of a player who does not push
+	LDA coopCamWant
+	BEQ :+
+	INC coopCamHold					;bit 0: the slot-0 player pushed (holds still)
+	BNE @p2
+:	LDA objX
+	CLC
+	ADC coopCamTmp
+	STA objX
+@p2:
+	LDA coopCamWant+1
+	BEQ :+
+	LDA coopCamHold
+	ORA #$02						;bit 1: the OSLOT_P2 player pushed
+	STA coopCamHold
+	RTS
+:	LDA objX+OSLOT_P2
+	CLC
+	ADC coopCamTmp
+	STA objX+OSLOT_P2
+@rts:
+	RTS
+
+; CoopCamWant: A = playerHeld, X = screen X, Y = playerState of one player. Out: A = DIR_LEFT / DIR_RIGHT if he pushes
+; the camera (the 1P rule of CODE_0788CC; a dying player does not push), else 0.
+CoopCamWant:
+	CPY #PLAYER_STATE_DEAD
+	BEQ @no
+	AND #KEY_LEFT|KEY_RIGHT
+	BEQ @rts
+	CMP #KEY_RIGHT
+	BEQ @r
+	CPX #COOP_CAM_LZONE				;LEFT (or both, as CODE_0788CC)
+	BCS @no
+	LDA #DIR_LEFT
+	RTS
+@r:	CPX #COOP_CAM_RZONE
+	BCC @no
+	LDA #DIR_RIGHT
+	RTS
+@no:
+	LDA #$00
+@rts:
+	RTS
+
+; CoopCamLeash: X = screen X of a player who does not push, Y = scroll direction. Out: C = 1 if the scroll would move
+; him past a screen edge (left scroll: X + step > COOP_EDGE_R; right scroll: X - step < COOP_EDGE_L).
+CoopCamLeash:
+	CPY #DIR_LEFT
+	BNE @r
+	CPX #COOP_EDGE_R-COOP_CAM_STEP+1
+	RTS
+@r:	TXA
+	EOR #$FF						;X <= COOP_EDGE_L+step-1  <=>  ~X >= 256-(COOP_EDGE_L+step)
+	CMP #<(256-(COOP_EDGE_L+COOP_CAM_STEP))
+	RTS
+
+.segment "PRG_BANK_F"
+
+; ---------------------------------------------------------------------------------------------
+; CoopRuckusWrap: JMP from CODE_08882A (Ruckus, round 20 boss; enemy AI, even tick, bank 8 at $8000, P1 resident) while
+; both players are in the round; the 1P code there clamps P1 at the top (Y < 8 -> 8) and sends a P1 who fell through
+; the floor (Y >= $E8) to the exit: Y 0, X $A0, camera $FF (the right end), bubbles and item to Y 0 (CODE_088AA2).
+; Here each player (slot 0, then OSLOT_P2) gets the same: the top clamp, and on a fall the exit, with the camera moved
+; right only as far as the partner stays on screen (partner X - move >= COOP_EDGE_L; the partner moves with the world)
+; and the faller at the exit's screen X ($A0 + $FF - camera), at most COOP_EDGE_R. A dying faller does not move the
+; camera. CODE_088AA2 runs when the camera moved, with P2's Y kept (it clears slots 18 and 20-39, 39 = P2).
+; Keeps X (the enemy index); continues at CODE_088857.
+; ---------------------------------------------------------------------------------------------
+CoopRuckusWrap:
+	TXA
+	PHA
+	LDX #$00
+	JSR @one
+	LDX #OSLOT_P2
+	JSR @one
+	PLA
+	TAX
+	JMP CODE_088857
+@one:
+	LDA objY,X
+	CMP #$08
+	BCS :+
+	LDA #$08
+	STA objY,X
+:	CMP #$E8
+	BCC @rts
+	LDA #$00						;fell through the floor
+	STA objY,X
+	LDY #OSLOT_P2					;Y = the partner's slot, A = the faller's state
+	LDA playerState
+	CPX #$00
+	BEQ :+
+	LDY #$00
+	LDA ctxOther_playerState
+:	CMP #PLAYER_STATE_DEAD
+	BEQ @land						;a dying player does not move the camera
+	LDA objX,Y						;move = min($FF - camera, partner X - COOP_EDGE_L), even
+	SEC
+	SBC #COOP_EDGE_L
+	BCC @land
+	STA coopCamTmp
+	LDA #$FF
+	SBC wideHScroll					;(C = 1)
+	CMP coopCamTmp
+	BCS :+
+	STA coopCamTmp
+:	LDA coopCamTmp
+	AND #$FE						;(wideHScroll stays odd)
+	BEQ @land
+	STA coopCamTmp
+	CLC
+	ADC wideHScroll
+	STA wideHScroll
+	LDA objX,Y						;the partner keeps his place in the world
+	SEC
+	SBC coopCamTmp
+	STA objX,Y
+	LDA objY+OSLOT_P2
+	PHA
+	JSR CODE_088AA2					;bubbles and the item to Y 0, as in 1P (keeps X and Y)
+	PLA
+	STA objY+OSLOT_P2				;but not P2
+@land:
+	LDA #$FF						;X = $A0 + ($FF - camera), at most COOP_EDGE_R
+	SEC
+	SBC wideHScroll
+	CLC
+	ADC #$A0
+	BCS :+
+	CMP #COOP_EDGE_R+1
+	BCC :++
+:	LDA #COOP_EDGE_R
+:	STA objX,X
+@rts:
+	RTS

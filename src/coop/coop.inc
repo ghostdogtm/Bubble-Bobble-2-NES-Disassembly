@@ -92,3 +92,13 @@ HUD_BONUS_DIGIT0 = $40          ; bonus-game screen (D-7b-11): the glyphs $66-$7
 HUD_ICON_HIDE_Y = $F8           ; objY of the HUD icon (slot OSLOT_ICON) while DrawObjects runs: its sprites get
                                 ; Y = $F0 (image offset -8), off screen, as the unused OAM entries
 .assert chrBonusHud_A_ID = (chrFans_AA_ID | $80), error, "NMI CHR remap: chrBonusHud_A_ID must be chrFans_AA_ID | $80"
+
+; ---------------------------------------------------------------------------------------------
+; Phase 8: round 20 (the only wide round) with both players in the round (see docs/coop_notes.md, Phase 8).
+; ---------------------------------------------------------------------------------------------
+COOP_EDGE_L     = 16            ; screen edges of a player object (X = sprite centre) while both players are in round 20:
+COOP_EDGE_R     = 240           ;   an X step past them is not taken, and the camera never pushes a player past them
+COOP_CAM_STEP   = 2             ; wideHScroll step per tick (WideScrollLeft / WideScrollRight)
+COOP_CAM_LZONE  = 80            ; CODE_0788CC: holding LEFT at X < 80 pushes the camera left,
+COOP_CAM_RZONE  = 176           ;   holding RIGHT at X >= 176 pushes it right
+COOP_RESPAWN_XMID = 128         ; in-place respawn X in round 20 while the camera is not at the round start

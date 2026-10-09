@@ -1320,6 +1320,8 @@ DATA_0788AC:
 	.byte $09					;- D 0 - - - 0x00E8DB 03:88CB: 09
 
 CODE_0788CC:
+	BIT coopP2Active			;(co-op 8) both players in the round: either player pushes the camera, with the leash
+	BMI CODE_0788CC_coop
 	LDA #$00					;C - - - - - 0x00E8DC 03:88CC: A9 00
 	STA wideScrollDir				;C - - - - - 0x00E8DE 03:88CE: 85 31
 
@@ -1340,6 +1342,11 @@ CODE_0788CC:
 			JSR WideScrollRight				;C - - - - - 0x00E8FE 03:88EE: 20 04 89
 @end:
 	RTS							;C - - - - - 0x00E901 03:88F1: 60
+CODE_0788CC_coop:
+	LDA #.LOBYTE(CoopCamera)	;(co-op 8) the co-op camera is in bank 5
+	LDX #.HIBYTE(CoopCamera)
+	LDY #.BANK(*)
+	JMP CoopRunB5
 
 WideScrollLeft:
 	LDA wideHScroll				;C - - - - - 0x00E902 03:88F2: AD 61 07

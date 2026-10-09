@@ -80,3 +80,10 @@ hudStamp:       .res 1          ; globalTimer of the tick that queued hudBuf: a 
 
 ; Phase 7b-3: team bonus.
 coopTeamDigits: .res SCORE_TOTAL_DIGITS ; CoopAddScoreTeam: scoreAdditionDigits kept for the second player's award
+
+; Phase 8: round 20 camera with both players in the round.
+coopCamHold:    .res 1          ; CoopCamera, on a tick it scrolled: bit 0 = the player then in slot 0 (the tick's resident),
+                                ; bit 1 = the one in OSLOT_P2 pushed the camera; his X step is not taken (CODE_0594EB), as the
+                                ; 1P camera does for P1. Read only while wideScrollDir != 0.
+coopCamWant:    .res 2          ; CoopCamera: push direction (0, DIR_LEFT, DIR_RIGHT) of the slot-0 and the OSLOT_P2 player
+coopCamTmp:     .res 1          ; CoopRuckusWrap: camera move (even) of a fall through the floor

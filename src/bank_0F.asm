@@ -5065,6 +5065,13 @@ CODE_0FFDA1:
 	STA scratch0				;C - - - - - 0x01FDB3 07:FDA3: 85 00
 	LDA objState,X				;C - - - - - 0x01FDB5 07:FDA5: BD 63 05
 	BEQ CODE_0FFDEE				;C - - - - - 0x01FDB8 07:FDA8: F0 44
+	;(co-op 8) P2's object is neither shifted nor despawned here: CoopCamera moves it with the world (2 px per
+	;scrolled tick) and its leash keeps it on screen
+	CPX #OSLOT_P2
+	BNE :+
+	BIT coopP2Active
+	BMI CODE_0FFDEE				;(X = 39: on to the next slot)
+:
 
 	LDA wideScrollDir				;C - - - - - 0x01FDBA 07:FDAA: A5 31
 	CMP #$01					;C - - - - - 0x01FDBC 07:FDAC: C9 01
@@ -5095,13 +5102,6 @@ CODE_0FFDCA:
 CODE_0FFDD9:
 	CPX #$14					;C - - - - - 0x01FDE9 07:FDD9: E0 14
 	BCC CODE_0FFDEE				;C - - - - - 0x01FDEB 07:FDDB: 90 11
-	;(Co-op) P2's object is shifted with the world like the bubbles but never despawned here
-	;(the camera leash that keeps P2 on screen is Phase 8)
-	CPX #OSLOT_P2
-	BNE :+
-	BIT coopP2Active
-	BMI CODE_0FFE4C
-:
 		;Unreached
 		LDA objState,X				;- - - - - - 0x01FDED 07:FDDD: BD
 		CMP #$80					;- - - - - - 0x01FDF0 07:FDE0: C9

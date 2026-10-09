@@ -1317,6 +1317,10 @@ CODE_08882A:
 	AND #$3F					;C - - - - - 0x01083D 04:882D: 29 3F
 	STA objState+OSLOT_ENEMY				;C - - - - - 0x01083F 04:882F: 8D 6C 05
 	JSR CODE_08886E				;C - - - - - 0x010842 04:8832: 20 6E 88
+	BIT coopP2Active			;(co-op 8) both players in the round: both get the wrap, the camera keeps them on screen
+	BPL CODE_088835
+	JMP CoopRuckusWrap			;(returns to CODE_088857)
+CODE_088835:
 	LDA objY				;C - - - - - 0x010845 04:8835: AD 8B 05
 	CMP #$08					;C - - - - - 0x010848 04:8838: C9 08
 	BCS CODE_088841				;C - - - - - 0x01084A 04:883A: B0 05
