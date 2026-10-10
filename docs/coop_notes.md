@@ -2628,3 +2628,121 @@ CoopBoot runs; usable for more boot-time code or data). Free banks: `$0E`, `$0F`
 - Rule for new co-op code: put it in `COOP_WRAM_CODE` (callable from any bank, no switching); keep fixed-bank hooks
   minimal. Code that writes the area at run time would trip the guard by design (no self-modifying code).
 - Phase 8 open items are unchanged.
+
+## Phase 9.1: player sprite CHR conflict
+
+Code commit `11899c2`. Build `p91a` (`p91af` = `COOP_FORCE`, `p91at` = `COOP_SWAPTEST`). Scripts and results:
+`tmp/coop_scripts/p91/`. 1P is unchanged: regress 12/12 (HUD-rule counts and lag columns identical to p90a's run).
+
+### Measurements
+- Sprites are 8x16 from pattern table `$1000`; `SprBaseTiles` = `$00/$40/$80/$C0`, so CHR slot 0 = tiles `$00-$3F` of
+  MMC3 R2 = `chrBankC` (NMI copies `chrBankC-F` to R2-R5). Both players have `objChrSlot` 0.
+- Player graphics (`slot0use.py`, `animdata.py`): a frame = (CHR bank `$40-$4F`, image block). The images use 4 fixed
+  blocks of 6 cells (12 tiles): A = `$00` (stand / walk: `imgPlayerL/R`, small player), B = `$06` (`imgPlayerJump*`:
+  jump, fall, inhale 4, die), C = `$20` (`imgUNK0B_*`: shoot, inhale 1-3, weaken, needler, die), D = `$26` (rotate).
+  Walking is animated by switching the bank under the same image (A in `$40-$47`). The bubbles use the other 16 tiles
+  (columns `$C-$F`), identical in all 16 player banks. 51 frames are referenced by animations (48 different contents;
+  47C = 40D, and D of `$44-$4F` is never used).
+- Users of slot 0 (all 80 rounds, co-op): the two players and the bubbles (`objChrBank` 0: `imgBubble_0/1`, pop,
+  emerge). Nothing else; special bubbles, items and the icon are in slot 1 (banks `$50-$55`: 8 cells special bubble +
+  24 cells items, no free cell), enemies in slots 2-3. **There is no special bubble in slot 0.**
+- Co-occurrence (`slot0use.py`, `fs01`-`fs80` = rounds 1-80, 2000 ticks co-op each, plus c01..c64, c40, c70, cnat):
+  82868 ticks with both players drawn, banks different on 67218 (81 %), 1290 different frame pairs (3088 with the
+  "charge" input style `chargelua.py`, which holds B: the random harness input never charges). Most frequent: 45C
+  (shoot) with 40A / 40B / 49B / 41B / 4FB, walk 40A-47A with jump / fall. Frames seen: 28 (harness input), 39
+  (charge style; adds inhale 1-4, states 5-10, needler); never seen: 4BA-4DA (win, bonus game only), 4EA / 4FA (small
+  player), 44B / 45B (unreferenced animations), 4BB (state 10), 4EB / 4EC (end of the death animation).
+- Free sprite slot (`freeslot.py`): only 37663 of the 67218 conflict ticks (56 %) have a slot 1-3 that no drawn object
+  uses, so "draw P2 from a free slot" is not a fix by itself.
+
+### Design
+One KB holds the 16 bubble tiles plus exactly 4 frames (one per block position, 4 x 12 tiles). A frame drawn from
+another block position only needs its OAM tile numbers shifted by the block difference (`$06`, `$20`, `$26`, ...).
+Every pair of frames must share some KB: with 4 frames per KB that is a covering design, at least v(v-1)/12 KBs for v
+frames (196 for 49), but CHR ROM is at the MMC3 maximum (256 KB) with 126 free ids. The projective space PG(3,3) has 40
+points and 130 lines of 4 points with every two points on exactly one line; 4 disjoint lines are the original banks
+`$40-$43` (their 16 frames at home), the other **126 lines are new banks: ids `$80-$97`, `$9A-$FF`** (all free ids).
+The 40 points are the 16 frames of `$40-$43` plus the 24 other frames seen in the runs (all 39 seen frames + 47C as
+40D). The 10 frames never seen are mapped to the nearest frame of the same block (pixel distance): 44B 45B 4BB -> 47B,
+4BA 4CA -> 40A, 4DA -> 44A, 4EA 4FA -> 47A, 4EB -> 4DB, 4EC -> 45C. The point labelling and the position of each frame
+in its banks were optimised (hill climbing, weighted by the measured pair counts) so that most players stay at their
+home block: in the measured pairs 21 % of player-ticks need a shift.
+
+Generator: `tmp/coop_scripts/p91/mkpairchr.py` (`--check` verifies both outputs; reads banks `$40-$4F` from a build's
+CHR, identical to the original ROM) -> `src/chr/CoopPairs.chr` (126 KB, banks in id order) and
+`src/coop/coop_pairtab.inc` (CoopFrmIdx 64 B: bank/block -> point; CoopPtBank/CoopPtPos 40+40; CoopTriLo/Hi 40+40;
+CoopPairBank/CoopPairPos 780+780, triangular by point pair). `statcheck.py`: all 1560 ordered pairs give a bank with
+both frames' bytes at the chosen positions and the bubbles intact.
+
+Runtime, every DrawObjects call while `coopP2Active` (`CoopDrawObjects`, bank E: `BIT coopP2Active / BPL / JMP
+CoopDrawPair`, 8 B, the last free bytes of COOP_CODE), `CoopDrawPair` in COOP_WRAM_CODE:
+1. both players drawn (`objState` != 0; the blink hides are already applied) and `objChrBank` different;
+2. memo: if the 7 inputs (both `objChrBank`, `objImgOfs`, `objImgOfsHI`, and `sprPrgBank`) equal the last call's, the
+   last result is reused (46 % of the calls in c01);
+3. else both banks `$40-$4F` -> `CoopFramePt` (bank, image -> point; image block from `objImgOfs`), pair lookup ->
+   bank and the two positions; `CoopPairShift` for a player not at home: copies his image (`$A000` table entry of
+   `sprPrgBank`, Rule 9 order switch as DrawObjectsBody does next) into `coopImgBuf` with the tile numbers shifted,
+   cached per player (copy redone 137 times in 3000 ticks of c01), and points `objImgOfs/HI` at `coopImgEnt` (the
+   table read `$A0xx + objImgOfs` wraps to the WRAM data area);
+4. `CoopDrawObjects1P` (icon hide + DrawObjectsBody), then `chrBankC` = the pair bank (bubbles need nothing: their
+   tiles are in every player KB), `objImgOfs/HI` put back.
+A player in slot 0 with a bank outside `$40-$4F` (found: anim `$A5` = `anInvaderDie`, bank `$5B`, while stuck in
+state `$0C`, rounds 4, 13, 18, 73 of the charge runs) is drawn from a slot 1-3 that already holds that bank, else
+from a slot no other drawn object uses (lent for this call: DrawObjects writes `chrBankD-F`, `CoopForRestore` puts the
+old value back at the next call or in `CoopP2Deactivate`), else without a bank write (`objChrBank` 0 for the call), so
+that the other player is always right and only the stuck player shows the other KB (as before the fix).
+
+### Sites
+| site | change | bytes |
+|------|--------|-------|
+| `CoopDrawObjects` (COOP_CODE) | gate `BIT coopP2Active / BPL CoopDrawObjects1P / JMP CoopDrawPair` | +8 |
+| `CoopP2Deactivate` (COOP_CODE2) | `JSR CoopForRestore` | +3 |
+| COOP_WRAM_CODE | CoopDrawPair, CoopForRestore, CoopForeignSlot, CoopFramePt, CoopPairShift, tables | +2857 (code ~1040, tables ~1815) |
+| COOP_BSS | coopPairOn, coopMemoKey/On, coopPairSave, coopPairBank/Pt/Blk/Pos, coopImgKey*, coopImgEnt, coopImgBuf 50, coopFor*, coopMuteSave, coopPairFor, coopPairA | +91 (COOP_BSS 253 B) |
+| `src/chr.asm` | ids `$80-$97`, `$9A-$FF` = `CoopPairs.chr` (was `$FF` filler) | CHR +126 KB used |
+
+### Verification (build `p91a`)
+1. Builds `p91a`, `p91af`, `p91at` assemble.
+2. `regress base p91a --reuse-base`: REGRESSION PASS 12/12, no new exclusion, HUD-rule counts identical to p90a; WRAM
+   guard silent.
+3. New checker `p91/pairchk.py` (per co-op play frame and player: the state at DrawObjects entry gives the expected
+   sprites = image struct from PRG ROM with the 32 pattern bytes of each 8x16 tile in the player's own `objChrBank`;
+   at the end of the rendered frame every PPU OAM entry is resolved through the MMC3 CHR registers actually written,
+   tracked from `$8000/$8001` writes; ok / bad (a sprite at its place only with wrong bytes) / absent / partial):
+   - c01 c05 c17 c20 c22 c50 c64: **p91a P1 bad 0 / 12740 ok, P2 bad 0 / 13041 ok** (partial 91 each = c64 OAM full);
+     p90a: P1 bad 4896 / 12740, P2 bad 4949 / 13041.
+   - charge style, 16 rounds with full sprite slots (fs02 04 08 11 13 18 23 27 35 40 42 48 49 56 61 73): p91a P1 bad 96,
+     P2 bad 0 of ~15000 each: 95 are the stuck player in bank `$5B` with no slot to borrow (residual class below) and
+     1 is fs35 with the OAM full and the two players overlapping exactly (a sprite of one found at the other's place);
+     p90a: P1 bad 6141 / P2 bad 6114.
+4. `p90/p90verify.py p91a` (32 runs): every rc 0, **violations p5 0, p6 0, p6b 0, p7 0, Phase 8 0**; every counter equal to p90a's run except the name `addscore_cp0_from_DF7E` -> `DF81` (a return address in COOP_CODE2, +3 B from the new `JSR CoopForRestore`). WRAM-code guard silent. (`p91/final_p90verify.txt`)
+5. `p90/hudcheck.py p91a`, sets coop (10), p8 (9), r2 (14), 1p (16): HUDCHECK PASS x4, 49 runs rc 0, 0 job / cell / stale errors. (`p91/final_hudcheck.txt`)
+6. `r2/menutest.py p91a p91af`: MENU TESTS PASS a-f. (`p91/final_menutest.txt`)
+7. `p7b2/pixcmp.py`: natural 1500 samples 0 differing (vs base and vs p90a); r20 (750): vs base 28 = 27 split-line + t2064 (the known sprite-limit area, as p90a); vs p90a 10, all split-line (+7 cycles in 1P shift the IRQ split timing). Nothing outside the known 7b-1 classes. (`p91/final_pixcmp_base.txt`, `final_pixcmp_p90a.txt`)
+8. Screenshots `tmp/coop_scripts/p91/shots/` (before = p90a, after = p91a, same input): `c01_t01074/5` (one dragon
+   shooting, the other walking: before, the shooter has walking tiles), `c01_t01500/1` (falling vs shooting),
+   `c17_t01160/1` (shooting vs walking), `c50_t01048/9` (jumping vs dying).
+
+### Cost
+- 1P (`stats p91a --vs p90a`): +7 cycles per tick everywhere (the gate), +0.04 %; lag +1 frame in r01 and r50, else 0.
+- Co-op (c01 c05 c17 c20 c22 c50 c64): +336 .. +468 play cycles per tick (+1.1 .. +2.4 %), lag +0 .. +71 frames per
+  3000 ticks (c50 71, c17 41, c64 37). Profile c01 per call: about 200 cycles on a memo hit, 350-450 on a miss
+  (frame lookup x2, pair lookup, shifts). The game itself runs identically (every non-co-op routine's cycles equal).
+
+### Free space after the phase
+COOP_WRAM_CODE 910 B free (was 3767); PRG-RAM data area 3843 B free (was 3934); COOP_CODE 0 (was 8); COOP_CODE2 105 (108); CHR ROM: **no free 1 KB id left**
+(all 126 used by the pair banks); banks 1 572, D 492, 5 262, F 182, ... unchanged; PRG banks `$0E`, `$0F`, `$11-$1D` free.
+
+### Deviations
+- Not "one combined bank per pair" (1176 pairs) but a PG(3,3) design: 126 banks for every pair of 40 frames.
+- The 10 never-seen frames are substituted, not exact (see design).
+- The checker counts per rendered frame (OAM DMA) from the state at DrawObjects entry: the tick-end state was wrong for
+  a few frames where an animation step ran after DrawObjects.
+
+### Open items
+- Residual: the stuck state `$0C` shows the player with anim `$A5` (`anInvaderDie`, bank `$5B`) in slot 0; when no
+  sprite slot 1-3 holds or can lend `$5B`, that player shows the other player's KB (as in p90a, but the other player is
+  now always right). A fix needs one more CHR KB per frame (no ids left) or a CHR layout change.
+- The substituted frames (if a player ever shows one, the pose is the nearest frame of the same image).
+- CHR ROM is full; any new CHR needs a smaller design (e.g. 37 points = 111 banks) or reuse of duplicate banks.
+- Co-op cost +1.1 .. +2.4 %: further savings possible (e.g. drop the image-HI bytes from the memo key).
