@@ -112,3 +112,5 @@ COOP_RESPAWN_XMID = 128         ; in-place respawn X in round 20 while the camer
 COOP_WRAM_CODE_RUN   = $7000    ; run address of COOP_WRAM_CODE (config_us WRAMCODE)
 COOP_WRAM_CODE_IMG   = $A000    ; the image in bank $10 (COOP_WRAM_CODE is the first segment of MEM_X10)
 COOP_WRAM_CODE_PAGES = 16       ; always the whole 4 KB area: a constant copy time (CoopBoot's delay is fixed)
+
+COOP_IMG_BUF    = 25            ; Phase 9.1: image copy size (size byte + 6 sprites x 4); player images have <= 6 sprites

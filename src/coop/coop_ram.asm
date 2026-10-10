@@ -88,3 +88,26 @@ coopCamHold:    .res 1          ; CoopCamera, on a tick it scrolled: bit 0 = the
                                 ; 1P camera does for P1. Read only while wideScrollDir != 0.
 coopCamWant:    .res 2          ; CoopCamera: push direction (0, DIR_LEFT, DIR_RIGHT) of the slot-0 and the OSLOT_P2 player
 coopCamTmp:     .res 1          ; CoopRuckusWrap: camera move (even) of a fall through the floor
+
+; Phase 9.1: both players' sprites from one CHR KB (CoopDrawPair; see docs/coop_notes.md, Phase 9.1).
+coopPairOn:     .res 1          ; CoopDrawPair, this DrawObjects call: bit 0 = chrBankC := coopPairBank after it; bit 1 / 2 = P1's /
+                                ; P2's objImgOfs points at his coopImgBuf (put back from coopPairSave+2/3 / +4/5)
+coopMemoKey:    .res 7          ; CoopDrawPair: the inputs of the last computed result (objChrBank, objImgOfs, objImgOfsHI of P1 / P2, sprPrgBank)
+coopMemoOn:     .res 1          ; its coopPairOn (0 = no pair)
+coopPairSave:   .res 6          ; +2/3: P1's objImgOfs / HI, +4/5: P2's (+0/1 unused)
+coopPairFor:    .res 1          ; bit 0 / 1: CoopForeignSlot moved P1 / P2 to another sprite CHR slot for this call
+coopForSlot:    .res 1          ; sprite slot 1-3 lent to a player by CoopForeignSlot in the last call (0 = none)
+coopForOld:     .res 1          ; its chrBankD-F value before, and the bank the player wrote there
+coopForVal:     .res 1
+coopMuteSave:   .res 2          ; objChrBank of P1 / P2 while CoopForeignSlot draws him without a bank (no slot free)
+coopPairA:      .res 1          ; DrawObjects' A across the restore
+coopPairBank:   .res 1          ; the pair bank of this call
+coopPairPt:     .res 2          ; per player (0 = slot 0, 1 = OSLOT_P2): frame point 0-39 (coop_pairtab.inc)
+coopPairBlk:    .res 2          ; per player: home block of the frame (0-3 = A B C D)
+coopPairPos:    .res 2          ; per player: block position of the frame in the pair bank
+coopImgKeyLo:   .res 2          ; per player: objImgOfs, objImgOfsHI, sprPrgBank and tile shift of the image in coopImgBuf
+coopImgKeyHi:   .res 2          ;   (coopImgKeyDelta 0 = buffer empty: a shift is never 0)
+coopImgKeyBank: .res 2
+coopImgKeyDelta: .res 2
+coopImgEnt:     .res 4          ; per player: pointer to his coopImgBuf (the "image table entry" objImgOfs points to)
+coopImgBuf:     .res 2*COOP_IMG_BUF ; per player: copy of the image with the tile numbers shifted
