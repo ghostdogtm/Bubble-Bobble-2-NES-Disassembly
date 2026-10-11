@@ -56,29 +56,54 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 ; ---------------------------------------------------------------------------------------------
 ; CoopSwap: exchange the resident player with the one stored in ctxOther / object slot OSLOT_P2.
 ;   - every COOP_CTX_SCALARS entry <-> its shadow byte ctxOther_<name>
-;   - every COOP_CTX_ARRAYS array: slot 0 <-> slot OSLOT_P2
+;   - every COOP_CTX_ARRAYS_DRAW and COOP_CTX_ARRAYS array: slot 0 <-> slot OSLOT_P2
+;     (9.2: the P2 window enters at CoopSwap + COOP_SWAP_WIN_OFS, after the DRAW arrays, which stay in place for it)
 ;   - powerUps: only the bits in COOP_POWERUP_MASK are exchanged with ctxOther_powerUps
 ;   - coopResident ^= 1; currentPlayer = coopResident ^ coopRoles (the physical id of the new resident;
 ;     coopRoles = 1 after P1 went out and P2 became the resident player, Phase 7a)
 ; CoopSwapCtx (Phase 7a) is the same without the object arrays (for flows where the objects do not matter:
 ; continue, new game, game over). Clobbers A and X; preserves Y; flags undefined. Unrolled (lists in coop.inc).
+; (9.2) Entries marked ", eq" in the lists, and the powerUps bits, are compared first and exchanged only when they differ.
 ; ---------------------------------------------------------------------------------------------
-.macro COOP_SWAP_SCALAR name
+.macro COOP_SWAP_SCALAR name, mode
+.ifblank mode
 	LDA name
 	LDX .ident(.concat("ctxOther_", .string(name)))
 	STX name
 	STA .ident(.concat("ctxOther_", .string(name)))
+.else
+	LDA name								;(9.2) usually equal: exchange only when they differ
+	CMP .ident(.concat("ctxOther_", .string(name)))
+	BEQ :+
+	LDX .ident(.concat("ctxOther_", .string(name)))
+	STX name
+	STA .ident(.concat("ctxOther_", .string(name)))
+:
+.endif
 .endmacro
 
-.macro COOP_SWAP_ARRAY name
+.macro COOP_SWAP_ARRAY name, mode
+.ifblank mode
 	LDA name
 	LDX name+OSLOT_P2
 	STX name
 	STA name+OSLOT_P2
+.else
+	LDA name
+	CMP name+OSLOT_P2
+	BEQ :+
+	LDX name+OSLOT_P2
+	STX name
+	STA name+OSLOT_P2
+:
+.endif
 .endmacro
 
 CoopSwap:
+	COOP_CTX_ARRAYS_DRAW COOP_SWAP_ARRAY
+@win:								;(9.2) the P2 window's swaps start here (see COOP_CTX_ARRAYS_DRAW in coop.inc)
 	COOP_CTX_ARRAYS COOP_SWAP_ARRAY
+COOP_SWAP_WIN_OFS = @win - CoopSwap
 CoopSwapCtx:
 	COOP_CTX_SCALARS COOP_SWAP_SCALAR
 
@@ -87,12 +112,14 @@ CoopSwapCtx:
 	LDA powerUps
 	EOR ctxOther_powerUps
 	AND #COOP_POWERUP_MASK
+	BEQ :+							;(9.2) x = 0 (most swaps): nothing changes
 	TAX
 	EOR powerUps
 	STA powerUps
 	TXA
 	EOR ctxOther_powerUps
 	STA ctxOther_powerUps
+:
 
 	LDA coopResident
 	EOR #$01
@@ -129,10 +156,13 @@ CoopP2WindowEven:
 CoopP2Window:
 	;A = bank that must be mapped at $8000 when control returns to the (banked) caller
 	STA bankedSubRetBank			;CoopSwap does not touch it
-	JSR CoopShotRestore				;shot bytes back with their owners before the swap (Phase 5)
+	LDA coopShotSwapped				;shot bytes back with their owners before the swap (Phase 5; CoopShotRestore inline)
+	BEQ :+
+	JSR CoopShotExchange
+:
 	LDA prgBankB					;the caller's $A000 bank, restored below
 	PHA
-	JSR CoopSwap					;P2 resident: context, slot 0 <-> OSLOT_P2, currentPlayer = 1
+	JSR CoopSwap+COOP_SWAP_WIN_OFS	;P2 resident: context, slot 0 <-> OSLOT_P2 (9.2: not the DRAW arrays), currentPlayer = 1
 	LDA #.LOBYTE(CODE_058E83)		;player update (reads pad 2 via currentPlayer)
 	STA bankedSub
 	LDA #.HIBYTE(CODE_058E83)
@@ -147,7 +177,7 @@ CoopP2Window:
 	LDA playerState
 	CMP #PLAYER_STATE_DEAD
 	BEQ @in
-	JSR CoopSwap
+	JSR CoopSwap+COOP_SWAP_WIN_OFS
 	JSR CoopP2Deactivate
 	JMP @restore
 @in:
@@ -164,7 +194,7 @@ CoopP2Window:
 @even:
 	JSR PlayerCheckEnemyCollision	;even: P2 vs enemies/food, exactly as RoundUpdate runs it for P1
 @swapback:
-	JSR CoopSwap					;P1 resident again (coopResident = 0, currentPlayer = 0)
+	JSR CoopSwap+COOP_SWAP_WIN_OFS	;P1 resident again (coopResident = 0, currentPlayer = 0)
 @restore:
 	PLA
 	CMP prgBankB					;$A000 always holds prgBankB (Rule 9), so equal = nothing to do
@@ -227,6 +257,9 @@ CoopP2BubbleTouch:
 	STX playerHazardTrigger
 	STX ram_007D
 	STX playerHazardSlot
+	DEX
+	STX coopTouchSkip				;(9.2) $FF: no bubble skipped since the last CODE_098932 call
+	INX
 @slot:
 	LDA objState+OSLOT_BUBBLE,X
 	BEQ @next
@@ -234,6 +267,22 @@ CoopP2BubbleTouch:
 	BCS @next						;states >= 6 (and $80+) do not reach CODE_098149
 	CPX coopP2SkipSlot
 	BEQ @next
+	;(9.2) CODE_098932 returns at once when |player X - bubble X| >= 16 (90 % of the calls), after it has set
+	;scratch2/3/6/7 only: that test is made here and the call skipped; the scratch bytes of the last bubble tested
+	;are rebuilt after the loop (@skipped), so the end state is the same as with every call made.
+	LDA objX						;P2's X (resident)
+	SEC
+	SBC objX+OSLOT_BUBBLE,X
+	BCS :+
+	EOR #$FF
+	ADC #$01						;(C = 0 here)
+:	CMP #$10
+	BCC @call
+	STX coopTouchSkip
+	BCS @next						;(always)
+@call:
+	LDA #$FF
+	STA coopTouchSkip
 	LDA objX+OSLOT_BUBBLE,X
 	STA scratch4
 	LDA objY+OSLOT_BUBBLE,X
@@ -257,8 +306,31 @@ CoopP2BubbleTouch:
 	STA coopPopDir,X
 @next:
 	INX
-	CPX bubbleSlotEnd
+	CPX #BUBBLE_SLOTS-1				;(9.2) = bubbleSlotEnd while P2 is in the round (the only time this runs)
 	BNE @slot
+	LDX coopTouchSkip
+	BPL @skipped
+	RTS
+@skipped:
+	;the last bubble tested was skipped: scratch2-7 as CODE_098149 / CODE_098932 leave them on that early return
+	LDA objX+OSLOT_BUBBLE,X
+	STA scratch4
+	LDA objY+OSLOT_BUBBLE,X
+	STA scratch5
+	LDA objY
+	CLC
+	ADC #$02
+	STA scratch3
+	LDA objX
+	STA scratch2
+	LDY #$01						;scratch6 = 1, + 1 when player X >= bubble X
+	CMP scratch4
+	BCC :+
+	INY
+:	STY scratch6
+	LDA #$00
+	STA scratch7
+	LDX #BUBBLE_SLOTS-1				;X as the loop leaves it
 	RTS
 
 ; ---------------------------------------------------------------------------------------------
@@ -299,11 +371,11 @@ CoopShotDone:
 ; From CODE_0FFA55 (bank F, end of CODE_0FF9E8), co-op only. X = enemy index, ram_00CA = enemy state.
 ; Same test as CODE_0FF9E8 (US) on the ctxOther shot; no scratch bytes used. Keeps X and Y.
 CoopCaptureOther:
+	LDA ctxOther_shooting			;(9.2) the most frequent exit first (the three tests only decide "return")
+	BEQ @rts
 	LDA ram_00CA
 	BEQ @rts						;as CODE_0FF9E8: state 0 is never tested
 	BMI @rts						;already flagged (the native shot hit, or bit 7 was set before)
-	LDA ctxOther_shooting
-	BEQ @rts
 	TYA
 	PHA
 	LDY ctxOther_shootInitialSlot
@@ -602,11 +674,12 @@ CoopNewGame:
 @done:
 	RTS
 
-; ---------------------------------------------------------------------------------------------
-; Invincibility blink for P2 (RoundUpdate hides slot 0 during DrawObjects when playerInvFrames & 2).
-; CoopP2BlinkHide before DrawObjects, CoopP2BlinkRestore after it. Preserve X/Y.
-; ---------------------------------------------------------------------------------------------
-CoopP2BlinkHide:
+; CoopDrawCoop (9.2): RoundUpdate's draw while P2 is in the round (bank 9, instead of CoopP2BlinkHide / DrawObjects /
+; CoopP2BlinkRestore): P2's invincibility blink hides slot OSLOT_P2 for the call when ctxOther_playerInvFrames & 2
+; (RoundUpdate does the same for slot 0 with playerInvFrames), then CoopDrawPair, then objState of OSLOT_P2 back.
+; Clobbers A/X/Y and the flags (RoundUpdate reloads A right after). In bank E, not PRG-RAM: it writes objState of
+; OSLOT_P2, and the Phase 6 checker accepts that only from the bank-E co-op code (as for CoopP2BlinkHide before).
+CoopDrawCoop:
 	LDA objState+OSLOT_P2
 	STA coopP2SavedState
 	LDA ctxOther_playerInvFrames
@@ -614,9 +687,7 @@ CoopP2BlinkHide:
 	BEQ :+
 	LDA #$00
 	STA objState+OSLOT_P2
-:	RTS
-
-CoopP2BlinkRestore:
+:	JSR CoopDrawPair
 	LDA coopP2SavedState
 	STA objState+OSLOT_P2
 	RTS
@@ -647,33 +718,79 @@ CoopTargetTick:
 	RTS
 
 ; CoopSelectTarget: enemy loop, per live enemy before its behaviour (bank B, gated by coopP2Active).
-; X = enemy index (kept), Y kept.
+; X = enemy index (kept), Y kept. (9.2) CoopNearest's rule inline (same result: |dx| + |dy| from the enemy, 9 bits, P2
+; only if strictly nearer; a dying player is not targetable; neither: coopTarget kept), without Y, coopPos or a JSR.
 CoopSelectTarget:
-	TYA
-	PHA
-	LDA objX+OSLOT_ENEMY,X
-	STA coopPos
+	LDA playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ @p1out
+	LDA ctxOther_playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ @t0							;P1 only
+	LDA objX+OSLOT_ENEMY,X			;both: slot 0's distance (9 bits) in coopDist / coopDist+1
+	SEC
+	SBC objX
+	BCS :+
+	EOR #$FF
+	ADC #$01						;(C = 0 here)
+:	STA coopDist
 	LDA objY+OSLOT_ENEMY,X
-	STA coopPos+1
-	JSR CoopNearest					;A = 0 / 1 / $FF (flags from A)
-	BPL :+
-	LDA coopTarget					;nobody targetable: keep the previous target
-:	STA coopTarget
-	BNE @p2
+	SEC
+	SBC objY
+	BCS :+
+	EOR #$FF
+	ADC #$01
+:	CLC
+	ADC coopDist
+	STA coopDist
+	LDA #$00
+	ROL A
+	STA coopDist+1
+	LDA objX+OSLOT_ENEMY,X			;slot OSLOT_P2's: lo in coopDist+2, hi in A
+	SEC
+	SBC objX+OSLOT_P2
+	BCS :+
+	EOR #$FF
+	ADC #$01
+:	STA coopDist+2
+	LDA objY+OSLOT_ENEMY,X
+	SEC
+	SBC objY+OSLOT_P2
+	BCS :+
+	EOR #$FF
+	ADC #$01
+:	CLC
+	ADC coopDist+2
+	STA coopDist+2
+	LDA #$00
+	ROL A
+	CMP coopDist+1
+	BCC @t1							;hi below
+	BNE @t0							;hi above
+	LDA coopDist+2
+	CMP coopDist
+	BCC @t1							;lo below (equal: slot 0)
+@t0:
+	LDA #$00
+	STA coopTarget
 	LDA objX
 	STA targetX
 	LDA objY
 	STA targetY
-	PLA
-	TAY
 	RTS
-@p2:
+@p1out:
+	LDA ctxOther_playerState
+	CMP #PLAYER_STATE_DEAD
+	BNE @t1							;P2 only
+	LDA coopTarget					;nobody targetable: keep the previous target
+	BEQ @t0
+@t1:
+	LDA #$01
+	STA coopTarget
 	LDA objX+OSLOT_P2
 	STA targetX
 	LDA objY+OSLOT_P2
 	STA targetY
-	PLA
-	TAY
 	RTS
 
 ; CoopProjTarget: projectile ops that aim at "the player" (bank 9: HomingPlayer, GetPlayerDist,
@@ -1297,155 +1414,9 @@ CoopKillScoreEnd:
 ; is resident = currentPlayer, else ctxOther_*; his own score digit set), so the blocks stay put after a role exchange.
 ; A player with 0 lives shows "00" and no hearts (co-op only). Any player's change sets the shared livesCurrentPos
 ; (not part of the swapped context), and every job redraws its row for both players, so the countdown is unchanged.
-; Space: CoopHudBuild is in COOP_CODE2, CoopHudUpload / CoopDrawObjects in COOP_CODE, the block helpers at the end of
-; bank 9 (src/bank_09.asm).
+; Space: the block helpers are at the end of bank 9 (src/bank_09.asm); CoopHudBuild / CoopHudUpload / CoopDrawObjects run
+; from PRG-RAM since 9.2 (COOP_WRAM_CODE, with the Phase 9.1 / 9.2 draw code).
 ; =============================================================================================
-.segment "COOP_CODE2"
-
-; CoopHudBuild: A free; X and Y are kept (the caller's RTS path follows). Writes only WRAM (and the stack).
-; Bank 9 is mapped (the only caller is CODE_099C48): the block helpers HudPlayerData / HudTop / HudBottom are in bank 9.
-CoopHudBuild:
-	TXA
-	PHA
-	TYA
-	PHA
-	LDX #HUD_ROW_TILES-1
-	LDA #HUD_G_BLANK
-:	STA hudBuf,X
-	DEX
-	BPL :-
-	LDA mapTargetAdr+1				;the job's high byte already follows the nametable / round-20 rule
-	STA hudDummy+1
-	STA hudTarget+1
-	LDA mapTargetAdr
-	STA hudDummy
-	LDA globalTimer
-	STA hudStamp
-	LDA livesCurrentPos				;job: 3 lives, 2 hearts -> top row; 1 score -> bottom row
-	CMP #$02
-	LDA #HUD_ROW_BOTTOM
-	BCC :+
-	LDA #HUD_ROW_TOP
-:	STA hudTarget
-	LDX #$00						;physical P1's block
-	TXA
-	JSR HudBlock
-	LDA coopMode					;(7b-2) co-op: physical P2's block (1P: blank)
-	BEQ @tiles
-	LDX #HUD_BLOCK
-	LDA #$01
-	JSR HudBlock
-@tiles:
-	LDA vNametable					;HUD bank in chrBankB (as DATA_099C54): tiles + $80
-	LSR A
-	LDA #$00
-	ROR A
-	STA hudCnt						;tile half
-	LDY #$00						;glyph shift
-	LDX vNametable
-	LDA chrBankA,X					;bonus-game screen (the same test as the NMI's CHR remap, bank F): the
-	CMP #chrFans_AA_ID				;HUD bank is mapped as chrBonusHud_A_ID, whose glyphs are at $40-$4C
-	BNE @shift
-	TXA
-	EOR #$01
-	TAX
-	LDA chrBankA,X
-	CMP #chrBonusRoom_A_ID
-	BNE @shift
-	LDY #HUD_G_DIGIT0-HUD_BONUS_DIGIT0
-@shift:
-	STY hudTmpA
-	LDX #HUD_ROW_TILES-1
-@tile:
-	LDA hudBuf,X
-	CMP #HUD_G_BLANK
-	BEQ :+
-	SEC
-	SBC hudTmpA
-:	ORA hudCnt
-	STA hudBuf,X
-	DEX
-	BPL @tile
-@queue:
-	LDA #$01
-	STA hudJob
-	PLA
-	TAY
-	PLA
-	TAX
-	RTS
-
-.segment "COOP_CODE"
-
-; CoopHudUpload: JMP from the head of CODE_0FE93B (NMI, hudJob != 0). Uploads hudBuf if the queued HUD job is the one
-; CODE_0FE93B is about to upload (mapTargetAdr unchanged since CoopHudBuild, first full NMI after that tick), then
-; does what the original does after its rows: mapTargetAdr += $20 and CODE_0FE980 (attribute part: ram_03AE is 0 for
-; HUD jobs; ColorBufferToVRAM; NMISubRet). Otherwise the original upload runs. hudJob is cleared on both paths.
-CoopHudUpload:
-	LDA #$00
-	STA hudJob
-	LDA mapTargetAdr
-	CMP hudDummy
-	BNE @orig
-	LDA mapTargetAdr+1
-	CMP hudDummy+1
-	BNE @orig
-	LDA globalTimer
-	CMP hudStamp
-	BNE @orig
-	LDA PPUSTATUS
-	LDA hudTarget+1
-	STA PPUADDR
-	LDA hudTarget
-	STA PPUADDR
-	LDX #$00
-:	LDA hudBuf,X
-	STA PPUDATA
-	INX
-	CPX #HUD_ROW_TILES
-	BNE :-
-	LDA mapTargetAdr
-	CLC
-	ADC #$20
-	STA mapTargetAdr
-	BCC :+
-	INC mapTargetAdr+1
-:	JMP CODE_0FE980
-@orig:
-	JMP HudUploadOrig
-
-; CoopDrawObjects: JMP from the head of DrawObjects. While the HUD icon (slot OSLOT_ICON, animation anJrDoll, set up by
-; CODE_059DFB) is active, it is drawn with objY = HUD_ICON_HIDE_Y: its OAM entries keep their place, tile, attributes
-; and X, only Y is off screen. objY is put back after DrawObjects; A, X, Y and the flags are DrawObjects' own.
-; (Phase 9.1) With P2 in the round, CoopDrawPair (COOP_WRAM_CODE) runs first and calls CoopDrawObjects1P.
-CoopDrawObjects:
-	BIT coopP2Active
-	BPL CoopDrawObjects1P
-	JMP CoopDrawPair
-CoopDrawObjects1P:
-	LDA objState+OSLOT_ICON
-	BEQ @plain
-	LDA objAnim+OSLOT_ICON
-	CMP #.LOBYTE(anJrDoll_ID)
-	BNE @plain
-	LDA objAnimHI+OSLOT_ICON
-	CMP #.HIBYTE(anJrDoll_ID)
-	BNE @plain
-	LDA objY+OSLOT_ICON
-	STA hudIconY
-	LDA #HUD_ICON_HIDE_Y
-	STA objY+OSLOT_ICON
-	JSR DrawObjectsBody
-	PHP
-	STA hudTmpA
-	LDA hudIconY
-	STA objY+OSLOT_ICON
-	LDA hudTmpA
-	PLP
-	RTS
-@plain:
-	JMP DrawObjectsBody
-
 ; =============================================================================================
 ; Phase 7b-3: either pad continues, team bonuses (COOP_CODE2).
 ; =============================================================================================
@@ -1689,6 +1660,128 @@ CoopRuckusWrap:
 @rts:
 	RTS
 
+; CoopHudBuild (9.2: runs from PRG-RAM, was COOP_CODE2): A free; X and Y are kept (the caller's RTS path follows). Writes only WRAM (and the stack).
+; Bank 9 is mapped (the only caller is CODE_099C48): the block helpers HudPlayerData / HudTop / HudBottom are in bank 9.
+CoopHudBuild:
+	TXA
+	PHA
+	TYA
+	PHA
+	LDX #HUD_ROW_TILES-1
+	LDA #HUD_G_BLANK
+:	STA hudBuf,X
+	DEX
+	BPL :-
+	LDA mapTargetAdr+1				;the job's high byte already follows the nametable / round-20 rule
+	STA hudDummy+1
+	STA hudTarget+1
+	LDA mapTargetAdr
+	STA hudDummy
+	LDA globalTimer
+	STA hudStamp
+	LDA livesCurrentPos				;job: 3 lives, 2 hearts -> top row; 1 score -> bottom row
+	CMP #$02
+	LDA #HUD_ROW_BOTTOM
+	BCC :+
+	LDA #HUD_ROW_TOP
+:	STA hudTarget
+	LDX #$00						;physical P1's block
+	TXA
+	JSR HudBlock
+	LDA coopMode					;(7b-2) co-op: physical P2's block (1P: blank)
+	BEQ @tiles
+	LDX #HUD_BLOCK
+	LDA #$01
+	JSR HudBlock
+@tiles:
+	LDA vNametable					;HUD bank in chrBankB (as DATA_099C54): tiles + $80
+	LSR A
+	LDA #$00
+	ROR A
+	STA hudCnt						;tile half
+	LDY #$00						;glyph shift
+	LDX vNametable
+	LDA chrBankA,X					;bonus-game screen (the same test as the NMI's CHR remap, bank F): the
+	CMP #chrFans_AA_ID				;HUD bank is mapped as chrBonusHud_A_ID, whose glyphs are at $40-$4C
+	BNE @shift
+	TXA
+	EOR #$01
+	TAX
+	LDA chrBankA,X
+	CMP #chrBonusRoom_A_ID
+	BNE @shift
+	LDY #HUD_G_DIGIT0-HUD_BONUS_DIGIT0
+@shift:
+	STY hudTmpA
+	TYA
+	BNE @shiftpass					;(9.2) bonus-game screen only: glyph shift
+	LDA hudCnt
+	BEQ @queue						;(9.2) no shift and the lower tile half: the tiles are final
+	LDX #HUD_ROW_TILES-1
+:	LDA hudBuf,X					;(9.2) no shift: every tile (blank too) gets the half bit only
+	ORA hudCnt
+	STA hudBuf,X
+	DEX
+	BPL :-
+	BMI @queue						;(always)
+@shiftpass:
+	LDX #HUD_ROW_TILES-1
+@tile:
+	LDA hudBuf,X
+	CMP #HUD_G_BLANK
+	BEQ :+
+	SEC
+	SBC hudTmpA
+:	ORA hudCnt
+	STA hudBuf,X
+	DEX
+	BPL @tile
+@queue:
+	LDA #$01
+	STA hudJob
+	PLA
+	TAY
+	PLA
+	TAX
+	RTS
+
+; CoopHudUpload (9.2: runs from PRG-RAM, was COOP_CODE; the row copy is unrolled): JMP from the head of CODE_0FE93B (NMI,
+; hudJob != 0). Uploads hudBuf if the queued HUD job is the one CODE_0FE93B is about to upload (mapTargetAdr unchanged
+; since CoopHudBuild, first full NMI after that tick), then does what the original does after its rows: mapTargetAdr +=
+; $20 and CODE_0FE980 (attribute part: ram_03AE is 0 for HUD jobs; ColorBufferToVRAM; NMISubRet). Otherwise the
+; original upload runs. hudJob is cleared on both paths. (Ends with X = HUD_ROW_TILES, as the loop it replaces.)
+CoopHudUploadOrig:
+	JMP HudUploadOrig
+CoopHudUpload:
+	LDA #$00
+	STA hudJob
+	LDA mapTargetAdr
+	CMP hudDummy
+	BNE CoopHudUploadOrig
+	LDA mapTargetAdr+1
+	CMP hudDummy+1
+	BNE CoopHudUploadOrig
+	LDA globalTimer
+	CMP hudStamp
+	BNE CoopHudUploadOrig
+	LDA PPUSTATUS
+	LDA hudTarget+1
+	STA PPUADDR
+	LDA hudTarget
+	STA PPUADDR
+.repeat HUD_ROW_TILES, I
+	LDA hudBuf+I
+	STA PPUDATA
+.endrepeat
+	LDX #HUD_ROW_TILES
+	LDA mapTargetAdr
+	CLC
+	ADC #$20
+	STA mapTargetAdr
+	BCC :+
+	INC mapTargetAdr+1
+:	JMP CODE_0FE980
+
 ; =============================================================================================
 ; Phase 9.1: both players' sprites from one CHR KB (COOP_WRAM_CODE; docs/coop_notes.md, Phase 9.1).
 ; Both players use sprite CHR slot 0 (chrBankC), whose bank DrawObjects takes from the last drawn object, so a player
@@ -1700,7 +1793,42 @@ CoopRuckusWrap:
 ; "image table entry" objImgOfs points to is in WRAM: $A000 + objImgOfs wraps to coopImgEnt). The players' objChrBank /
 ; objImgOfs are put back after DrawObjects. 1P and P2 out: not reached (CoopDrawObjects tests coopP2Active).
 ; Uses scratch0-5, 8, 9 only (DrawObjects clobbers them anyway; bank 9 keeps scratch6 across DrawObjects).
+; (9.2) Same results, cheaper: no wrapper when no pair bank is needed (tail jump), the restore needs no PHP/PLP (every
+; DrawObjectsBody exit leaves X = 0, Z = 1, N = 0, C = 1, so LDX / STX and a final LDX #0 rebuild it exactly; A and Y are
+; DrawObjects' own), the redirected objImgOfs are put back from the memo key (= their values at entry), the frame point
+; lookup is inline, and CoopPairShift only refreshes the image copy (the redirect is written in one place, CoopDrawPairResult).
 ; =============================================================================================
+
+; CoopDrawObjects: JMP from the head of DrawObjects (every caller but RoundUpdate, which calls CoopDrawCoop /
+; CoopDrawObjects1P itself since 9.2). With P2 in the round CoopDrawPair, else CoopDrawObjects1P.
+CoopDrawObjects:
+	BIT coopP2Active
+	BMI CoopDrawPair
+; CoopDrawObjects1P (7b-1): while the HUD icon (slot OSLOT_ICON, animation anJrDoll, set up by CODE_059DFB) is active, it
+; is drawn with objY = HUD_ICON_HIDE_Y: its OAM entries keep their place, tile, attributes and X, only Y is off screen.
+; objY is put back after DrawObjectsBody; A, X, Y and the flags are DrawObjects' own (X = 0, Z = 1, N = 0, C = 1 on every
+; exit of DrawObjectsBody, so LDX / STX / LDX #0 keep them; V is not read by anything).
+CoopDrawObjects1P:
+	LDA objState+OSLOT_ICON
+	BEQ @plain
+	LDA objAnim+OSLOT_ICON
+	CMP #.LOBYTE(anJrDoll_ID)
+	BNE @plain
+	LDA objAnimHI+OSLOT_ICON
+	CMP #.HIBYTE(anJrDoll_ID)
+	BNE @plain
+	LDA objY+OSLOT_ICON
+	STA hudIconY
+	LDA #HUD_ICON_HIDE_Y
+	STA objY+OSLOT_ICON
+	JSR DrawObjectsBody
+	LDX hudIconY
+	STX objY+OSLOT_ICON
+	LDX #$00
+	RTS
+@plain:
+	JMP DrawObjectsBody
+
 ; CoopForRestore: a sprite slot lent by CoopForeignSlot in the last DrawObjects call gets its bank back (unless the game
 ; rewrote it since). From CoopDrawPair and CoopP2Deactivate. Keeps X/Y.
 CoopForRestore:
@@ -1721,65 +1849,103 @@ CoopForRestore:
 @rts:
 	RTS
 
+; CoopDrawPair: DrawObjects with P2 in the round. Memo: if the 7 inputs (both objChrBank, objImgOfs, objImgOfsHI, and
+; sprPrgBank) equal the last computed call's, its result coopMemoOn is reused: 0 = no pair bank (draw as is), else
+; bit 0 = chrBankC := coopPairBank after DrawObjects, bit 1 / 2 = P1's / P2's objImgOfs points at his coopImgBuf (the
+; image copy is still valid: it only changes in CoopPairShift).
+CoopDrawPlain:							;(trampolines within branch range of CoopDrawPair's tests)
+	JMP CoopDrawObjects1P
+CoopDrawMiss:
+	JMP CoopDrawPairMiss
 CoopDrawPair:
 	LDA coopForSlot
 	BEQ :+
 	JSR CoopForRestore
-:	LDA #$00
-	STA coopPairOn
-	STA coopPairFor
-	LDA objState						;both players drawn? (blink hides set objState 0 here)
-	BEQ @nopair
+:	LDA objState						;both players drawn? (blink hides set objState 0 here)
+	BEQ CoopDrawPlain
 	LDA objState+OSLOT_P2
-	BEQ @nopair
+	BEQ CoopDrawPlain
 	LDA objChrBank
 	CMP objChrBank+OSLOT_P2
-	BNE @frames
-@nopair:
-	JMP @draw
-@foreign:
-	LDX #$00							;a player shown from another bank (bank $5B, anim $A5 while stuck): drawn
-	JSR CoopForeignSlot					;from a sprite slot 1-3 that holds it or is free, else without a bank
-	LDX #OSLOT_P2
-	JSR CoopForeignSlot
-	JMP @draw
-@frames:
-	LDA objChrBank
-	CMP coopMemoKey					;the same inputs as the last call: its result (coopMemoOn) still holds
-	BNE @miss
+	BEQ CoopDrawPlain							;one bank: both frames are in it
+	CMP coopMemoKey
+	BNE CoopDrawMiss
 	LDA objChrBank+OSLOT_P2
 	CMP coopMemoKey+1
-	BNE @miss
+	BNE CoopDrawMiss
 	LDA objImgOfs
 	CMP coopMemoKey+2
-	BNE @miss
+	BNE CoopDrawMiss
 	LDA objImgOfs+OSLOT_P2
 	CMP coopMemoKey+3
-	BNE @miss
+	BNE CoopDrawMiss
 	LDA objImgOfsHI
 	CMP coopMemoKey+4
-	BNE @miss
+	BNE CoopDrawMiss
 	LDA objImgOfsHI+OSLOT_P2
 	CMP coopMemoKey+5
-	BNE @miss
+	BNE CoopDrawMiss
 	LDA sprPrgBank
 	CMP coopMemoKey+6
-	BNE @miss
-	JMP @hit
-@miss:
+	BNE CoopDrawMiss
+CoopDrawPairResult:
+	LDA coopMemoOn
+	BEQ @plain
+	LSR
+	BEQ @bank							;1: both frames at their home block in the pair bank
+	LSR
+	BCC :+
+	LDX #<coopImgEnt					;P1's image from his coopImgBuf (DrawObjects reads $A000 + objImgOfs)
+	STX objImgOfs
+	LDX #>(coopImgEnt-$A000)
+	STX objImgOfsHI
+:	LSR
+	BCC :+
+	LDX #<(coopImgEnt+2)				;P2's
+	STX objImgOfs+OSLOT_P2
+	LDX #>(coopImgEnt+2-$A000)
+	STX objImgOfsHI+OSLOT_P2
+:	JSR CoopDrawObjects1P
+	LDX coopPairBank					;both players' frames are in this KB; the bubbles are in every player KB
+	STX chrBankC
+	LDX coopMemoKey+2					;objImgOfs / HI back (the memo key holds their values at entry)
+	STX objImgOfs
+	LDX coopMemoKey+4
+	STX objImgOfsHI
+	LDX coopMemoKey+3
+	STX objImgOfs+OSLOT_P2
+	LDX coopMemoKey+5
+	STX objImgOfsHI+OSLOT_P2
+	LDX #$00							;DrawObjects' exit: X = 0, Z = 1, N = 0 (C = 1 untouched)
+	RTS
+@bank:
+	JSR CoopDrawObjects1P
+	LDX coopPairBank
+	STX chrBankC
+	LDX #$00
+	RTS
+@plain:
+	JMP CoopDrawObjects1P
+
+; CoopDrawPairMiss: the memo did not match: compute the pair bank, the positions and the image copies, then the common
+; draw (CoopDrawPairResult).
+CoopDrawPairMiss:
 	LDA objChrBank						;both banks $40-$4F: the pair banks
 	SEC
 	SBC #chrPlayer_A_ID
 	CMP #$10
-	BCS @tofor
+	BCS @foreign
+	ASL
+	ASL
+	STA scratch0						;P1: (bank - $40) * 4
 	LDA objChrBank+OSLOT_P2
 	SEC
 	SBC #chrPlayer_A_ID
 	CMP #$10
-	BCC :+
-@tofor:
-	JMP @foreign
-:
+	BCS @foreign
+	ASL
+	ASL
+	STA scratch1						;P2
 	LDA objChrBank
 	STA coopMemoKey
 	LDA objChrBank+OSLOT_P2
@@ -1796,19 +1962,53 @@ CoopDrawPair:
 	STA coopMemoKey+6
 	LDA #$00
 	STA coopMemoOn
-	LDX #$00
-	LDY #$00
-	JSR CoopFramePt
-	BCS @nopair2
-	LDX #OSLOT_P2
-	LDY #$01
-	JSR CoopFramePt
-	BCC :+
-@nopair2:
-	JMP @draw
-:
-	LDA coopPairPt
-	CMP coopPairPt+1
+	BEQ @p1							;(always)
+@foreign:
+	JMP CoopDrawForeign
+@plain:
+	JMP CoopDrawObjects1P
+@p1:
+	;frame point of P1 (slot 0): CHR slot 0, image block from objImgOfs, point from (bank, block)
+	LDA objChrSlot
+	BNE @plain
+	LDA objImgOfsHI
+	BNE @p1slow
+	LDA objImgOfs
+	CMP #$20
+	BCS @p1slow
+	LSR
+	TAY
+	LDA CoopImgBlk,Y
+	BMI @plain
+@p1blk:
+	STA coopPairBlk
+	ORA scratch0
+	TAY
+	LDA CoopFrmIdx,Y
+	CMP #40
+	BCS @plain
+	STA coopPairPt
+	;frame point of P2 (slot OSLOT_P2)
+	LDA objChrSlot+OSLOT_P2
+	BNE @plain
+	LDA objImgOfsHI+OSLOT_P2
+	BNE @p2slow
+	LDA objImgOfs+OSLOT_P2
+	CMP #$20
+	BCS @p2slow
+	LSR
+	TAY
+	LDA CoopImgBlk,Y
+	BMI @plain
+@p2blk:
+	STA coopPairBlk+1
+	ORA scratch1
+	TAY
+	LDA CoopFrmIdx,Y
+	CMP #40
+	BCS @plain
+	STA coopPairPt+1
+	CMP coopPairPt
 	BNE @pair
 	TAX									;same frame content (47C = 40D): its home
 	LDA CoopPtBank,X
@@ -1817,10 +2017,20 @@ CoopDrawPair:
 	STA coopPairPos
 	STA coopPairPos+1
 	JMP @apply
+@p1slow:
+	LDX #$00
+	JSR CoopImgBlkSlow
+	BCC @p1blk
+	JMP @plain
+@p2slow:
+	LDX #OSLOT_P2
+	JSR CoopImgBlkSlow
+	BCC @p2blk
+	JMP @plain
 @pair:
-	LDX coopPairPt						;X = the higher point, Y = the lower one
+	LDX coopPairPt						;X = the higher point, Y = the lower one (C = 1: P2's point is the higher)
 	LDY coopPairPt+1
-	BCS :+
+	BCC :+
 	LDX coopPairPt+1
 	LDY coopPairPt
 :	CLC
@@ -1832,94 +2042,65 @@ CoopDrawPair:
 	STA scratch1
 	LDA (scratch0),Y
 	STA coopPairBank
+	LDA scratch0						;the same entry of CoopPairPos
 	CLC
-	LDA CoopTriLo,X
-	ADC #<CoopPairPos
+	ADC #<(CoopPairPos-CoopPairBank)
 	STA scratch0
-	LDA CoopTriHi,X
-	ADC #>CoopPairPos
+	LDA scratch1
+	ADC #>(CoopPairPos-CoopPairBank)
 	STA scratch1
 	LDA (scratch0),Y					;bits 0-1: position of the lower point, bits 2-3: of the higher one
-	TAX
+	CPX coopPairPt
+	BEQ :+
+	TAX									;P1 has the lower point
 	AND #$03
-	STA scratch2
+	STA coopPairPos
 	TXA
 	LSR
 	LSR
-	STA scratch3
-	LDA coopPairPt
-	CMP coopPairPt+1
-	BCS :+
-	LDA scratch2						;P1 has the lower point
-	STA coopPairPos
-	LDA scratch3
 	STA coopPairPos+1
 	JMP @apply
-:	LDA scratch3
-	STA coopPairPos
-	LDA scratch2
+:	TAX									;P1 has the higher point
+	AND #$03
 	STA coopPairPos+1
+	TXA
+	LSR
+	LSR
+	STA coopPairPos
 @apply:
 	LDA #$01							;bit 0: the pair bank goes to chrBankC after DrawObjects
-	STA coopPairOn
+	STA coopMemoOn
+	LDX coopPairPos						;P1: tile shift = position base - home base (0: at home, the bank alone)
+	LDA CoopBlkBase,X
+	LDX coopPairBlk
+	SEC
+	SBC CoopBlkBase,X
+	BEQ :+
 	LDX #$00
 	LDY #$00
 	JSR CoopPairShift
+:	LDX coopPairPos+1					;P2
+	LDA CoopBlkBase,X
+	LDX coopPairBlk+1
+	SEC
+	SBC CoopBlkBase,X
+	BEQ :+
 	LDX #OSLOT_P2
 	LDY #$01
 	JSR CoopPairShift
-	LDA coopPairOn
-	STA coopMemoOn
-	JMP @draw
-@hit:
-	LDA coopMemoOn						;0: no pair; else as CoopPairShift left it (the image copies are unchanged)
-	STA coopPairOn
-	AND #$02
-	BEQ :+
-	LDA objImgOfs
-	STA coopPairSave+2
-	LDA objImgOfsHI
-	STA coopPairSave+3
-	LDA #<coopImgEnt
-	STA objImgOfs
-	LDA #>(coopImgEnt-$A000)
-	STA objImgOfsHI
-:	LDA coopPairOn
-	AND #$04
-	BEQ @draw
-	LDA objImgOfs+OSLOT_P2
-	STA coopPairSave+4
-	LDA objImgOfsHI+OSLOT_P2
-	STA coopPairSave+5
-	LDA #<(coopImgEnt+2)
-	STA objImgOfs+OSLOT_P2
-	LDA #>(coopImgEnt+2-$A000)
-	STA objImgOfsHI+OSLOT_P2
-@draw:
+:	JMP CoopDrawPairResult
+
+; CoopDrawForeign: a player bank outside $40-$4F (see CoopForeignSlot).
+CoopDrawForeign:
+	LDA #$00							;a player shown from another bank (bank $5B, anim $A5 while stuck): drawn
+	STA coopPairFor						;from a sprite slot 1-3 that holds it or is free, else without a bank
+	LDX #$00
+	JSR CoopForeignSlot
+	LDX #OSLOT_P2
+	JSR CoopForeignSlot
 	JSR CoopDrawObjects1P
 	PHP
 	STA coopPairA
-	LDA coopPairOn
-	BEQ @for
-	LSR
-	LDA coopPairBank					;both players' frames are in this KB; the bubbles are in every player KB
-	STA chrBankC
-	BCC @for							;(bit 0 is always set here; C = bit 0)
-	LDA coopPairOn
-	AND #$02
-	BEQ :+
-	LDA coopPairSave+2					;P1's image was redirected (CoopPairShift)
-	STA objImgOfs
-	LDA coopPairSave+3
-	STA objImgOfsHI
-:	LDA coopPairOn
-	AND #$04
-	BEQ @for
-	LDA coopPairSave+4
-	STA objImgOfs+OSLOT_P2
-	LDA coopPairSave+5
-	STA objImgOfsHI+OSLOT_P2
-@for:
 	LDA coopPairFor
 	BEQ @ret
 	LSR
@@ -2029,22 +2210,11 @@ CoopForeignSlot:
 	STA coopPairFor
 	RTS
 
-; CoopFramePt: X = slot, Y = player (0/1). C = 0: coopPairPt,Y = frame point, coopPairBlk,Y = home block.
-; C = 1: not a player frame of banks $40-$4F in CHR slot 0 (DrawObjects then runs unchanged).
-CoopFramePt:
-	LDA objChrSlot,X
-	BNE @none
-	LDA objChrBank,X
-	SEC
-	SBC #chrPlayer_A_ID
-	CMP #$10
-	BCS @none
-	ASL
-	ASL
-	STA scratch0						;(bank - $40) * 4
-	STY scratch9
+; CoopImgBlkSlow: X = slot whose objImgOfsHI != 0 or objImgOfs >= $20. C = 0: A = image block (0-3) of a player image;
+; C = 1: not a player image (CoopDrawPair then draws without a pair bank).
+CoopImgBlkSlow:
 	LDA objImgOfsHI,X
-	BEQ @lo
+	BEQ @hi
 	CMP #$01
 	BNE @none
 	LDA objImgOfs,X						;$12C-$132: imgPlayerSmallWalk* (table 2), block A
@@ -2053,54 +2223,28 @@ CoopFramePt:
 	CMP #$08
 	BCS @none
 	LDA #$00
-	BEQ @blk
-@lo:
-	LDA objImgOfs,X
-	CMP #$20
-	BCS @hi
-	LSR
-	TAY
-	LDA CoopImgBlk,Y
-	JMP @blk
+	CLC
+	RTS
 @hi:
+	LDA objImgOfs,X
 	CMP #$B2							;imgPlayerRotateR_2 / imgPlayerRotateL_2: block D
 	BEQ :+
 	CMP #$B4
 	BNE @none
 :	LDA #$03
-@blk:
-	LDY scratch9
-	CMP #$04
-	BCS @none
-	STA coopPairBlk,Y
-	ORA scratch0
-	TAY
-	LDA CoopFrmIdx,Y
-	LDY scratch9
-	CMP #40
-	BCS @none
-	STA coopPairPt,Y
 	CLC
 	RTS
 @none:
 	SEC
 	RTS
 
-; CoopPairShift: X = slot, Y = player. If the frame's position in the pair bank is not its home block, points the
-; slot's objImgOfs at coopImgEnt,player, whose coopImgBuf holds the image with every tile number + (position base -
-; home base). The copy is redone only when the image, the image bank or the shift changed (coopImgKey*).
+; CoopPairShift: A = tile shift (position base - home base, never 0), X = slot, Y = player. Makes the player's coopImgBuf
+; hold his image with every tile number + shift and sets bit 1 / 2 of coopMemoOn (CoopDrawPairResult points his objImgOfs at it).
+; The copy is redone only when the image, the image bank or the shift changed (coopImgKey*).
 CoopPairShift:
+	STA scratch5
 	STX scratch4
 	STY scratch9
-	LDX coopPairPos,Y
-	LDA CoopBlkBase,X
-	LDX coopPairBlk,Y
-	SEC
-	SBC CoopBlkBase,X
-	BNE :+
-	RTS									;at home: the bank alone
-:	STA scratch5						;the tile shift (even, never 0)
-	LDX scratch4
 	LDA objImgOfs,X
 	CMP coopImgKeyLo,Y
 	BNE @copy
@@ -2112,7 +2256,11 @@ CoopPairShift:
 	BNE @copy
 	LDA scratch5
 	CMP coopImgKeyDelta,Y
-	BEQ @point
+	BNE @copy
+	LDA CoopMemoBit,Y					;the buffer is current
+	ORA coopMemoOn
+	STA coopMemoOn
+	RTS
 @copy:
 	LDA #$00
 	STA coopImgKeyDelta,Y				;buffer invalid until the copy is complete
@@ -2172,46 +2320,22 @@ CoopPairShift:
 	STA coopImgKeyBank,Y
 	LDA scratch5
 	STA coopImgKeyDelta,Y
-@point:
-	TYA									;save the slot's image for the restore: coopPairSave+2/3 (P1), +4/5 (P2),
-	ASL									;bit 1 / 2 of coopPairOn
-	STA scratch9
-	TAY
-	LDA objImgOfs,X
-	STA coopPairSave+2,Y
-	LDA objImgOfsHI,X
-	STA coopPairSave+3,Y
-	LDA CoopPairOnBit,Y
-	ORA coopPairOn
-	STA coopPairOn
-	LDA scratch9
-	LSR
-	TAY
-	LDA CoopImgBufHi,Y					;coopImgEnt + 2 * player = the address of the player's coopImgBuf
-	PHA
-	LDA CoopImgBufLo,Y
-	PHA
-	TYA
+	TYA									;coopImgEnt + 2 * player = the address of the player's coopImgBuf
 	ASL
-	TAY
-	PLA
-	STA coopImgEnt,Y
-	PLA
-	STA coopImgEnt+1,Y
-	TYA									;objImgOfs/HI = coopImgEnt + 2 * player - $A000 (DrawObjects adds $A0 to HI)
-	CLC
-	ADC #<coopImgEnt
-	STA objImgOfs,X
-	LDA #>coopImgEnt
-	ADC #$00
-	SEC
-	SBC #$A0
-	STA objImgOfsHI,X
+	TAX
+	LDA CoopImgBufLo,Y
+	STA coopImgEnt,X
+	LDA CoopImgBufHi,Y
+	STA coopImgEnt+1,X
+@point:
+	LDA CoopMemoBit,Y
+	ORA coopMemoOn
+	STA coopMemoOn
 @rts:
 	RTS
 
-CoopPairOnBit:							;by 2 * player
-	.byte $02, $00, $04
+CoopMemoBit:							;by player: his redirect bit in coopMemoOn
+	.byte $02, $04
 CoopSlotBit:
 	.byte $01, $02, $04, $08
 CoopImgBufLo:

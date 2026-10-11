@@ -3541,14 +3541,11 @@ CODE_099785:
 		LDA #$00					;C - - - - - 0x0137A1 04:9791: A9 00
 		STA objState				;C - - - - - 0x0137A3 04:9793: 8D 63 05
 CODE_099796:
-	BIT coopP2Active				;co-op: P2's invincibility blink (slot OSLOT_P2)
-	BPL :+
-		JSR CoopP2BlinkHide
-:
-	JSR DrawObjects				;C - - - - - 0x0137A6 04:9796: 20 E2 EE
-	BIT coopP2Active
-	BPL :+
-		JSR CoopP2BlinkRestore
+	BIT coopP2Active				;(co-op 9.2) P2 in the round: P2's blink + CoopDrawPair (CoopDrawCoop, bank E);
+	BPL :+							;1P: DrawObjects' own target CoopDrawObjects1P directly (icon hide + body)
+		JSR CoopDrawCoop
+		JMP :++
+:	JSR CoopDrawObjects1P			;C - - - - - 0x0137A6 04:9796: 20 E2 EE (was JSR DrawObjects)
 :
 	LDA scratch6				;C - - - - - 0x0137A9 04:9799: A5 06
 	STA objState				;C - - - - - 0x0137AB 04:979B: 8D 63 05

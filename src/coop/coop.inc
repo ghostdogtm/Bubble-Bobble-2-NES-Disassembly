@@ -18,55 +18,68 @@ COOP_CANARY3    = $50           ; 'P'
 ; Macros only: nothing is emitted here.
 ; ---------------------------------------------------------------------------------------------
 ; Per-player scalars (zero-page or absolute, the assembler picks the addressing mode)
+; (9.2) An entry with a second argument (", eq") is exchanged only when the two values differ (CoopSwap compares
+; first): for bytes that are equal in most swaps (measured with tmp/coop_scripts/p92/swapstat.py: compare 10-11 cycles
+; when equal, 20-22 when not, against 14-16 for the plain exchange). The result is the same either way.
 ; (shootCounter, $0546, is NOT here since Phase 6b: it is rewardsEaten+7, the shared "bubbles blown" statistic that
 ; spawns the candy item, like the other rewardsEaten entries; see docs/coop_notes.md, Phase 6b)
 .macro COOP_CTX_SCALARS M
 	M ram_0062
 	M playerHeld
-	M playerPressed
-	M playerState
+	M playerPressed, eq
+	M playerState, eq
 	M ram_0076
 	M playerDir
 	M ram_0078
 	M hBlocked
-	M ram_007A
-	M ram_007B
-	M playerDmgType
-	M ram_007D
-	M playerHazardTrigger
-	M playerHazardSlot
-	M playerInvFrames
-	M playerHearts
+	M ram_007A, eq
+	M ram_007B, eq
+	M playerDmgType, eq
+	M ram_007D, eq
+	M playerHazardTrigger, eq
+	M playerHazardSlot, eq
+	M playerInvFrames, eq
+	M playerHearts, eq
 	M playerLives
-	M ram_047A
+	M ram_047A, eq
 	M ram_047B
-	M inflateTime
-	M extraBubbles
+	M inflateTime, eq
+	M extraBubbles, eq
 	M ram_047E
 	M shootSlot
 	M shootDir
-	M shootTrigger
-	M shootQueuedBubbles
+	M shootTrigger, eq
+	M shootQueuedBubbles, eq
 	M shooting
 	M shootInitialSlot
-	M bubbleVariant
-	M ram_077B
+	M bubbleVariant, eq
+	M ram_077B, eq
 .endmacro
 
-; Per-object arrays: slot 0 (P1) is exchanged with slot OSLOT_P2 (P2). No shadow storage needed.
+; Per-object arrays: slot 0 (P1) is exchanged with slot OSLOT_P2 (P2). No shadow storage needed. (", eq": as above)
+; (9.2) COOP_CTX_ARRAYS_DRAW: arrays that no code running inside a P2 window reads or writes for slot 0 / OSLOT_P2:
+; objImgOfs / objImgOfsHI / objChrBank are written only by the animation engine (bank F AnimateObjects /
+; AnimateNonBubbles / AnimateObjectsFromX) and the title setup, objChrSlot / objAttr by the cutscene ops, the round setup
+; (CODE_0880C8), the announcement / bubble spawners (other slots) and the title setup; all of them are read only by
+; DrawObjects (and the co-op draw code). So the window's two swaps leave them in place: CoopSwap exchanges them first, and
+; CoopP2Window enters after them, at CoopSwap + COOP_SWAP_WIN_OFS. Every other CoopSwap call exchanges them as before.
+; (Checked dynamically by tmp/coop_scripts/p92/windowchk.py: no access inside any window.)
+.macro COOP_CTX_ARRAYS_DRAW M
+	M objImgOfs
+	M objChrBank
+	M objImgOfsHI, eq
+	M objChrSlot, eq
+	M objAttr, eq
+.endmacro
+
 .macro COOP_CTX_ARRAYS M
-	M objState
+	M objState, eq
 	M objY
 	M objX
-	M objImgOfs
-	M objImgOfsHI
-	M objChrSlot
-	M objChrBank
 	M objAnim
 	M objAnimTimer
 	M objAnimProgress
-	M objAttr
-	M objAnimHI
+	M objAnimHI, eq
 .endmacro
 
 ; Bits of powerUps that are per player (cleared on death); the other bits are shared.
