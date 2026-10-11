@@ -2746,3 +2746,138 @@ COOP_WRAM_CODE 910 B free (was 3767); PRG-RAM data area 3843 B free (was 3934); 
 - The substituted frames (if a player ever shows one, the pose is the nearest frame of the same image).
 - CHR ROM is full; any new CHR needs a smaller design (e.g. 37 points = 111 banks) or reuse of duplicate banks.
 - Co-op cost +1.1 .. +2.4 %: further savings possible (e.g. drop the image-HI bytes from the memo key).
+
+## Phase 9.2: co-op performance
+
+Code commit `a41d580`. Build `p92g` (`p92gf` = `COOP_FORCE`, `p92gt` = `COOP_SWAPTEST`); baseline `p92base` = the 9.1 sources
+(ROM identical to `p91a`). Scripts and results: `tmp/coop_scripts/p92/` (`STATE.md`, `final_*.txt`). Game behaviour is
+unchanged: 1P regress 12/12, co-op RAM identical to p91a on every tick, every p90verify counter equal to p91a's.
+
+### Baseline (p91a)
+Co-op specific cost per play tick, exclusive cycles of the co-op routines (`cooptable.py`: run total / 1800 play ticks,
+so the intro windows are included; P2's own game work - player update, `CODE_098932`, enemy collision - is not):
+
+| item | c01 | c05 | c17 | c20 | c22 | c50 | c64 | mean |
+|---|---|---|---|---|---|---|---|---|
+| swap (CoopSwap/Ctx) | 1627 | 1639 | 1626 | 1645 | 1626 | 1621 | 1626 | 1630 |
+| P2 window glue | 156 | 156 | 157 | 158 | 153 | 156 | 154 | 156 |
+| P2 bubble-touch loop | 286 | 262 | 387 | 183 | 249 | 422 | 358 | 307 |
+| pair draw (9.1) | 452 | 376 | 421 | 456 | 408 | 377 | 444 | 419 |
+| draw gate + P2 blink | 53 | 54 | 53 | 55 | 54 | 54 | 54 | 54 |
+| HUD icon hide | 85 | 85 | 85 | 86 | 85 | 85 | 85 | 86 |
+| enemy targeting | 175 | 434 | 217 | 124 | 272 | 400 | 474 | 300 |
+| capture test (other shot) | 40 | 80 | 37 | 0 | 48 | 120 | 110 | 62 |
+| HUD build + upload | 25 | 41 | 20 | 8 | 89 | 91 | 47 | 46 |
+| camera / edges (round 20) | 30 | 30 | 30 | 215 | 31 | 31 | 30 | 57 |
+| other co-op | 50 | 64 | 74 | 110 | 68 | 46 | 160 | 82 |
+| SUM | 2980 | 3222 | 3108 | 3040 | 3083 | 3405 | 3543 | 3197 |
+
+- The swap is the largest item: 2 `CoopSwap` per co-op tick, 707 cycles each (43 bytes exchanged, 14-16 cycles each).
+- Lag: in p91a the co-op scenarios lag 118 / 162 / 688 / 1 / 146 / 798 / 1252 frames per 3000 ticks (c01 c05 c17 c20 c22
+  c50 c64). 9.1 added 12 / 25 / 41 / 0 / 4 / 71 / 37 of them (`lagdiff.py p90a p92base`: no tick lost a lag frame, the
+  new ones are ticks that p90a ran in 28.5k-29.7k logic cycles; a tick lags when its logic (from the NMI) passes about
+  29.7k-29.9k cycles; on those ticks the logic grew by 1.0k-2.0k, i.e. the 9.1 pair draw (~350-550 on a memo miss) plus
+  the lag NMI's own audio work once it happened). c50 has 401 ticks at 28-29.7k: in heavy co-op rounds most play ticks sit
+  within a few hundred cycles of the frame, so every co-op cycle saved removes lag frames.
+- 1P: p91a = p90a + 7 cycles per tick (the 9.1 `BIT/BPL` in `CoopDrawObjects`); the RoundUpdate draw path cost 30 cycles of
+  gates/JMPs (blink hide gate, `JSR DrawObjects`, `JMP CoopDrawObjects`, gate, blink restore gate) plus the icon hide.
+
+### Changes
+| step | change | where |
+|------|--------|-------|
+| A | RoundUpdate draws with `BIT coopP2Active / BPL / JSR CoopDrawCoop / JMP` or `JSR CoopDrawObjects1P` (1P: 13 cycles of overhead instead of 30). `CoopDrawCoop` = P2 blink hide + `CoopDrawPair` + restore (was `CoopP2BlinkHide/Restore` + `DrawObjects` gate) | bank 9, COOP_CODE2 |
+| A | `CoopDrawPair` rewritten: no-pair cases tail-jump to `CoopDrawObjects1P`; the restore uses X (every `DrawObjectsBody` exit has X = 0, Z = 1, N = 0, C = 1, so `LDX/STX ... LDX #0` rebuilds DrawObjects' exit; A and Y are its own) instead of PHP/PLP; redirected `objImgOfs` are put back from the memo key; frame points inline (`CoopFramePt` gone, `CoopImgBlkSlow` for the rare images); `CoopPairShift` only refreshes the copy; one redirect site (`CoopDrawPairResult`) | WRAM |
+| A | icon hide (`CoopDrawObjects1P`): restore without PHP/PLP (same X trick), -13 cycles; `CoopDrawObjects` / `CoopDrawObjects1P` / `CoopHudUpload` moved to WRAM | WRAM |
+| B | `CoopSwap`: list entries marked `, eq` (17 scalars, 5 arrays: equal in 69-100 % of the swaps, `swapstat.py`) compare first and exchange only when different (10-11 cycles when equal, 20-22 when not, 14-16 before); the powerUps exchange is skipped when the masked bits are equal (90 %) | coop.inc, COOP_CODE |
+| C | `CoopSelectTarget`: `CoopNearest`'s rule inline (no JSR, Y save, `coopPos`); P2 touch loop `CPX #19` (= `bubbleSlotEnd` while P2 is in); window: shot-restore test inline; `CoopHudBuild` -> WRAM (space) | COOP_CODE2, WRAM |
+| D | P2 touch loop: `CODE_098932` returns at once when the player is >= 16 px away in X (90 % of the calls), after writing only scratch2/3/6/7. The loop makes that test itself and skips the call; if the last bubble tested was skipped, scratch2-7 are rebuilt after the loop exactly as the early return leaves them (`coopTouchSkip`), so the end state is the same | COOP_CODE2 |
+| E | the P2 window's two swaps leave `COOP_CTX_ARRAYS_DRAW` in place (objImgOfs, objChrBank, objImgOfsHI, objChrSlot, objAttr): only the animation engine, DrawObjects, the title / cutscene / round-setup / announce / bubble spawners (other slots) and co-op draw code touch them, none inside a window. `CoopSwap` exchanges them first; the window calls `CoopSwap+COOP_SWAP_WIN_OFS` (no new label, so the checkers' `CoopSwap` ranges are unchanged); every other swap is complete as before. `windowchk.py`: no read or write of these 10 bytes inside any window | coop.inc, COOP_CODE |
+| F | `CoopCaptureOther` tests `ctxOther_shooting` first; `CoopHudBuild` final pass: no work for the lower tile half without glyph shift, a plain ORA pass otherwise (the bonus-screen shift unchanged); `CoopHudUpload` row copy unrolled (224 instead of 420 cycles in the NMI) | WRAM, COOP_CODE2 |
+
+Placement note: `CoopDrawCoop` stays in bank E (COOP_CODE2) because the Phase 6 checker accepts writes to slot 39's objState
+only from the bank-E co-op code (from PRG-RAM it reported `v_slot39_objstate_writer`); it costs the same there.
+
+### Result
+Per play tick, `stats p92g --vs p92base` (= vs p91a) and vs p90a:
+
+| scen | play p91a | play p92g | d vs p91a | d vs p90a | lag p90a | lag p91a | lag p92g |
+|---|---|---|---|---|---|---|---|
+| c01 | 21405 | 20694 | -711 (-3.32%) | -296 (-1.41%) | 106 | 118 | 99 |
+| c05 | 23298 | 22557 | -741 (-3.18%) | -394 (-1.72%) | 137 | 162 | 123 |
+| c17 | 29236 | 28325 | -911 (-3.12%) | -521 (-1.81%) | 647 | 688 | 629 |
+| c20 | 17143 | 16577 | -566 (-3.30%) | -162 (-0.97%) | 1 | 1 | 0 |
+| c22 | 22147 | 21436 | -711 (-3.21%) | -365 (-1.67%) | 142 | 146 | 137 |
+| c50 | 31963 | 30978 | -985 (-3.08%) | -649 (-2.05%) | 727 | 798 | 688 |
+| c64 | 31803 | 30849 | -954 (-3.00%) | -486 (-1.55%) | 1215 | 1252 | 1155 |
+
+Co-op specific cost after (same method as the baseline table):
+
+| item | c01 | c05 | c17 | c20 | c22 | c50 | c64 | mean |
+|---|---|---|---|---|---|---|---|---|
+| swap (CoopSwap/Ctx) | 1187 | 1209 | 1174 | 1192 | 1196 | 1197 | 1185 | 1192 |
+| P2 window glue | 142 | 142 | 143 | 144 | 139 | 142 | 140 | 142 |
+| P2 bubble-touch loop | 295 | 270 | 385 | 173 | 257 | 426 | 368 | 311 |
+| pair draw (9.1) | 310 | 252 | 289 | 318 | 277 | 251 | 306 | 286 |
+| draw gate + P2 blink | 43 | 43 | 43 | 44 | 44 | 44 | 43 | 43 |
+| HUD icon hide | 70 | 70 | 70 | 71 | 70 | 70 | 70 | 70 |
+| enemy targeting | 132 | 313 | 163 | 94 | 196 | 284 | 348 | 218 |
+| capture test (other shot) | 37 | 71 | 32 | 0 | 39 | 110 | 99 | 56 |
+| HUD build + upload | 20 | 32 | 15 | 7 | 69 | 70 | 36 | 36 |
+| camera / edges (round 20) | 30 | 30 | 30 | 215 | 31 | 31 | 30 | 57 |
+| other co-op | 50 | 64 | 74 | 110 | 68 | 46 | 160 | 82 |
+| SUM | 2317 | 2497 | 2418 | 2367 | 2386 | 2672 | 2788 | 2492 |
+
+The touch-loop line does not fall because the pre-test (step D) runs inside it; the saving is in the skipped bank-9
+`CODE_098932` calls (about 11k of 12k P2 calls per c50 run, ~60 cycles each). A swap is now ~600 cycles (natural run of the
+swap test: 600 in 2497 of 3446 swaps; was 707); the window's two swaps also skip the 5 draw arrays.
+
+Per step (c01 / c50, d_play vs p91a; lag c01 / c50): A -180 / -161 (113 / 764); +B -387 / -363 (107 / 742); +C -454 / -505
+(107 / 732); +D -573 / -822 (101 / 707); +E,F -667 / -940 (99 / 690); +G (objChrSlot/objAttr in the DRAW list) -711 / -985
+(99 / 688).
+
+1P (`stats p92g --vs p92base`, 12 regress scenarios): -40 .. -51 play cycles per tick (-0.21 .. -0.35 %), lag -4 .. 0;
+against p90a (before 9.1) -33 .. -44, lag -3 .. 0 (r01 151 = p90a, r50 319 vs 322). The 9.1 +7 and the lag +1 in r01 / r50 are
+gone; the remaining 1P overhead against the original game is the 7b-1 icon hide and HUD code (shorter now: draw path 13
+instead of 30 gate cycles, icon restore -13, HUD job ticks -300 .. -600 build and -196 upload).
+
+### Verification (build `p92g`, one pipeline `p92/verify_all.sh`)
+ROM md5 `3c8e473a75ca150e0b42e3bb915c7bc1` (p92gf `7346693c...`, p92gt `012a61a8...`); results `p92/final_*.txt`.
+1. `regress base p92g --reuse-base`: REGRESSION PASS 12/12, no new exclusion, HUD-rule counts identical to p91a; WRAM guard
+   silent on every run of the pipeline.
+2. Co-op RAM identity, `regress p92base p92g --scen c01 c05 c17 c20 c22 c50 c64`: PASS 7/7: CPU RAM (incl. scratch), nametables
+   and palette equal to p91a's on every tick (only lag-dependent bytes excluded, as in 1P).
+3. `p90/p90verify.py p92g` (32 runs): every rc 0, violations p5 0, p6 0, p6b 0, p7 0, Phase 8 0; `p92/cmpverify.py` against
+   p91a's run: 0 differences in all per-run counters and totals (the return-address counters only renamed: `_from_9F44` ->
+   `9F3F`, `D197` -> `D207`, `DF81` -> `DFB5`, same counts).
+4. `p92/pairchk.py p92g set`: P1 ok 12740, P2 ok 13041, bad 0 (= p91a); charge set (`fsset`, frame-polled input, so the play
+   differs from p91a's with the lag): P2 bad 0, P1 bad 38, all the known stuck-`$5B` class (`final_pairchk_charge_keys.txt`).
+5. `p90/hudcheck.py`, sets coop / p8 / r2 / 1p: HUDCHECK PASS x4, 49 runs rc 0, 0 job / cell / stale errors.
+6. `r2/menutest.py p92g p92gf`: MENU TESTS PASS a-f.
+7. `p7b2/pixcmp.py`: natural 0 differing (vs base and vs p91a); r20 vs base 25 = 24 split-line + t2064 (the known area), vs
+   p91a 17, all split-line. Nothing outside the known 7b-1 classes.
+8. `p92/swapcheck.py p92gt` (full swap content check): r01 `--inject` 2032 swaps, natural 3446, 0 failures.
+9. `p92/windowchk.py p92g`, 11 co-op scenarios (c01 c05 c17 c20 c22 c50 c64 c40 c70 cnat cgo, 63k window swaps): no read or
+   write of the `COOP_CTX_ARRAYS_DRAW` bytes of slot 0 / 39 inside a window.
+
+### Free space after the phase
+COOP_WRAM_CODE 522 B free (was 910); PRG-RAM data 3842 (3843; +`coopTouchSkip`); COOP_CODE 18 (0); COOP_CODE2 53 (105);
+bank 9 28 (23; 22 with `COOP_SWAPTEST`); banks 5, F and the others unchanged. `coopPairOn` / `coopPairSave` are unused since 9.2
+(left in place).
+
+### Deviations
+- The checkers needed copies, not changes: `p92/pairchk.py` (also hooks `CoopDrawPair`, which RoundUpdate now reaches
+  without `DrawObjects`; on p91a both hooks see the same state) and `p92/swapcheck.py` (reads both array lists).
+  `p90verify.py`, `hudcheck.py`, `menutest.py`, `pixcmp.py` are unchanged.
+- New co-op identity check: `perf.py regress p92base p92g --scen c01 c05 c17 c20 c22 c50 c64` (the 1P regress compare used
+  on co-op runs; no tool change).
+- In p92g the window's swaps do not fire the p5 hook on the `CoopSwap` entry (`v_swap_with_shot_exchanged`); the window
+  restores the shot bytes right before them, as before.
+
+### Open items / options not taken
+- The swap is still ~1.2k cycles per co-op tick (2 x ~600). Further cuts need per-variable liveness (e.g. `playerHeld` /
+  `playerPressed` are rewritten at the start of P2's update, so the window's swap-in could only save them), a separate
+  window-only routine, and checker updates: left as an option.
+- P1's half of the same early-out (`UpdateBubbles` -> `CODE_098149` -> `CODE_098932`, 90 % early returns) is original 1P
+  code; the same pre-test would save ~0.3k cycles per tick in heavy rounds for both modes. Not done (1P code).
+- The icon hide (~70 cycles per play tick in both modes) is now the largest 1P overhead left; cheaper variants need either
+  a change in DrawObjects' per-slot loop or object RAM changes.
