@@ -793,6 +793,9 @@ CODE_078548:
 	RTS							;C - - - - - 0x00E558 03:8548: 60
 
 CODE_078549:
+	BIT coopP2Active			;(co-op 9.3) both players in the round: either player triggers the tractor (CoopTractor)
+	BMI CODE_078549_coop
+CODE_078549_1p:
 	LDA #$00					;C - - - - - 0x00E559 03:8549: A9 00
 	SEC							;C - - - - - 0x00E55B 03:854B: 38
 	SBC wideHScroll				;C - - - - - 0x00E55C 03:854C: ED 61 07
@@ -807,6 +810,7 @@ CODE_078549:
 			LDA objX				;C - - - - - 0x00E56F 03:855F: AD B3 05
 			STA scratch1				;C - - - - - 0x00E572 03:8562: 85 01
 			LDA objY				;C - - - - - 0x00E574 03:8564: AD 8B 05
+CODE_078549_pos:						;(co-op 9.3) CoopTractor enters here with A = P2's objY, scratch1 = P2's objX
 			STA scratch0				;C - - - - - 0x00E577 03:8567: 85 00
 			CMP #$C4					;C - - - - - 0x00E579 03:8569: C9 C4
 			BNE CODE_07859A				;C - - - - - 0x00E57B 03:856B: D0 2D
@@ -851,6 +855,8 @@ CODE_07859A:
 			STA openingCycle				;C - - - - - 0x00E5C7 03:85B7: 8D CD 04
 CODE_0785BA:
 	RTS							;C - - - - - 0x00E5CA 03:85BA: 60
+CODE_078549_coop:
+	JMP CoopTractor				;(co-op 9.3) PRG-RAM (COOP_WRAM_CODE)
 
 CODE_0785BB:
 	LDA ram_04D1				;C - - - - - 0x00E5CB 03:85BB: AD D1 04

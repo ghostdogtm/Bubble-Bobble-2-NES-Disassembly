@@ -692,6 +692,20 @@ CoopDrawCoop:
 	STA objState+OSLOT_P2
 	RTS
 
+; CoopP2ObjHide / CoopP2ObjShow (9.3): slot OSLOT_P2's objState to 0 and back around DrawObjectsBody's even scan after
+; CoopDrawBodyC has drawn P2 first (here in bank E: the Phase 6 checker accepts slot-39 objState writes only from the
+; bank-E co-op code). Clobber A.
+CoopP2ObjHide:
+	LDA objState+OSLOT_P2
+	STA coopDrawSave
+	LDA #$00
+	STA objState+OSLOT_P2
+	RTS
+CoopP2ObjShow:
+	LDA coopDrawSave
+	STA objState+OSLOT_P2
+	RTS
+
 ; =============================================================================================
 ; Phase 6a: enemy target selection (COOP_CODE2). The enemy AI (CODE_0B81B6, even tick) always runs
 ; with P1 resident: P1 = slot 0 + native player vars, P2 = slot OSLOT_P2 + ctxOther_*. Enemy code reads
@@ -1854,7 +1868,7 @@ CoopForRestore:
 ; bit 0 = chrBankC := coopPairBank after DrawObjects, bit 1 / 2 = P1's / P2's objImgOfs points at his coopImgBuf (the
 ; image copy is still valid: it only changes in CoopPairShift).
 CoopDrawPlain:							;(trampolines within branch range of CoopDrawPair's tests)
-	JMP CoopDrawObjects1P
+	JMP CoopDrawObjectsC
 CoopDrawMiss:
 	JMP CoopDrawPairMiss
 CoopDrawPair:
@@ -1905,7 +1919,7 @@ CoopDrawPairResult:
 	STX objImgOfs+OSLOT_P2
 	LDX #>(coopImgEnt+2-$A000)
 	STX objImgOfsHI+OSLOT_P2
-:	JSR CoopDrawObjects1P
+:	JSR CoopDrawObjectsC
 	LDX coopPairBank					;both players' frames are in this KB; the bubbles are in every player KB
 	STX chrBankC
 	LDX coopMemoKey+2					;objImgOfs / HI back (the memo key holds their values at entry)
@@ -1919,13 +1933,13 @@ CoopDrawPairResult:
 	LDX #$00							;DrawObjects' exit: X = 0, Z = 1, N = 0 (C = 1 untouched)
 	RTS
 @bank:
-	JSR CoopDrawObjects1P
+	JSR CoopDrawObjectsC
 	LDX coopPairBank
 	STX chrBankC
 	LDX #$00
 	RTS
 @plain:
-	JMP CoopDrawObjects1P
+	JMP CoopDrawObjectsC
 
 ; CoopDrawPairMiss: the memo did not match: compute the pair bank, the positions and the image copies, then the common
 ; draw (CoopDrawPairResult).
@@ -1966,7 +1980,7 @@ CoopDrawPairMiss:
 @foreign:
 	JMP CoopDrawForeign
 @plain:
-	JMP CoopDrawObjects1P
+	JMP CoopDrawObjectsC
 @p1:
 	;frame point of P1 (slot 0): CHR slot 0, image block from objImgOfs, point from (bank, block)
 	LDA objChrSlot
@@ -2098,7 +2112,7 @@ CoopDrawForeign:
 	JSR CoopForeignSlot
 	LDX #OSLOT_P2
 	JSR CoopForeignSlot
-	JSR CoopDrawObjects1P
+	JSR CoopDrawObjectsC
 	PHP
 	STA coopPairA
 	LDA coopPairFor
@@ -2331,6 +2345,184 @@ CoopPairShift:
 	LDA CoopMemoBit,Y
 	ORA coopMemoOn
 	STA coopMemoOn
+@rts:
+	RTS
+
+; =============================================================================================
+; Phase 9.3: OAM order with both players in the round. DrawObjectsBody alternates the slot order (even ticks 0..39, odd
+; ticks 39..0), so one player is first in OAM and the other last; with more than 8 sprites on his lines the last one
+; loses them, and on a lag frame (NMIShort does no OAM DMA) the PPU shows that tick's OAM a second time: a player could
+; be invisible for 2 frames in a row (p93/flick.py). Here both players come first: the one the body would draw last is
+; drawn before the body (CoopDrawSlot at OAM 0) and hidden for the body's scan, so the order is
+; even: P2, P1, 1..38 / odd: P1, P2, 38..1 (the other objects keep the original alternation behind the players).
+; The pre-drawn player's chrBank write is made after the body, where the original order made it (last).
+; CoopDrawObjectsC: CoopDrawObjects1P (HUD icon hide) around CoopDrawBodyC; every CoopDrawPair path draws through it.
+; =============================================================================================
+CoopDrawObjectsC:
+	LDA objState+OSLOT_ICON
+	BEQ CoopDrawBodyC
+	LDA objAnim+OSLOT_ICON
+	CMP #.LOBYTE(anJrDoll_ID)
+	BNE CoopDrawBodyC
+	LDA objAnimHI+OSLOT_ICON
+	CMP #.HIBYTE(anJrDoll_ID)
+	BNE CoopDrawBodyC
+	LDA objY+OSLOT_ICON
+	STA hudIconY
+	LDA #HUD_ICON_HIDE_Y
+	STA objY+OSLOT_ICON
+	JSR CoopDrawBodyC
+	LDX hudIconY
+	STX objY+OSLOT_ICON
+	LDX #$00
+	RTS
+
+; CoopDrawBodyC: DrawObjectsBody with both players first (see above). The original order when ram_0475 is set (pause,
+; announcements: slots >= ram_0475 skipped) or when the player who would be last is not drawn (objState 0: blink, ...).
+; Exit as DrawObjectsBody's (X = 0, Z = 1, N = 0, C = 1); A and Y are the body's or the bank write's (no caller reads them).
+CoopDrawBodyC:
+	LDA ram_0475
+	BNE @orig
+	LDA globalTimer
+	LSR
+	BCS @odd
+	LDA objState+OSLOT_P2				;even tick: the body draws 0..39, P2 last
+	BEQ @orig
+	JSR CoopDrawMap
+	LDY #OSLOT_P2
+	JSR CoopDrawSlot
+	JSR CoopP2ObjHide					;bank E: slot-39 objState writes stay in the bank-E co-op code (Phase 6 checker)
+	LDY #$00
+	JSR DrawObjects_EvenScan			;the body's even scan from slot 0 (its bank map and oamBufferPos = 0 skipped)
+	JSR CoopP2ObjShow
+	LDX objChrSlot+OSLOT_P2				;P2's chrBank write, last as in the original order
+	LDA objChrBank+OSLOT_P2
+	BEQ :+
+	STA chrBankC,X
+:	LDX #$00
+	RTS
+@odd:
+	LDA objState						;odd tick: the body draws 39..0, P1 last
+	BEQ @orig
+	JSR CoopDrawMap
+	LDY #$00
+	JSR CoopDrawSlot
+	LDA objState
+	STA coopDrawSave
+	LDA #$00
+	STA objState
+	LDY #$27
+	JSR DrawObjects_OddScan				;the body's odd scan from slot 39 (ram_0475 = 0)
+	LDX coopDrawSave
+	STX objState
+	LDX objChrSlot						;P1's chrBank write, last as in the original order
+	LDA objChrBank
+	BEQ :+
+	STA chrBankC,X
+:	LDX #$00
+	RTS
+@orig:
+	JMP DrawObjectsBody
+
+; CoopDrawMap: what DrawObjectsBody does before its scans: the image bank at $A000 (Rule 9 order) and oamBufferPos = 0.
+CoopDrawMap:
+	LDA #$07
+	STA $8000
+	LDA sprPrgBank
+	STA prgBankB
+	STA $8001
+	LDA #$00
+	STA oamBufferPos
+	RTS
+
+; CoopDrawSlot: Y = slot: one step of DrawObjectsBody's slot loop (same OAM bytes) at oamBufferPos, without the chrBank
+; write. At most 8 sprites at OAM 0: the buffer cannot fill. Uses scratch0-3, 5, 8, 9, sprAttr (as the body; not 6/7).
+CoopDrawSlot:
+	LDA objAttr,Y
+	STA sprAttr
+	LDA objY,Y
+	STA scratch2
+	LDA objX,Y
+	STA scratch3
+	LDA objImgOfs,Y
+	STA scratch0
+	LDA objImgOfsHI,Y
+	CLC
+	ADC #$A0
+	STA scratch1
+	LDX objChrSlot,Y
+	LDY #$00
+	LDA (scratch0),Y
+	STA scratch8
+	INY
+	LDA (scratch0),Y
+	STA scratch9
+	DEY
+	LDA (scratch8),Y					;size of the sprite struct
+	CLC
+	ADC #$01
+	STA scratch1
+	LDA SprBaseTiles,X
+	STA scratch5
+	LDX oamBufferPos
+	LDY #$01
+@spr:
+	LDA (scratch8),Y					;Y
+	CLC
+	ADC scratch2
+	STA OAMBuffer,X
+	INX
+	INY
+	LDA (scratch8),Y					;tile
+	CLC
+	ADC scratch5
+	STA OAMBuffer,X
+	INX
+	INY
+	LDA (scratch8),Y					;attributes
+	ORA sprAttr
+	STA OAMBuffer,X
+	INX
+	INY
+	LDA (scratch8),Y					;X
+	CLC
+	ADC scratch3
+	STA OAMBuffer,X
+	INX
+	INY
+	CPY scratch1
+	BNE @spr
+	STX oamBufferPos
+	RTS
+
+; =============================================================================================
+; Phase 9.3: round-50 missile tractor (CODE_078462 -> CODE_078549, bank 7, run by CODE_078247 before P1's update, so
+; P1 is resident: slot 0 = P1, OSLOT_P2 = P2). CODE_078549 is the tractor's only player read: in the states 0-2 / 5 / 6
+; (openingCounter) it reads slot 0's objX / objY once: on the floor (Y $C4) on the side the tractor moves to (state 1:
+; X <= tractor, state 2: X > tractor) it speeds up (state +2, sound, openingCycle $20); high (Y < $60) within $30 px it
+; stops and fires (state 6, openingCycle 1). The fast states 3/4 test the tractor's own position instead (no player).
+; CoopTractor: CODE_078549 while both players are in the round (BIT coopP2Active / BMI, bank 7 mapped at $8000).
+; Rule: the first player who triggers it, P1 first: the original code runs for P1; if it left openingCounter as it was
+; (no trigger) and the tractor is not in state 3/4, the same test runs again from CODE_078549_pos with P2's position
+; (scratch3 = tractor X is still set). A re-trigger of state 6 by P1 (6 -> 6, only openingCycle changes) also runs P2's
+; test: in state 6 P2 can only re-trigger the same way (6, cycle 1), so the result is the same as "P1 first".
+; Clobbers A and the flags, as CODE_078549 does (X / Y untouched).
+; =============================================================================================
+CoopTractor:
+	LDA openingCounter
+	PHA
+	JSR CODE_078549_1p
+	PLA
+	CMP openingCounter
+	BNE @rts						;P1 triggered it
+	CMP #$03
+	BEQ @rts						;fast states: no player test
+	CMP #$04
+	BEQ @rts
+	LDA objX+OSLOT_P2
+	STA scratch1
+	LDA objY+OSLOT_P2
+	JMP CODE_078549_pos				;the original test with P2's position; returns to CODE_0784CA's caller
 @rts:
 	RTS
 

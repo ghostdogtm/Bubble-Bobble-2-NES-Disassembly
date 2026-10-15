@@ -114,3 +114,6 @@ coopImgBuf:     .res 2*COOP_IMG_BUF ; per player: copy of the image with the til
 
 ; Phase 9.2: co-op performance.
 coopTouchSkip:  .res 1          ; (9.2) CoopP2BubbleTouch: the last bubble whose CODE_098932 call was skipped ($FF = none since the last call)
+
+; Phase 9.3: OAM order.
+coopDrawSave:   .res 1          ; (9.3) CoopDrawBodyC / CoopP2ObjHide: objState of the player drawn first, hidden for the body's scan
