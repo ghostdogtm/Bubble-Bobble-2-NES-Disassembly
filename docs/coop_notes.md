@@ -2881,3 +2881,174 @@ bank 9 28 (23; 22 with `COOP_SWAPTEST`); banks 5, F and the others unchanged. `c
   code; the same pre-test would save ~0.3k cycles per tick in heavy rounds for both modes. Not done (1P code).
 - The icon hide (~70 cycles per play tick in both modes) is now the largest 1P overhead left; cheaper variants need either
   a change in DrawObjects' per-slot loop or object RAM changes.
+
+## Phase 9.3: round-50 tractor, sprite flicker
+
+Code commit `7132ab4`. Build `p93b` (`p93bf` = `COOP_FORCE`, `p93bt` = `COOP_SWAPTEST`); `p93a` = the same sources without
+item B (tractor only, used to separate the two changes in the RAM comparisons). Scripts and results: `tmp/coop_scripts/p93/`
+(`STATE.md`, `progress.txt`, `final_*.txt`, one pipeline `verify_all.sh`). 1P is unchanged: regress 12/12.
+Plan task numbers: plan 9.1 (OAM flicker) = item B here; plan 9.2 (palette) = item C.
+
+### A. Round-50 missile tractor
+The tractor is round 50's per-tick routine `CODE_078462` (installed in `ram_005B` by `CODE_078404`, run by `CODE_078247`
+from `RoundUpdate` before P1's update, so P1 is resident: slot 0 = P1, `OSLOT_P2` = P2). Its whole path, checked for
+player reads:
+
+| routine | what | player read |
+|---|---|---|
+| `CODE_078462` | state (`openingCounter` 0-6) timer `openingCycle`, speed `DATA_0784E3` added to `wideHScroll` (the tractor's position, an IRQ split), bounce at the ends | none |
+| `CODE_0784EA` | state 6 with `openingCycle` 0: `SpawnProj psMissileTractor` at the tractor's X | none (X from `wideHScroll`) |
+| `AnimateMissileTractor` | BG CHR animation (`bgAnimValue`) | none |
+| `CODE_078549` | the reaction, see below | **`objX` / `objY` of slot 0** (the only one) |
+| `psMissileTractor` -> `ProjOp_TractorMissile` -> 3 x `psGravityProj` | missiles spawn at the parent's X, fly up | spawn: none; contact `PO_GET_PLAYER_CONTACT` / `PO_HURT_PLAYER` = Phase 5 (`CoopProjCheckP2`), both players |
+
+`CODE_078549` (scratch3 = tractor X = `$80 - wideHScroll`):
+- states 0-2, 5, 6: reads the player once. On the floor (Y = `$C4`): state 1 (moving left) with the player at or left of the
+  tractor, or state 2 (moving right) with the player right of it -> state +2 (fast, toward the player), sound
+  `snMissileTractor`, `openingCycle` `$20`. Else, high (Y < `$60`) within `$30` px -> state 6, `openingCycle` 1 (stop and
+  fire: the missile leaves one tick after the player is out of that zone, original behaviour).
+- fast states 3/4: no player read; the same "high" test runs on the tractor's own position (scratch0/1 left by
+  `CODE_078462`), which fires missiles at fixed positions.
+
+**Rule (co-op, both players in the round): the first player who triggers it, P1 first.** `CODE_078549` starts with
+`BIT coopP2Active / BMI` -> `JMP CoopTractor` (PRG-RAM). `CoopTractor` runs the original code for P1
+(`JSR CODE_078549_1p`); if `openingCounter` is unchanged (P1 triggered nothing) and the state is not 3/4, it runs the same
+test with P2's position (`objX/objY+OSLOT_P2` -> scratch1 / A, `JMP CODE_078549_pos`, the original `STA scratch0`; scratch3
+is still set). A P1 re-trigger of state 6 (6 -> 6, only the timer changes) also runs P2's test; in state 6 P2 can only
+re-trigger the same way, so the result equals "P1 first". "Nearest player" was not used: the two tests are per player
+and side-dependent (floor) or zone-based (high), so "whoever satisfies it" is the natural co-op version and keeps P1's
+result whenever P1 triggers. 1P, and a game with one player out (`coopP2Active` = 0), run the original code (the
+playing player is resident in slot 0).
+
+### B. Sprite overflow with two players
+**Measurement (`p93/flick.py`).** Per rendered frame of co-op play: the expected sprites of each player (image struct at
+DrawObjects / `CoopDrawPair` entry, as `pairchk.py`), latched by the OAM DMA and kept on lag frames (`NMIShort` does no
+DMA: the PPU shows the last tick's OAM again); at frame end the PPU OAM is evaluated per scanline (first 8 entries in
+OAM order are drawn, 8x16: lines Y+1..Y+16). Per player and frame: ok / part (>= 50 % of his sprite lines) / big
+(< 50 %) / inv (0 lines, incl. sprites cut off a full buffer) / hid (not drawn: blink) / off. Runs = consecutive big|inv
+frames. An exact overlap (both players the same frame at the same place) counts as one image. Scenarios c01 c05 c17 c20
+c22 c50 c64 and the floor style f17 / f64 (both pads walk and tap B, never jump: both players on the bottom row; inputs
+per tick, independent of lag).
+
+Before (`p92g`) and after (`p93b`), co-op play frames (`final_flick_p92g.txt`, `final_flick_p93b.txt`); "big+inv" = frames
+with less than half of the player's sprite lines shown, "inv" = none shown; "runs of 2" = two such frames in a row;
+"others" = share of dropped sprite lines of all other objects:
+
+| scen | frames (lag) | P1 big+inv / inv | P2 big+inv / inv | P1 runs of 2 | P2 runs of 2 | longest run | after: players big+inv | others dropped before -> after |
+|---|---|---|---|---|---|---|---|---|
+| c01 | 2153 (122) | 95 / 0 | 69 / 0 | 0 | 9 | 2 | 0 | 9.9 % -> 13.8 % |
+| c05 | 2215 (180) | 117 / 0 | 143 / 0 | 13 | 23 | 2 | 0 | 10.8 % -> 14.0 % |
+| c17 | 2768 (717) | 331 / 17 | 490 / 46 | 28 | 221 | 2 | 0 | 21.1 % -> 27.2 % |
+| c20 | 2130 (3) | 36 / 10 | 62 / 10 | 0 | 2 | 2 | 0 | 4.1 % -> 8.1 % |
+| c22 | 2167 (148) | 344 / 32 | 418 / 37 | 0 | 55 | 2 | 0 | 19.0 % -> 25.5 % |
+| c50 | 2907 (854) | 40 / 0 | 41 / 0 | 4 | 20 | 2 | 0 | 9.9 % -> 10.7 % |
+| c64 | 3324 (1277) | 263 / 8 | 344 / 8 | 115 | 159 | 2 | 0 | 19.5 % -> 22.6 % |
+| f17 | 2378 (708) | 166 / 2 | 334 / 4 | 13 | 159 | 2 | 0 | 8.0 % -> 12.6 % |
+| f64 | 3643 (1596) | 464 / 11 | 700 / 14 | 211 | 342 | 2 | 0 | 21.8 % -> 25.7 % |
+
+Before, totals: frames with sprites over the limit P1 5345 / P2 7122 of 23685; cut off a full buffer (c64, f64) 392 frames
+each; fully invisible (inv) frames P1 80 / P2 119, of which runs of 2 frames P1 9 / P2 38; no run longer than 2. Every
+bad frame is on the player's losing parity (P1 odd ticks, P2 even ticks), and every run of 2 is a lag frame (bad frames
+on lag frames: P1 384, P2 990). After: 0 frames with any player line dropped or cut; other objects' dropped lines
+16.0 % -> 19.9 %, their fully dropped entries 39478 -> 54612 (c50 differs in play: the tractor, item A).
+Cross-check `pairchk`: the "partial" frames of p92g (91 per player, c64 OAM full) are gone (0).
+
+**Cause.** `DrawObjectsBody` alternates the slot order (even ticks 0..39, odd 39..0), so every tick one player is first in
+OAM and the other last: P1 loses lines only on odd ticks, P2 only on even ticks (no bad frame on the other parity). The
+2-frame runs are all lag frames: the losing tick's OAM is shown twice. No per-tick rotation can prevent that (whether
+the next frame lags is not known when the OAM is built), and re-ordering at the lag NMI would need an OAM DMA there
+(the buffer can be half rebuilt by the next tick's DrawObjects) or an OAMADDR rotation (2C02 OAM corruption with a
+non-zero OAMADDR at render start).
+
+**Change: both players first.** `CoopDrawPair` (every co-op draw, all its paths) draws through `CoopDrawObjectsC` (the
+icon hide of `CoopDrawObjects1P`) -> `CoopDrawBodyC`: the player the body would draw last is drawn first by
+`CoopDrawSlot` (one step of the body's slot loop, same OAM bytes, at OAM 0, after `CoopDrawMap` = the body's own bank map
+in Rule 9 order and `oamBufferPos` = 0), hidden for the body's scan, which is entered at `DrawObjects_EvenScan` (Y = 0) /
+`DrawObjects_OddScan` (Y = 39). Order: even P2, P1, 1..38; odd P1, P2, 38..1 (the other objects keep the original
+alternation; the two players still alternate between themselves). The pre-drawn player's chrBank write is made after the
+body, where the original order made it (last). Slot 39's objState hide/restore is in bank E (`CoopP2ObjHide/Show`,
+COOP_CODE2: the Phase 6 checker accepts slot-39 objState writes only from bank-E co-op code); slot 0 is hidden in place.
+Original order when `ram_0475` != 0 (pause, announcements) or when the player who would be last is not drawn (blink).
+Two players use at most 6 sprites per line (3-wide frames), so they can no longer lose a line or be cut off a full buffer.
+Visible side effects: the other objects on the players' lines lose more (numbers above), and a player overlapping another
+object is now always in front of it (before: in front every other tick).
+
+### C. Palette: owner decision (2026-10-15)
+P2 keeps P1's palette: shared sprite palette 0, P2 looks like P1 (plan task 9.2 closed; no research, no mockup, no change;
+see "P2 visual identity" in Phase 3 and "Lone-P2 colour" in 7b-2).
+
+### Sites
+| site | change | bytes |
+|---|---|---|
+| `CODE_078549` (bank 7) | `BIT coopP2Active / BMI CODE_078549_coop`; labels `CODE_078549_1p`, `CODE_078549_pos`; `CODE_078549_coop: JMP CoopTractor` after `CODE_0785BA` | +8 |
+| `CoopTractor` (PRG-RAM) | new | +33 |
+| `CoopDrawPair` / `CoopDrawPairMiss` / `CoopDrawForeign` (PRG-RAM) | 6 x `CoopDrawObjects1P` -> `CoopDrawObjectsC` | 0 |
+| `CoopDrawObjectsC`, `CoopDrawBodyC`, `CoopDrawMap`, `CoopDrawSlot` (PRG-RAM) | new (42, 98, 19, 109) | +268 |
+| `CoopP2ObjHide`, `CoopP2ObjShow` (COOP_CODE2) | new (12, 7) | +19 |
+| COOP_BSS | `coopDrawSave` | +1 |
+
+### Verification (build `p93b`, one pipeline `p93/verify_all.sh`)
+ROM md5 `3ce81e5e339748d7d7bf1fd7edb42e6b` (p93bf `8f5e0f57...`, p93bt `fd8e0a2a...`, p93a `cf8e851f...`); results `p93/final_*.txt`.
+1. Builds p93b, p93bf, p93bt (and p93a) assemble.
+2. `regress base p93b --reuse-base`: REGRESSION PASS 12/12, no new exclusion, HUD-rule counts as p92g, ignored scratch-byte
+   diffs +1 in r08 and r17 (bank 7 relinked; scratch is not compared); WRAM guard silent on every run.
+3. Co-op RAM identity, item A alone: `regress p92g p93a --scen c01 c05 c17 c20 c22 c50 c64`: 6/7 PASS (c17: 1 scratch byte,
+   ignored by the tool); c50 differs from tick 953: `openingCounter` 1 -> 3, `openingCycle` $20, `soundTrigger`
+   `snMissileTractor` = the first P2-alone trigger in the tractor log (P1 at Y $C1, P2 on the floor at X $1F left of the
+   tractor at $7F, state 1).
+4. Item B alone, `p93/ramdiff.py p93a p93b` (same 7 scenarios, every tick, perf's exclusions): only OAMBuffer and the draw
+   temporaries (scratch0-9, sprAttr, oamBufferPos) differ; the OAM holds the same visible sprites in another order on
+   every tick, except 182 ticks of c64 where the buffer is full in both runs (another object is cut instead of a player);
+   no chrBank difference, nothing else. (`final_ramdiff_b.txt`)
+5. Tractor probes `p93/tractor.py` (every `CODE_078549` call logged and re-computed by a model of the rule; MISMATCH 0 in
+   all runs, `final_tractor.txt`), t50a / t50b = round 50 co-op, 6000 ticks:
+   - both (c50 t50a t50b): P1 alone 84, P2 alone 81, both 7 floor triggers (P1's taken);
+   - P2 only (P1's Y forced off for the call): P2 floor 123, P2 high 18, 6 missile volleys; P1 only: P1 floor 123;
+   - forced high zone (100 of every 400 ticks): P2 1436 / P1 1455 high triggers, 21 missile volleys each;
+   - 1P r50 (`p93b`, model "P1 only"): PASS, 17 floor triggers, 3 fast-state volleys;
+   - before (`p92g`): the model "P1 only" holds, 1014 calls where P2's position satisfied the test were ignored; with P1's
+     Y forced off, no trigger and no missile at all.
+6. `p90/p90verify.py p93b` (32 runs): every rc 0, violations p5 0, p6 0, p6b 0, p7 0, Phase 8 0. `cmpverify` against p92g's run:
+   per-run differences only in c50 (deaths / pops after the tractor change, 6 counters); the totals differ by c50's share.
+7. `p93/pairchk.py p93b set`: P1 ok 13031, P2 ok 12948, bad 0, partial 0 (p92g: partial 91 each); charge set: P2 bad 0,
+   P1 bad 34, all the known stuck-`$5B` class; absent / partial 0 (p92g: absent 9 / 9, partial 25 / 23).
+8. `p90/hudcheck.py`, sets coop / p8 / r2 / 1p: HUDCHECK PASS x4, 49 runs rc 0, 0 job / cell / stale errors.
+9. `r2/menutest.py p93b p93bf`: MENU TESTS PASS a-f.
+10. `p7b2/pixcmp.py`: natural 0 differing (vs base and vs p92g); r20 vs base 28 = 27 split-line + t2064 (the known area), vs
+    p92g 10, all split-line (1P r20 is +1 cycle per tick: bank 7 relinked). Nothing outside the known 7b-1 classes.
+11. `p93/swapcheck.py p93bt`: r01 `--inject` 2032 swaps, natural 3446, 0 failures. `p93/windowchk.py p93b` (11 scenarios): no
+    access, same window counts as p92g.
+12. `p93/flick.py`: the table above.
+
+### Cost
+- 1P (`stats p93b --vs p92g`, 12 scenarios): 0 everywhere except r50 +6 cycles per tick (the `BIT/BMI` in `CODE_078549`,
+  round 50 only; lag +1 frame of 3000) and r20 +1 (relink); total +7 cycles.
+- Co-op, item B (`stats p93b --vs p93a`, same game): +48 .. +61 cycles per play tick (+0.2 .. +0.4 %), c64 +9; lag +0 .. +6.
+  Per draw (profile): `CoopDrawBodyC` ~77, `CoopDrawMap` ~28, the bank-E hide/show ~16 on average; `CoopDrawSlot` (~550)
+  is the moved draw of one player, which the body no longer makes.
+- Co-op, item A: `CoopTractor` ~40 cycles per round-50 tick plus P2's test in the original code. c50 vs p92g is -468 per
+  tick, lag -25: a different game (the tractor reacts to P2), not a saving.
+- `stats p93b --vs p92g`, co-op: c01 +57, c05 +54, c17 +61, c20 +60, c22 +48, c64 +8 (9.2's gains of -711 .. -985 kept).
+
+### Free space after the phase
+PRG-RAM code area 221 B free (was 522); COOP_CODE2 34 (53); bank 7 13 (21); COOP_CODE 18, bank 9 28 (22 with
+`COOP_SWAPTEST`), banks 1 572, D 492, 5 262, F 182 unchanged; PRG-RAM data area 3841.
+
+### Deviations
+- The plan's 9.1 asked for "rotating start" cycling; the code shows that the alternation already gives each player the
+  front every other tick, and that the remaining 2-frame vanishing comes from lag frames, which no per-tick rotation can
+  reach. So both players are drawn first instead (an "interleaving" order); the players never lose a line, and the other
+  objects take the overflow.
+- The draw-order change applies to every co-op DrawObjects call (all paths of `CoopDrawPair`), not only RoundUpdate's.
+- The pre-drawn player's chrBank write is moved after the body (same final CHR registers as the original order;
+  `ramdiff`: no chrBank difference on any tick).
+- `p93/ramdiff.py` (new): the RAM-identity check for an intentional OAM-order change (perf's regress would fail on the OAM).
+- `verify_all.sh` lost the progress lines of its last 3 steps (relative path after a `cd`; fixed in the script).
+
+### Open items
+- Owner choice (B): the players are now always in front; the other objects on their lines flicker more (dropped lines
+  16.0 % -> 19.9 % in the measured set). The alternative on record: keep the p92g order (each player in front every other
+  tick, invisible up to 2 frames on lag frames, as P1 in the original 1P game).
+- The tractor's missile zone rarely triggers in random play (the players are seldom high near it); forced probes cover it.
+- 1P keeps the original order (P1 last on odd ticks, invisible up to 2 frames on lag frames): unchanged on purpose.
+- PRG-RAM code area: 221 B left; further co-op code needs the space of other free banks (`$0E`, `$0F`, `$11-$1D`).
