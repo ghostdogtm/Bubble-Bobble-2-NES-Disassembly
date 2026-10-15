@@ -3057,3 +3057,113 @@ PRG-RAM code area 221 B free (was 522); COOP_CODE2 34 (53); bank 7 13 (21); COOP
 The owner chose (a): keep the Phase 9.3 order, both players always drawn first in co-op (they never vanish; the other
 objects on their lines flicker more). Not taken: (b) back to the p92g order (each player in front every other tick,
 invisible up to 2 frames on lag frames).
+
+## Test pipeline speed-up
+The full verification of Phase 9.3 (`tmp/coop_scripts/p93/verify_all.sh p93b`) took 83 minutes, ran one step after
+the other, showed no progress inside a step and could not tell a slow run from a hung one. Owner-approved: changes to
+`tools/perf` for speed and progress/status only; nothing that is checked changed. Game sources untouched.
+
+### How to run
+- Full (the checks of `p93/verify_all.sh`, parametrised; Phase 9.3 values shown):
+  `python tools/perf/verify.py full p93b --prev p92g --alt p93a --p90ref tmp/coop_scripts/p92/final_p90verify.txt`
+  (`p93bf` / `p93bt` must exist; `--alt` and `--p90ref` are optional; `--base` defaults to `base`). Results:
+  `tmp/verify/p93b_full/final_*.txt` (the file names of `verify_all.sh`), `summary.txt` (PASS / FAIL / INFO per step
+  with its file), `run.log` (the console lines). Exit code 0 only if every step with a verdict passed (9.3's expected
+  `ramidentity` FAIL at c50 therefore gives exit code 1).
+- Quick (development, ~5.5 min cold): `python tools/perf/verify.py quick p93b` - 1P regress (12 scenarios), p90verify
+  on c01 c17 c50 c64 w20n bn2, hudcheck c01,c20,c50, pairchk c01 c50, menutest.
+- Status (from another shell): `python tools/perf/verify.py status` - running / finished / STALE, steps with elapsed
+  time and run i/M, the Mesen runs alive (pid, elapsed, expected, hang limit), ETA.
+- `--jobs N` Mesen processes at once (default 4), `--no-cache`, `--force` (start although Mesen.exe processes exist).
+
+### Where the time went (measured, `tmp/coop_scripts/speed/`)
+- Emulation itself: 3300 frames take 14 s in Mesen's test runner (a Lua script turns the debugger on); every 3000-tick
+  run costs at least that. Harness Lua ~5 s per run, the per-tick dump ~2.5 s.
+- p90verify-type runs (p90verify and hudcheck's r2 / p8 sets, 55 of ~200 runs, over half the CPU): c01 took 95 s.
+  `emu.getState()` costs ~200 us per call (Mesen serializes the whole emulator, 323 keys); 211k calls = 42 s. Every
+  registered exec callback is tested by Mesen on every executed instruction; one on a PRG-ROM offset costs ~0.27 s per
+  3300 frames (4x one on a CPU address); p90verify registers ~110 of them: ~30 s.
+- Duplicated emulation: hudcheck's r2 / p8 sets (23 runs) are p90verify's runs of the same scenarios plus the HUD Lua.
+  Base / p92g runs (pixcmp, flick, tractor) were redone each pipeline; pixcmp ran the new build twice.
+- Parallelism: the old steps used 1-4 Mesen processes and many steps were serial (swapcheck, tractor's 8 calls, the
+  two pixcmp calls). Scaling on this 4-core machine (c01 dump run): 1 run 21.5 s, 2: 23.0, 3: 26.0, 4: 31.3, 5: 38.0
+  -> 4 at once is the best (5 adds 2 % and leaves nothing for the Python side); ~170 MB per Mesen.
+- Python: `perf.py regress` compared every byte of every differing tick record (4128 bytes x 3000 ticks x 12).
+
+### Changes
+- `tools/perf/harness.lua`, "Speed layer" (runs before any registration, also for the add-on Lua of the co-op
+  checkers): (1) `emu.getState()` returns the table of the previous call while Mesen is still delivering the same
+  memory access / exec / event (same callback type, memory type and address and a higher registration number; events
+  and `emu.write*` drop it); (2) with `CFG.prg_link` (perf.py passes it) every single-address exec callback, on a CPU
+  address or on a PRG-ROM offset (registered at the CPU address its ROM segment is linked at), goes into one Mesen
+  callback per CPU address that calls the entries in registration order; a PRG-ROM entry only if
+  `emu.convertAddress` maps the executed address to its offset. Verified in Mesen: callbacks fire in registration
+  order across memory types, a PRG-ROM exec callback gets the same arguments (CPU address, opcode), a returned value
+  is passed on, an error does not stop the others, `emu.stop` does not raise; the layer does the same. Dump records
+  are read 4 bytes at a time (`emu.read32`), same bytes. p90verify c01: 95 -> 60 s; perf dump runs 22 -> 20.4 s;
+  perf runs r01 / c01 (csv, dump, icon, prof, wprof) byte-identical before / after.
+- `tools/perf/perf.py`: `CFG.prg_link`, `--timeout=1800` for Mesen (its own ~100 s script limit could cut a run when 4
+  share the CPUs), `diff_offsets` (chunk-wise, same list) in `compare_runs`, `PERF_JOBS`.
+- `tools/perf/verify.py` (new): the runner. A lock (`tmp/verify/verify.lock`, pid + process creation time; a second
+  pipeline is refused, a lock of a dead process is replaced) and a refusal while any Mesen.exe runs. The runner joins a
+  Windows Job Object (kill on close), so killing it kills every child; Ctrl-C / errors kill the children explicitly
+  (taskkill /T). The step scripts run unchanged under `verify.py _step`, whose `subprocess.run` hands every Mesen run to
+  the runner: at most 4 at once, longest expected first, a per-run hang limit (3x the expected time, at least +300 s;
+  a hang is killed and reported, the caller gets `TimeoutExpired`), a run cache (`tmp/verify/cache`, key = hash of
+  Mesen.exe / MesenCore.dll / settings.json, the ROM bytes, the Lua with its `[[path]]` strings normalized and the
+  arguments; the files the Lua writes are recorded by a one-line prologue, so line numbers do not move; only exit code
+  0 runs; scripts with math.random / os.time / os.clock are never cached; LRU at 6 GB). Steps run in parallel as their
+  data allow (stats after the runs they read, ramdiff after both dump sets, the second pixcmp after the first, ...).
+  Progress: `tmp/verify/progress.json`, console lines for step start / end and every run, a heartbeat every 30 s,
+  ETA from the previous pipeline (`tmp/verify/history.json`).
+- `tmp/coop_scripts` (not committed): `p90/p90verify.py --reuse TAG --reuse-scen ... --reuse-done ...` takes the
+  output files of hudcheck's r2 / p8 runs (waits for each; requires exit code 0, this ROM's md5 and the p90verify Lua
+  verbatim in that run's script; runs a scenario itself if no such run appears); `p8/coophelp.py` writes `OUT.rc`
+  (exit code + ROM md5); `p93/ramdiff.py` uses `perf.diff_offsets`. Before adopting the reuse, the 23 scenarios were
+  run both ways: `_p5/_p6/_p6b/_p7.txt` and `.csv` identical (as sets of lines: Lua `pairs()` order differs per run).
+- Not done: `VideoFilter` None in `tmp/mesen/settings.json` would save ~12 % CPU per run (the LcdGrid filter runs in
+  a second thread), but it changes the screenshot PNGs (pixel data from `getScreenBuffer` is the same): owner's call.
+
+### Measurements (build p93b; old = `p93/verify_all.sh` run of 2026-10-15)
+| step | old wall | new: Mesen runs, CPU s (cold run) |
+|---|---|---|
+| 1P regress (+stats) | 3:41 | 12 runs, 342 |
+| co-op RAM identity p92g -> p93a | 1:56 | 7, 197 |
+| run p93b co-op dump+profile, ramdiff, stats, profile | 2:07 | 7, 196 (+6 s ramdiff) |
+| swapcheck x2 | 2:01 | 2, 129 |
+| windowchk | 2:22 | 11, 389 |
+| pairchk set + charge | 2:25 | 23, 467 |
+| flick p92g + p93b | 2:54 | 18, 505 |
+| tractor (8 calls) | 7:25 | 19, 938 |
+| p90verify (32) + cmpverify | 30:08 | 9 own runs, 843 (23 from hudcheck) |
+| hudcheck x4 sets | 25:11 | 49, 2855 |
+| menutest | 0:15 | 6, 44 |
+| pixcmp x2 | 2:27 | 10 (+2 from the cache), 333 |
+| **total** | **82:52** | **34:04** wall, 173 runs, 121 CPU-min |
+
+In the new pipeline the steps overlap (4 slots shared, longest runs first), so a step's own span says little; the
+work per step is its CPU. Intermediate result without the p90verify / hudcheck reuse: 43:52 (198 runs, 157 CPU-min).
+Warm cache (the same build again, e.g. after a checker fix or a crash): full 2:06 (173 of 175 runs from the cache;
+swapcheck's random-inject runs are never cached), quick 5:30 cold / 0:24 warm.
+
+### Equivalence (`tmp/coop_scripts/speed/eqcheck.py p93 tmp/verify/p93b_full`)
+Against the old pipeline's `p93/final_*.txt`, for the cold run with the reuse and again for the warm run: identical
+bytes for md5, regress, stats (1P, co-op x3), RAM identity (same 6/7 and c50 FAIL), ramdiff, profile, windowchk,
+flick (both), tractor, p90verify (32 runs, 0 violations), cmpverify (34 differences, the same ones), hudcheck (PASS x4,
+LF line ends as before), pixcmp (both). Same up to order: menutest (cases print in completion order, also before) and
+pairchk (in the first new run, before the reuse, one of the listed keys differed: its top-12 'bad' list cuts through 8
+keys of count 1, whose order comes from Lua `pairs()`, random per run, also before; totals equal). swapcheck: swaps / checks / failures equal; the --inject run's
+cycle histogram differs in every run (old, and all four new runs): the injected random values are assigned in
+`pairs()` order. Runner safety tested: second start refused while one runs; runner killed with taskkill (no /T): all
+Mesen and step processes gone, status STALE, next start replaced the lock; a never-ending run was killed at its limit
+and reported as HANG.
+
+### Open items
+- `VideoFilter` None (above): ~12 % less CPU, different screenshot PNGs.
+- The remaining cost of p90verify-type runs is getState in two write hooks that need the writer's PC (ctxOther
+  whitelist 63k calls, p6b's player-state writes 79k calls per c01 run); only a different check could avoid it.
+- Several checkers still emulate the same co-op scenarios with different light Lua (windowchk, pairchk, flick, hudcheck
+  coop, perf dump: c01-c64); merging their Lua into one run would save ~5 runs per scenario but needs the checkers'
+  output paths separated; not done.
+- The pipeline definition calls the Phase 9.3 checkers in `tmp/coop_scripts` (not committed), `--checkers` points to
+  another copy.
