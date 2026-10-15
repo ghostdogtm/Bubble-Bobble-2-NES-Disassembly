@@ -60,6 +60,11 @@ Phase 9.0 (PRG ROM 256 KB, co-op code in PRG-RAM; owner-approved tool change):
     logic tick, the area must then equal the image, and after that ANY CPU write into the area, or an MMC3 $A001 write
     other than $80 (PRG-RAM enabled, writable), stops the run with exit code 4 and a csv line WRAM_CODE_WRITE /
     WRAM_CODE_COPY / PRG_RAM_A001. run / regress fail on it (Mesen exit code), and so do the co-op checkers.
+
+Speed (2026-10-15, with tools/perf/verify.py; nothing that is checked changed): scen_extra adds CFG.prg_link (ROM
+segment offsets and link addresses) for the harness's speed layer (getState memo, merged exec callbacks; see
+harness.lua); run_scen passes --timeout=1800 to Mesen; compare_runs finds the differing bytes chunk-wise
+(diff_offsets, same list); PERF_JOBS overrides the thread-pool size. The whole verification: tools/perf/verify.py.
 """
 import argparse
 import bisect
@@ -80,7 +85,8 @@ WRAM_LO, WRAM_HI = 0x6000, 0x8000               # PRG-RAM window
 WRAM_CODE_SEG = "COOP_WRAM_CODE"                # Phase 9.0: code copied to PRG-RAM at power-on
 WRAM_CODE_AREA = (0x7000, 0x1000)               # the code area of PRG-RAM (config_us WRAMCODE), guarded
 
-JOBS = max(1, min(8, (os.cpu_count() or 2) - 2))
+# PERF_JOBS: thread-pool size override (tools/perf/verify.py sets it; there the runner limits the Mesen processes)
+JOBS = int(os.environ.get("PERF_JOBS") or max(1, min(8, (os.cpu_count() or 2) - 2)))
 RAM_SIZE = 0x800
 REC_SIZE = RAM_SIZE + 0x800 + 0x20
 
@@ -299,7 +305,24 @@ def scen_extra(build, opts, seed):
     if lives:
         extra += ", lives_addrs = {" + ",".join(map(str, lives)) + "}"
     extra += wram_guard_cfg(build)
+    extra += prg_link_cfg(build)
     return extra
+
+
+_PRG_LINK = {}
+
+
+def prg_link_cfg(build):
+    """CFG field prg_link (speed only, see harness.lua: lets it register exec hooks on PRG-ROM offsets at their link CPU
+    address): PRG-ROM offset range [lo, hi) and CPU address of every ROM segment ($8000-$FFFF) of the build"""
+    dbg = os.path.join(BUILDS, build, "rom.dbg")
+    if not os.path.exists(dbg):
+        return ""
+    key = (build, os.path.getmtime(dbg))
+    if key not in _PRG_LINK:
+        segs = [(lo, hi, start) for lo, hi, start, bank, name in Symbols(build).prg if start >= 0x8000 and hi > lo]
+        _PRG_LINK[key] = ", prg_link = {" + ",".join(f"{{{lo},{hi},{start}}}" for lo, hi, start in segs) + "}"
+    return _PRG_LINK[key]
 
 
 def wram_guard_cfg(build):
@@ -343,7 +366,9 @@ def run_scen(build, scen, dump=False, profile=False, shots=None):
            f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}}{extra} }}\n')
     script = out + "_harness.lua"
     open(script, "w").write(cfg + open(HARNESS).read())
-    r = subprocess.run([os.path.join(MESEN_DIR, "Mesen.exe"), "--testrunner", rom, script],
+    # --timeout: Mesen's test runner otherwise stops a script after ~100 s wall time (no TIMEOUT line, run cut short),
+    # which a long scenario can reach when 4 runs share the CPUs
+    r = subprocess.run([os.path.join(MESEN_DIR, "Mesen.exe"), "--testrunner", rom, script, "--timeout=1800"],
                        cwd=MESEN_DIR, capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
         tail = open(out + ".csv").read().splitlines()[-1:] if os.path.exists(out + ".csv") else []
@@ -415,6 +440,15 @@ def hud_nt_ignored(o, va, vb, rb=None, rb_prev=None):
             any(r is not None and bonus_screen(r, half) for r in (rb, rb_prev)))
 
 
+def diff_offsets(ra, rb, chunk=64):
+    """[i for i in range(len(ra)) if ra[i] != rb[i]] (same list, same order), scanning only the chunks that differ"""
+    out = []
+    for j in range(0, len(ra), chunk):
+        if ra[j:j + chunk] != rb[j:j + chunk]:
+            out.extend(i for i in range(j, min(j + chunk, len(ra))) if ra[i] != rb[i])
+    return out
+
+
 def compare_runs(base, test, scen, verbose=True):
     pa = os.path.join(RUNS, base, scen + ".dump")
     pb = os.path.join(RUNS, test, scen + ".dump")
@@ -444,7 +478,7 @@ def compare_runs(base, test, scen, verbose=True):
         if lag_differs and audio_desync is None:
             audio_desync = tick
         if ra != rb:
-            diffs = [i for i in range(REC_SIZE) if ra[i] != rb[i]]
+            diffs = diff_offsets(ra, rb)
             hard = []
             icon_ok = set()
             if icon_a is not None and icon_b is not None:

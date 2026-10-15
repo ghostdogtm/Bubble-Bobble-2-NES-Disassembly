@@ -41,6 +41,8 @@
 --                $A001 write other than $80 (PRG-RAM enabled, writable), fails the run: csv line WRAM_CODE_WRITE /
 --                WRAM_CODE_COPY / PRG_RAM_A001 at the end of that tick, exit code 4.
 --   profile      also writes the PRG-RAM exec counters to <out>.wprof (offsets from $6000) if Mesen has them
+--   prg_link     (optional, speed only) {{lo, hi, cpu}, ...}: PRG-ROM offset range [lo, hi) of every ROM segment and
+--                the CPU address it is linked at (perf.py passes it); see "Speed layer" below
 --
 -- CSV columns (perf.py reads columns 3 and 5, so new columns are only ever appended):
 --   tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2
@@ -56,6 +58,102 @@
 -- All hooks are on RAM writes to nmiProgress, so they do not depend on code layout.
 
 if not CFG then dofile("harness_cfg.lua") end
+
+------------------------------------------------------------------------------------------
+-- Speed layer (2026-10-15, tools/perf/verify.py work). Runs before any callback is registered (also those of the
+-- add-on Lua the co-op checkers append to this file) and changes no value any callback sees; it only makes Mesen do
+-- less work. Measured on a p90verify run (95 s): emu.getState() costs ~200 us per call (Mesen serializes the whole
+-- emulator, 323 keys) and was called 211k times (42 s); every registered exec callback is tested by Mesen on every
+-- executed instruction, one on emu.memType.nesPrgRom ~4x as costly as one on a CPU address (~110 of them: ~30 s).
+-- 1. getState memo: emu.getState() (no arguments) returns the table of the previous call while Mesen is still
+--    delivering the SAME memory access (or exec, or event) to the script: Mesen calls all callbacks matching one access
+--    one after the other, in registration order, before the CPU goes on. Each registered function is wrapped; a call
+--    belongs to the access of the previous call iff it has the same callback type, memory type and address and a
+--    higher registration number (a new access starts again at the lowest matching registration; a different location
+--    has another address or memory type). Event callbacks, and every emu.write*, drop the memo. (The table is shared:
+--    no checker writes into it.)
+-- 2. Exec-callback merge, only with CFG.prg_link: every single-address exec callback on the NES CPU, on a CPU address
+--    or on a PRG-ROM offset inside a ROM segment (then registered at the CPU address that segment is linked at, the
+--    only place its code runs), goes into a per-CPU-address list with ONE Mesen callback, which calls the entries in
+--    registration order (Mesen's order). A PRG-ROM entry runs only if emu.convertAddress maps the executed address to
+--    its offset (the test Mesen makes). Arguments are what Mesen passes to both kinds (CPU address, opcode); a returned
+--    integer replaces the value for later entries and is returned (as Mesen does); an error in one entry does not stop
+--    the others (as in Mesen). Everything else is registered unchanged (through the wrapper of 1).
+do
+  local realAdd, realEvt, realGetState = emu.addMemoryCallback, emu.addEventCallback, emu.getState
+  local memo = nil
+  local lastCt, lastMt, lastAddr, lastIdx = nil, nil, nil, -1
+  local nreg = 0
+  local function guard(fn, ct, mt)
+    nreg = nreg + 1
+    local idx = nreg
+    return function(a, v)
+      if not (ct == lastCt and mt == lastMt and a == lastAddr and idx > lastIdx) then memo = nil end
+      lastCt, lastMt, lastAddr, lastIdx = ct, mt, a, idx
+      return fn(a, v)
+    end
+  end
+  emu.getState = function(...)
+    if select("#", ...) ~= 0 then return realGetState(...) end
+    if memo == nil then memo = realGetState() end
+    return memo
+  end
+  for _, w in ipairs({"write", "write16", "write32", "writeWord"}) do
+    local real = emu[w]
+    if real then emu[w] = function(...) memo = nil; return real(...) end end
+  end
+  emu.addEventCallback = function(fn, ...)
+    return realEvt(function(...) memo = nil; lastCt = nil; return fn(...) end, ...)
+  end
+  local EXEC, NES = emu.callbackType.exec, emu.cpuType.nes
+  local PRG, CPUMEM = emu.memType.nesPrgRom, emu.memType.nesMemory
+  local link = CFG.prg_link
+  local lists = {}
+  local function linkAddr(o)
+    for _, sg in ipairs(link) do
+      if o >= sg[1] and o < sg[2] then return sg[3] + o - sg[1] end
+    end
+    return nil
+  end
+  local convert = emu.convertAddress
+  local function dispatcher(list)
+    return function(a, v)
+      local abs, ret, err = nil, nil, nil
+      for i = 1, #list do
+        local e = list[i]
+        local run = true
+        if e.off then
+          abs = abs or convert(a, CPUMEM)
+          run = abs ~= nil and abs.memType == PRG and abs.address == e.off
+        end
+        if run then
+          local ok, r = pcall(e.fn, a, v)
+          if not ok then err = err or r
+          elseif math.type(r) == "integer" then v = r; ret = r end
+        end
+      end
+      if err and ret == nil then error(err, 0) end
+      return ret
+    end
+  end
+  emu.addMemoryCallback = function(...)
+    local fn, ct, a1, a2, cpu, mt = ...
+    if link and select("#", ...) == 6 and ct == EXEC and cpu == NES and math.type(a1) == "integer" and a2 == a1
+        and (mt == CPUMEM or mt == PRG) then
+      local addr, off = a1, nil
+      if mt == PRG then off = a1; addr = linkAddr(a1) end
+      if addr ~= nil then
+        local l = lists[addr]
+        if l then l[#l + 1] = {fn = fn, off = off}; return nil end
+        l = {{fn = fn, off = off}}
+        lists[addr] = l
+        return realAdd(guard(dispatcher(l), EXEC, CPUMEM), EXEC, addr, addr, NES, CPUMEM)
+      end
+    end
+    return realAdd(guard(fn, ct, mt), select(2, ...))
+  end
+end
+------------------------------------------------------------------------------------------
 
 local NMI_PROGRESS = 0x15
 local CUR_ROUND    = 0xD8
@@ -195,6 +293,16 @@ local function readBlock(memType, base, len)
   for i = 0, len - 1 do t[i + 1] = emu.read(base + i, memType) end
   return string.char(table.unpack(t))
 end
+-- the same bytes as readBlock (len a multiple of 4), read 4 at a time (emu.read32, little endian): ~3x faster
+local FMT32 = {}
+local function readBlock32(memType, base, len)
+  local n = len // 4
+  local fmt = FMT32[n]
+  if not fmt then fmt = "<" .. string.rep("I4", n); FMT32[n] = fmt end
+  local t = {}
+  for i = 0, n - 1 do t[i + 1] = emu.read32(base + 4 * i, memType) end
+  return string.pack(fmt, table.unpack(t))
+end
 
 local vramSnap = nil
 
@@ -300,7 +408,7 @@ emu.addMemoryCallback(function(addr, value)
       end
     end
     if dump then
-      vramSnap = readBlock(MT_NT, 0, 0x800) .. readBlock(MT_PAL, 0, 0x20)
+      vramSnap = readBlock32(MT_NT, 0, 0x800) .. readBlock(MT_PAL, 0, 0x20)
     end
   elseif value == 3 and inTick then
     -- banked game logic finished
@@ -308,7 +416,7 @@ emu.addMemoryCallback(function(addr, value)
     logicCyc = tLogicEnd - tStart
     lagNmis = nmisInTick - 1
     if dump then
-      dump:write(readBlock(MT_RAM, 0, 0x800))
+      dump:write(readBlock32(MT_RAM, 0, 0x800))
       dump:write(vramSnap)
     end
     if iconf then
