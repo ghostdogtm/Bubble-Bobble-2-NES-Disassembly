@@ -3167,3 +3167,9 @@ and reported as HANG.
   output paths separated; not done.
 - The pipeline definition calls the Phase 9.3 checkers in `tmp/coop_scripts` (not committed), `--checkers` points to
   another copy.
+
+### Owner decision (2026-10-15): Mesen video filter off
+`perf.py setup` now sets the first `VideoFilter` in `tmp/mesen/settings.json` to `None` (was `LcdGrid`; the local copy
+was patched the same way). Screenshots become plain 256x240; no checker compares PNGs (pixcmp uses raw frame dumps).
+The run cache key includes the settings, so all cached runs were invalidated. Quick mode, cold cache: 5:30 -> 5:04;
+results identical (1P regress 12/12 PASS, p90verify 0 violations, hudcheck/menutest PASS, pairchk totals equal).

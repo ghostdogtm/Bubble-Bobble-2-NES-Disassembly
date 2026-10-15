@@ -180,6 +180,8 @@ def cmd_setup(a):
     s = open(p, encoding="utf-8").read()
     s = s.replace('"AllowIoOsAccess": false', '"AllowIoOsAccess": true')
     s = re.sub(r'"ScriptTimeout": \d+', '"ScriptTimeout": 100', s)
+    # no video filter: ~12 % less CPU per run (screenshots are 256x240 instead of LcdGrid's scaled frame)
+    s = re.sub(r'"VideoFilter": "[^"]*"', '"VideoFilter": "None"', s, count=1)
     s = s.replace('"RamPowerOnState": "Random"', '"RamPowerOnState": "AllZeros"')
     open(p, "w", encoding="utf-8").write(s)
     print("Mesen copied to", MESEN_DIR)
