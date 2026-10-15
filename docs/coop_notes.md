@@ -3052,3 +3052,8 @@ PRG-RAM code area 221 B free (was 522); COOP_CODE2 34 (53); bank 7 13 (21); COOP
 - The tractor's missile zone rarely triggers in random play (the players are seldom high near it); forced probes cover it.
 - 1P keeps the original order (P1 last on odd ticks, invisible up to 2 frames on lag frames): unchanged on purpose.
 - PRG-RAM code area: 221 B left; further co-op code needs the space of other free banks (`$0E`, `$0F`, `$11-$1D`).
+
+### Owner decision (2026-10-15): draw order
+The owner chose (a): keep the Phase 9.3 order, both players always drawn first in co-op (they never vanish; the other
+objects on their lines flicker more). Not taken: (b) back to the p92g order (each player in front every other tick,
+invisible up to 2 frames on lag frames).
