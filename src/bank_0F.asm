@@ -3578,11 +3578,13 @@ GetTile:
 	;01: X
 
 	LDA irqEffect				;C - - - - - 0x01F4DB 07:F4CB: A5 1D
-	BNE CODE_0FF4D2				;C - - - - - 0x01F4DD 07:F4CD: D0 03
-		JMP CODE_0FF563				;C - - - - - 0x01F4DF 07:F4CF: 4C 63 F5
+	;(Perf 9.4) was BNE CODE_0FF4D2 / JMP CODE_0FF563: the irqEffect 0 path (60 % of the calls) branches directly
+	;(the unreached irqEffect 2 block moved after the RTS to bring CODE_0FF563 into branch range); same A / flags:
+	;CODE_0FF563 starts with LDA scratch0, the other paths with CMP.
+	BEQ CODE_0FF563
 CODE_0FF4D2:
 	CMP #$02					;C - - - - - 0x01F4E2 07:F4D2: C9 02
-	BEQ CODE_0FF50A				;C - - - - - 0x01F4E4 07:F4D4: F0 34
+	BEQ CODE_0FF50Aj			;(Perf 9.4) was BEQ CODE_0FF50A (now out of range)
 
 	CMP #$05					;C - - - - - 0x01F4E6 07:F4D6: C9 05
 	BEQ CODE_0FF549				;C - - - - - 0x01F4E8 07:F4D8: F0 6F
@@ -3604,24 +3606,6 @@ CODE_0FF4D2:
 	LDA ram_0760,Y				;C - - - - - 0x01F512 07:F502: B9 60 07
 	STA ram_00D2				;C - - - - - 0x01F515 07:F505: 85 D2
 	JMP CODE_0FF535				;C - - - - - 0x01F517 07:F507: 4C 35 F5
-CODE_0FF50A:
-	;Unreached
-
-	LDA #$07					;- - - - - - 0x01F51A 07:F50A: A9
-	STA $8000					;- - - - - - 0x01F51E 07:F50E: 8D
-	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F521 07:F511: A9
-	STA prgBankB				;- - - - - - 0x01F526 07:F516: 85
-	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
-
-	LDA scratch0				;- - - - - - 0x01F536 07:F526: A5
-	AND #$F8					;- - - - - - 0x01F538 07:F528: 29
-	BEQ CODE_0FF563				;- - - - - - 0x01F53A 07:F52A: F0
-
-	TAY							;- - - - - - 0x01F53C 07:F52C: A8
-	LDA (ram_0027),Y			;- - - - - - 0x01F53D 07:F52D: B1
-	TAY							;- - - - - - 0x01F53F 07:F52F: A8
-	LDA flowAdr+1,Y				;- - - - - - 0x01F540 07:F530: B9
-	STA ram_00D3				;- - - - - - 0x01F543 07:F533: 85
 CODE_0FF535:
 	LDA scratch0				;C - - - - - 0x01F545 07:F535: A5 00
 	CLC							;C - - - - - 0x01F547 07:F537: 18
@@ -3639,6 +3623,8 @@ CODE_0FF535:
 	;STA $8000. The other paths take the guarded switch at CODE_0FF56E. Same code as
 	;CODE_0FF563/CODE_0FF56D up to the switch.
 	JMP CODE_0FF56Df
+CODE_0FF50Aj:
+	JMP CODE_0FF50A				;(Perf 9.4) the irqEffect 2 block (unreached) is after GetTile's RTS
 CODE_0FF563f:
 	LDA scratch0
 	AND #$F0
@@ -3650,8 +3636,7 @@ CODE_0FF56Df:
 	LSR
 	LSR
 	LSR
-	CLC
-	ADC scratch2
+	ORA scratch2					;(Perf 9.4) was CLC / ADC: A <= $0F, low nibble of scratch2 = 0 (see CODE_0FF56E)
 	STA ram_0046
 	TAY
 	LDA terrainBank
@@ -3686,8 +3671,11 @@ CODE_0FF56E:
 	LSR							;C - - - - - 0x01F57E 07:F56E: 4A
 	LSR							;C - - - - - 0x01F57F 07:F56F: 4A
 	LSR							;C - - - - - 0x01F580 07:F570: 4A
-	CLC							;C - - - - - 0x01F581 07:F571: 18
-	ADC scratch2				;C - - - - - 0x01F582 07:F572: 65 02
+	;(Perf 9.4) was CLC / ADC scratch2: the bits never overlap (irqEffect 0: A <= $0F, scratch2 = Y & $F0;
+	;irqEffect 5: A <= $1F after the ROR, scratch2 = (Y & $F0) << 1), so ORA gives the same A / N / Z and the ADC
+	;could not carry or overflow. C (bit shifted out by the LSR) and V (unchanged) differ but are dead: the CMP
+	;prgBankB below redefines C, and the tile * 5 ADC redefines V before the RTS (no BVC/BVS on the way).
+	ORA scratch2
 	STA ram_0046				;C - - - - - 0x01F584 07:F574: 85 46
 	TAY							;C - - - - - 0x01F586 07:F576: A8
 
@@ -3705,29 +3693,25 @@ CODE_0FF595:
 	;Get 16x16 tile number
 	LDA (terrainAdr),Y			;C - - - - - 0x01F5A5 07:F595: B1 42
 	STA scratch3				;C - - - - - 0x01F5A7 07:F597: 85 03
-	STA scratch6				;C - - - - - 0x01F5A9 07:F599: 85 06
-	LDA #$00					;C - - - - - 0x01F5AB 07:F59B: A9 00
-	STA scratch7				;C - - - - - 0x01F5AD 07:F59D: 85 07
-	ASL scratch6				;C - - - - - 0x01F5AF 07:F59F: 06 06
-	ROL scratch7				;C - - - - - 0x01F5B1 07:F5A1: 26 07
-	ASL scratch6				;C - - - - - 0x01F5B3 07:F5A3: 06 06
-	ROL scratch7				;C - - - - - 0x01F5B5 07:F5A5: 26 07
-	;Now times 4 (16-bit)
-	LDA scratch6				;C - - - - - 0x01F5B7 07:F5A7: A5 06
-	CLC							;C - - - - - 0x01F5B9 07:F5A9: 18
-	ADC scratch3				;C - - - - - 0x01F5BA 07:F5AA: 65 03
-	STA scratch6				;C - - - - - 0x01F5BC 07:F5AC: 85 06
-	LDA scratch7				;C - - - - - 0x01F5BE 07:F5AE: A5 07
-	ADC #$00					;C - - - - - 0x01F5C0 07:F5B0: 69 00
-	STA scratch7				;C - - - - - 0x01F5C2 07:F5B2: 85 07
-	;Now times 5 (16-bit)
-	LDA terrainTypeDefs				;C - - - - - 0x01F5C4 07:F5B4: A5 40
-	CLC							;C - - - - - 0x01F5C6 07:F5B6: 18
-	ADC scratch6				;C - - - - - 0x01F5C7 07:F5B7: 65 06
-	STA terrainTileDef				;C - - - - - 0x01F5C9 07:F5B9: 85 60
-	LDA terrainTypeDefs+1				;C - - - - - 0x01F5CB 07:F5BB: A5 41
-	ADC scratch7				;C - - - - - 0x01F5CD 07:F5BD: 65 07
-	STA terrainTileDef+1				;C - - - - - 0x01F5CF 07:F5BF: 85 61
+	;(Perf 9.4) tile * 5 with the low byte in A (was ASL/ROL on scratch6 and two separate 16-bit adds):
+	;the same scratch6/7 (= tile * 5), terrainTileDef (= terrainTypeDefs + tile * 5), and the same C/V/N/Z
+	;from the last ADC (same operands, same carry in). Y is reloaded below (LDY #$01).
+	LDY #$00
+	STY scratch7
+	ASL
+	ROL scratch7
+	ASL
+	ROL scratch7					;C = 0 (scratch7 was 0 or 1)
+	ADC scratch3					;tile * 4 + tile, low byte
+	STA scratch6
+	BCC :+
+	INC scratch7
+:	CLC
+	ADC terrainTypeDefs
+	STA terrainTileDef
+	LDA scratch7
+	ADC terrainTypeDefs+1
+	STA terrainTileDef+1
 
 	LDY #$01					;C - - - - - 0x01F5D1 07:F5C1: A0 01
 	LDA scratch0				;C - - - - - 0x01F5D3 07:F5C3: A5 00
@@ -3751,6 +3735,28 @@ CODE_0FF5DA:
 	STY ram_075C				;C - - - - - 0x01F5F2 07:F5E2: 8C 5C 07
 
 	RTS							;C - - - - - 0x01F5F5 07:F5E5: 60
+
+CODE_0FF50A:
+	;Unreached
+
+	LDA #$07					;- - - - - - 0x01F51A 07:F50A: A9
+	STA $8000					;- - - - - - 0x01F51E 07:F50E: 8D
+	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F521 07:F511: A9
+	STA prgBankB				;- - - - - - 0x01F526 07:F516: 85
+	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
+
+	LDA scratch0				;- - - - - - 0x01F536 07:F526: A5
+	AND #$F8					;- - - - - - 0x01F538 07:F528: 29
+	BNE :+						;(Perf 9.4) was BEQ CODE_0FF563 (out of range after the move)
+	JMP CODE_0FF563
+:
+
+	TAY							;- - - - - - 0x01F53C 07:F52C: A8
+	LDA (ram_0027),Y			;- - - - - - 0x01F53D 07:F52D: B1
+	TAY							;- - - - - - 0x01F53F 07:F52F: A8
+	LDA flowAdr+1,Y				;- - - - - - 0x01F540 07:F530: B9
+	STA ram_00D3				;- - - - - - 0x01F543 07:F533: 85
+	JMP CODE_0FF535				;(Perf 9.4) was the fall-through into CODE_0FF535 before the move
 
 CODE_0FF5E6:
 	LDA irqEffect				;C - - - - - 0x01F5F6 07:F5E6: A5 1D
@@ -3788,21 +3794,23 @@ CODE_0FF5E6:
 	LDA scratch1				;C - - - - - 0x01F630 07:F620: A5 01
 	CLC							;C - - - - - 0x01F632 07:F622: 18
 	ADC ram_00D2				;C - - - - - 0x01F633 07:F623: 65 D2
-	CLC							;C - - - - - 0x01F635 07:F625: 18
+	;(Perf 9.4) a CLC was here: dead (the LSRs at CODE_0FF632 shift a 0 in and C out)
 	JMP CODE_0FF632				;C - - - - - 0x01F636 07:F626: 4C 32 F6
 CODE_0FF629:
 	LDA scratch0				;C - - - - - 0x01F639 07:F629: A5 00
 	AND #$F0					;C - - - - - 0x01F63B 07:F62B: 29 F0
 	STA scratch2				;C - - - - - 0x01F63D 07:F62D: 85 02
 	LDA scratch1				;C - - - - - 0x01F63F 07:F62F: A5 01
-	CLC							;C - - - - - 0x01F641 07:F631: 18
+	;(Perf 9.4) a CLC was here: dead, the LSRs below shift a 0 in and C out
 CODE_0FF632:
 	LSR							;C - - - - - 0x01F642 07:F632: 4A
 	LSR							;C - - - - - 0x01F643 07:F633: 4A
 	LSR							;C - - - - - 0x01F644 07:F634: 4A
 	LSR							;C - - - - - 0x01F645 07:F635: 4A
-	CLC							;C - - - - - 0x01F646 07:F636: 18
-	ADC scratch2				;C - - - - - 0x01F647 07:F637: 65 02
+	;(Perf 9.4) was CLC / ADC scratch2: A <= $0F and scratch2 has a zero low nibble on both paths ((Y & $F0), or
+	;(Y + ram_00D3) & $F0), so ORA gives the same A / N / Z; the ADC could not carry. C is redefined by CODE_0FF986's
+	;CMP prgBankB; V (ADC: 0, now unchanged) is read by no code outside the audio bank (no BVC/BVS).
+	ORA scratch2
 	STA ram_0046				;C - - - - - 0x01F649 07:F639: 85 46
 	JSR CODE_0FF986				;C - - - - - 0x01F64B 07:F63B: 20 86 F9
 	LDA scratch5				;C - - - - - 0x01F64E 07:F63E: A5 05
@@ -4198,27 +4206,23 @@ CODE_0FF88C:
 CODE_0FF8A7:
 	LDA (terrainAdr),Y			;C - - - - - 0x01F8B7 07:F8A7: B1 42
 	STA scratch5				;C - - - - - 0x01F8B9 07:F8A9: 85 05
-	STA scratch6				;C - - - - - 0x01F8BB 07:F8AB: 85 06
-	LDA #$00					;C - - - - - 0x01F8BD 07:F8AD: A9 00
-	STA scratch7				;C - - - - - 0x01F8BF 07:F8AF: 85 07
-	ASL scratch6				;C - - - - - 0x01F8C1 07:F8B1: 06 06
-	ROL scratch7				;C - - - - - 0x01F8C3 07:F8B3: 26 07
-	ASL scratch6				;C - - - - - 0x01F8C5 07:F8B5: 06 06
-	ROL scratch7				;C - - - - - 0x01F8C7 07:F8B7: 26 07
-	LDA scratch6				;C - - - - - 0x01F8C9 07:F8B9: A5 06
-	CLC							;C - - - - - 0x01F8CB 07:F8BB: 18
-	ADC scratch5				;C - - - - - 0x01F8CC 07:F8BC: 65 05
-	STA scratch6				;C - - - - - 0x01F8CE 07:F8BE: 85 06
-	LDA scratch7				;C - - - - - 0x01F8D0 07:F8C0: A5 07
-	ADC #$00					;C - - - - - 0x01F8D2 07:F8C2: 69 00
-	STA scratch7				;C - - - - - 0x01F8D4 07:F8C4: 85 07
-	LDA terrainTypeDefs				;C - - - - - 0x01F8D6 07:F8C6: A5 40
-	CLC							;C - - - - - 0x01F8D8 07:F8C8: 18
-	ADC scratch6				;C - - - - - 0x01F8D9 07:F8C9: 65 06
-	STA scratch6				;C - - - - - 0x01F8DB 07:F8CB: 85 06
-	LDA terrainTypeDefs+1				;C - - - - - 0x01F8DD 07:F8CD: A5 41
-	ADC scratch7				;C - - - - - 0x01F8DF 07:F8CF: 65 07
-	STA scratch7				;C - - - - - 0x01F8E1 07:F8D1: 85 07
+	;(Perf 9.4) tile * 5 with the low byte in A (as in GetTile): the same scratch5, scratch6/7 (= terrainTypeDefs
+	;+ tile * 5) and the same C/V from the last ADC (same operands, same carry in). Y is reloaded below.
+	LDY #$00
+	STY scratch7
+	ASL
+	ROL scratch7
+	ASL
+	ROL scratch7					;C = 0 (scratch7 was 0 or 1)
+	ADC scratch5					;tile * 4 + tile, low byte
+	BCC :+
+	INC scratch7
+:	CLC
+	ADC terrainTypeDefs
+	STA scratch6
+	LDA scratch7
+	ADC terrainTypeDefs+1
+	STA scratch7
 	LDY ram_075C				;C - - - - - 0x01F8E3 07:F8D3: AC 5C 07
 	INY							;C - - - - - 0x01F8E6 07:F8D6: C8
 	INY							;C - - - - - 0x01F8E7 07:F8D7: C8
@@ -4345,15 +4349,18 @@ CODE_0FF986:
 	TAY							;C - - - - - 0x01F9C9 07:F9B9: A8
 	LDA DATA_0FF9CE,Y			;C - - - - - 0x01F9CA 07:F9BA: B9 CE F9
 	AND scratch5				;C - - - - - 0x01F9CD 07:F9BD: 25 05
-	STA scratch5				;C - - - - - 0x01F9CF 07:F9BF: 85 05
+	;(Perf 9.4) the shift is made in A and stored once (was STA scratch5 / LSR scratch5 x 2 per step / JMP): the same
+	;scratch5, Y = 3 and Z = C = 1, N = 0 from CPY #3; A is the shifted value (was the unshifted one): the only caller,
+	;CODE_0FF5E6, reloads A (LDA scratch5) right after.
 CODE_0FF9C1:
 	CPY #$03					;C - - - - - 0x01F9D1 07:F9C1: C0 03
 	BEQ CODE_0FF9CD				;C - - - - - 0x01F9D3 07:F9C3: F0 08
-		LSR scratch5				;C - - - - - 0x01F9D5 07:F9C5: 46 05
-		LSR scratch5				;C - - - - - 0x01F9D7 07:F9C7: 46 05
+		LSR
+		LSR
 		INY							;C - - - - - 0x01F9D9 07:F9C9: C8
-		JMP CODE_0FF9C1				;C - - - - - 0x01F9DA 07:F9CA: 4C C1 F9
+		BNE CODE_0FF9C1				;(always: Y <= 3 here)
 CODE_0FF9CD:
+	STA scratch5
 	RTS							;C - - - - - 0x01F9DD 07:F9CD: 60
 
 DATA_0FF9CE:
