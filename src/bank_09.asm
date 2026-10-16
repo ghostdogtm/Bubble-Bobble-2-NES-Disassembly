@@ -188,16 +188,33 @@ CODE_09813F:
 	TAX							;C - - - - - 0x012155 04:8145: AA
 	JMP CODE_09815D				;C - - - - - 0x012156 04:8146: 4C 5D 81
 CODE_098149:
+	;(Perf 9.4) CODE_098932 returns at once when |player X - bubble X| >= 16 (about 90 % of the calls), having
+	;written only scratch2/3/6/7 (and scratch4/5 here). CODE_098258 below always rewrites scratch0/1/2/4/5/6/7
+	;before reading them (CODE_0FF5E6 -> CODE_0FF986), so of that early return only scratch3 = objY + 2 survives.
+	;scratch3 is written here first (CODE_098932 rewrites it on the near path), then the X test is made here and
+	;the call skipped when far. Same decision as CODE_098932's own test (|dx| from the carry of the subtraction).
+	LDA objY
+	CLC
+	ADC #$02
+	STA scratch3
+	LDA objX
+	SEC
+	SBC objX+OSLOT_BUBBLE,X
+	BCS @absdx
+	EOR #$FF
+	ADC #$01						;(C = 0 here)
+@absdx:
+	CMP #$10
+	BCS @move						;far: the original call returns at once
 	LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x012159 04:8149: BD C7 05
 	STA scratch4				;C - - - - - 0x01215C 04:814C: 85 04
 	LDA objY+OSLOT_BUBBLE,X				;C - - - - - 0x01215E 04:814E: BD 9F 05
 	STA scratch5				;C - - - - - 0x012161 04:8151: 85 05
 	JSR CODE_098932				;C - - - - - 0x012163 04:8153: 20 32 89
-	TXA							;C - - - - - 0x012166 04:8156: 8A
-	PHA							;C - - - - - 0x012167 04:8157: 48
+@move:
+	;(Perf 9.4) was TXA / PHA / JSR / PLA / TAX: CODE_098258 (with CODE_0FF5E6 / CODE_0FF986) never writes X,
+	;and A / flags are dead at CODE_09815D (INX / CPX, then LDA #0 or LDA roundFlags).
 	JSR CODE_098258				;C - - - - - 0x012168 04:8158: 20 58 82
-	PLA							;C - - - - - 0x01216B 04:815B: 68
-	TAX							;C - - - - - 0x01216C 04:815C: AA
 CODE_09815D:
 	INX							;C - - - - - 0x01216D 04:815D: E8
 	CPX bubbleSlotEnd			;(co-op) was CPX #20
