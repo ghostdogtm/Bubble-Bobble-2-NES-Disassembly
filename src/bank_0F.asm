@@ -4598,8 +4598,12 @@ CODE_0FFB19:
 	RTS							;C - - - - - 0x01FB29 07:FB19: 60
 
 PlayerCheckEnemyCollision:
-	LDA #$00					;C - - - - - 0x01FB2A 07:FB1A: A9 00
-	STA scratch1				;C - - - - - 0x01FB2C 07:FB1C: 85 01
+	;(Perf 9.4) the slot is kept in X (was scratch1 = 0 here, LDX scratch1 at @checkslot, and INC scratch1 /
+	;LDX scratch1 / CPX #9 / BEQ @end / JMP @checkslot at the old @next). scratch1 is written where the original
+	;leaves it at the two exits: the slot at "Collision confirmed", 9 at the loop end. The loop step sits in front
+	;of @checkslot (falls into it: no taken branch per slot, and the tests branch back to it on the same page).
+	;Every other instruction is unchanged, so A / X / Y / N / Z / C / V at both exits are the same.
+	LDX #$00
 	LDA objX				;C - - - - - 0x01FB2E 07:FB1E: AD B3 05
 	STA scratch2				;C - - - - - 0x01FB31 07:FB21: 85 02
 	LDA objY				;C - - - - - 0x01FB33 07:FB23: AD 8B 05
@@ -4607,8 +4611,16 @@ PlayerCheckEnemyCollision:
 	;01: Enemy slot
 	;02: X
 	;03: Y
+	JMP @checkslot
+@done:
+	STX scratch1					;= 9, as the original loop end leaves it (Z = C = 1, N = 0 from CPX #9 as before)
+	RTS
+@notvalid:
+@next:
+	INX
+	CPX #9
+	BEQ @done
 @checkslot:
-	LDX scratch1				;C - - - - - 0x01FB38 07:FB28: A6 01
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x01FB3A 07:FB2A: BD 6C 05
 	BEQ @notvalid				;C - - - - - 0x01FB3D 07:FB2D: F0 38
 
@@ -4644,8 +4656,6 @@ PlayerCheckEnemyCollision:
 	STA scratch4				;C - - - - - 0x01FB70 07:FB60: 85 04
 	INC scratch4				;C - - - - - 0x01FB72 07:FB62: E6 04
 	JMP @havehdist				;C - - - - - 0x01FB74 07:FB64: 4C 6C FB
-@notvalid:
-	JMP @next				;C - - - - - 0x01FB77 07:FB67: 4C E3 FB
 @poshdist:
 	STA scratch4				;C - - - - - 0x01FB7A 07:FB6A: 85 04
 @havehdist:
@@ -4671,6 +4681,7 @@ PlayerCheckEnemyCollision:
 	BCC @next				;C - - - - - 0x01FB99 07:FB89: 90 58
 
 	;Collision confirmed
+	STX scratch1					;(Perf 9.4) the slot, as LDX scratch1 left it in the original
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x01FB9B 07:FB8B: BD 6C 05
 	CMP #ENEMY_COLLECTABLE					;C - - - - - 0x01FB9E 07:FB8E: C9 0D
 	BNE @notreward				;C - - - - - 0x01FBA0 07:FB90: D0 33
@@ -4718,12 +4729,6 @@ PlayerCheckEnemyCollision:
 	ORA #DMG_ENEMY					;C - - - - - 0x01FBEC 07:FBDC: 09 80
 	STA playerDmgType				;C - - - - - 0x01FBEE 07:FBDE: 85 7C
 	JMP @end				;C - - - - - 0x01FBF0 07:FBE0: 4C EE FB
-@next:
-	INC scratch1				;C - - - - - 0x01FBF3 07:FBE3: E6 01
-	LDX scratch1				;C - - - - - 0x01FBF5 07:FBE5: A6 01
-	CPX #9					;C - - - - - 0x01FBF7 07:FBE7: E0 09
-	BEQ @end				;C - - - - - 0x01FBF9 07:FBE9: F0 03
-		JMP @checkslot				;C - - - - - 0x01FBFB 07:FBEB: 4C 28 FB
 @end:
 	RTS							;C - - - - - 0x01FBFE 07:FBEE: 60
 
