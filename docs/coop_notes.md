@@ -3173,3 +3173,10 @@ and reported as HANG.
 was patched the same way). Screenshots become plain 256x240; no checker compares PNGs (pixcmp uses raw frame dumps).
 The run cache key includes the settings, so all cached runs were invalidated. Quick mode, cold cache: 5:30 -> 5:04;
 results identical (1P regress 12/12 PASS, p90verify 0 violations, hudcheck/menutest PASS, pairchk totals equal).
+
+### Owner decision (2026-10-16): shared reward statistics (plan 9.5)
+The 13 item-spawn statistics `$053F-$054B` (`rewardsEaten` food, `shootCounter` shots -> candy, `sameRewardStreak` +
+`lastRewardType` same-food streak -> clock, `crystals`, `shoes`, ...) stay shared by both players: both players' actions
+add to one counter, so items appear about twice as often as in 1P and either player may collect them; collecting zeroes
+the entry for both. Not taken: (b) per-player counters (more code at every writer/reader/reset, two items could spawn at
+once); (c) shared but doubled thresholds in co-op (1P-like item frequency).
