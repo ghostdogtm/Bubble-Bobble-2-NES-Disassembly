@@ -3376,3 +3376,241 @@ banks 1 572, D 492, 5 262 (259 with `COOP_FORCE`), 2 231, 6 134. Free PRG banks 
 (a) CheckWall, CheckFloor, `CODE_0FF852` and `CODE_0FF8F3` keep their per-call terrain-bank guard (10 cycles). Not taken:
 (b) drop the guards (~87 cycles per co-op tick, ~56 per 1P tick) with a new rule "call only right after GetTile", a static
 check of the 42 call sites and a harness runtime check.
+
+## Phase 9.5: P2 respawn spot, borrowing lives
+
+Code commit `ff24660`. Brief: two owner requests (A: each physical player respawns at his own start spot; B: an out player
+borrows a life from his partner with A+B, Contra style). Build `p95b` (`p95bf` = `COOP_FORCE`, `p95bt` = `COOP_SWAPTEST`; `p95a` = the first version, see "Layout").
+Scripts and results: `tmp/coop_scripts/p95/` (`STATE.md`, `apply.py` .. `apply5.py` = the source edits in order,
+`mkverify95.py` + `p95lua.py` -> `p95verify.py`, `hudcheck.py`, result files named below, `shots/`). 1P is unchanged:
+regress 12/12, no new exclusion.
+
+### Facts the design rests on (from the code)
+- **Start spots.** Every round start goes through `CODE_0884CF` (bank 8), which waits until P1 (slot 0) is at exactly
+  (`$1F`, `$C4`) and then calls `CoopRoundStartP2`. So P1's start spot is the same in every round, and `CoopSpawnP2`'s mirror
+  (X' = 256 - X, clamped) always gives P2 X `$E1` (225), Y `$C4`. There is no round in which P1's start differs (the brief
+  assumed there might be); the stored spot (below) is still written per round, so a future start-spot change is followed.
+- **The in-place respawn** (`CODE_0595E3`) puts the player at Y 193 (3 px above the start Y; he drops onto the floor) facing
+  right with 120 i-frames. Rule A keeps Y 193 and the 120 i-frames for both players and changes X and the facing.
+- **`playerLives` = lives including the one being played.** A new game / continue gives 3 (HUD `x03`); `PlayerHandlerDead`
+  decrements it at the START of a death; at the end of the death (`ram_047B` = `$25`) lives 0 means "out" (state 0, no
+  respawn), else the in-place respawn. So a player in play has lives >= 1, a player dying on his last life has 0, an out
+  player has 0 and is not dying (7a). The HUD shows `playerLives` (`x02` = this life and one more).
+- **Lending threshold:** the lender (the resident, alone in the round) must have `playerLives >= 2` (`COOP_LEND_MIN`): he
+  keeps >= 1, i.e. he is still alive in his current life, so lending can neither put him out nor end the game. A lender at
+  `x01` cannot lend.
+
+### A. Respawn spot (per physical player)
+`CoopSpot` (PRG-RAM, 31 B) is the one rule, used by the in-place respawn and by a rejoin. Input: the physical player
+(`currentPlayer` of the dying player = `coopResident ^ coopRoles`, so it is per physical player, not per slot) and
+"partner in the round".
+- Round 20 (`wideRound`), partner in the round (`coopP2Active` = `$80`), camera not at the start (`wideHScroll` != 1):
+  the screen centre X 128 facing right (the Phase 8 owner rule, unchanged).
+- Otherwise physical P1: X 31 facing right (the original respawn, 1P unchanged); physical P2: `coopP2StartX` facing left
+  (his start facing; see "Deviations").
+- `coopP2StartX` (COOP_BSS): `CoopSpawnP2` stores the X it gives slot 39 at every round start (the mirror of the resident's
+  start: with exchanged roles the resident is physical P2, who also started at `$1F`, so the value is the mirror of P1's
+  standard start either way, as the brief asks for "the round began with roles exchanged"); a round that starts with the
+  other player out stores `COOP_P2_START_X` = `$E1` (the mirror of P1's start). A mid-round rejoin does not change it.
+- Alone in round 20 (1P path, also a lone physical P2 after a role exchange) the respawn still resets the camera to 1
+  first (`CODE_0595C1`, unchanged), so the own spot applies: P2 `$E1`, which is floor at camera 1 (his round-start spot).
+- `CoopRespawnX` (bank 5) now = `LDA coopP2Active / ASL A / LDA currentPlayer / JSR CoopSpot / STA objX / TYA / RTS`;
+  `CODE_0595E3` stores the returned facing in `playerDir` and passes it to `CODE_0599FF` as the animation (`anPlayerR_ID`
+  = 2 = right, `anPlayerL_ID` = 1 = left, asserted). 1P: A = 2 as before (same final RAM; the writes of `playerDir` /
+  `objAnim` happen in another order inside the routine).
+
+### B. Borrowing a life (manual, A+B)
+**States.** `coopP2Active` gets a third value: `COOP_P2_OUT` = `$40` = co-op, the non-resident player (ctxOther, slot 39
+free) is out and the resident plays alone. Bit 7 is clear, so every existing `BIT coopP2Active / BPL|BMI` gate (27 sites)
+and `CoopQuakeReady`'s `LDA / BPL` read it as "P2 not in the round", exactly as 0 before (checked: no `LDA / BEQ|BNE` use).
+`CoopP2Deactivate` now stores its entry A into `coopP2Active` and `coopBorrowReq`: 0 when `CoopDespawnAll` falls into it
+(every round setup, bonus game, game over, continue, title), `COOP_P2_OUT` (= `COOP_BORROW_UNARMED`, asserted) from the
+window's "P2 out" path (`CoopSwapOut` = the swap back + `LDA #COOP_P2_OUT`) and from `CoopResidentOut`'s role exchange
+(`CoopP2DeactOut`). `CoopRoundStartP2` sets `$40` when the other player has no lives. `CoopSpawnAt` sets `$80` (round
+start or rejoin).
+
+**Hook.** `RoundUpdate` end: `BIT coopP2Active / BPL / JSR CoopExtraLifeOther` became `LDA coopP2Active / BEQ / JSR
+CoopTickOther` (same 8 bytes, same 7 cycles when 0: 1P cost 0; `CODE_099BE7` next reloads A). `CoopTickOther` (COOP_CODE2):
+N set (`$80`) -> `CoopExtraLifeOther` as before (+2 cycles); else `JMP CoopBorrowTick`. The check runs once per
+RoundUpdate tick, after P1's / P2's updates, the draw and the resident's extra life, before the HUD job, the pause check
+and the end checks; so only while `RoundUpdate` is the NMI sub.
+
+**Button and arming.** The out player's own pad: pad 2 for physical P2 (P1 resident), pad 1 for physical P1 (roles
+exchanged; `currentPlayer` = 1). Request = A and B both held and at least one of them pressed this tick (a new A+B press).
+A request counts only when armed: `coopBorrowReq` = `COOP_BORROW_UNARMED` (`$40`) from the moment the player is out (or a
+round starts with him out) until a tick with A and B both released. Reason (found in the first probe run): A (jump) + B
+(shoot) is a normal play combination; without arming, a player who mashed jump+shoot while his last death ended borrowed in
+the very tick he went out (k1 dev run, t1427). With arming every borrow is a deliberate new press after he is out.
+
+**Conflicts (checked before choosing A+B).** While a player is out, his pad is read by nothing in `RoundUpdate` except
+pad 1's START (`CheckPause`, pause; physical P1 out still pauses with START as before). Pad 2 is read only by the P2 window
+(not running) and the dormant bonus element 1. The bonus game (`CODE_0792E8`) reads the resident's pad. The game-over /
+continue screens read A/B/START/SELECT of either pad (`CoopPadsPressed`), the title / intro / ending pad 1: none of them is
+a `RoundUpdate` tick, so the borrow check never sees those presses. No conflict, no owner decision needed.
+
+**When allowed (else ignored or dropped).**
+- Ignored (the check does not run): pause (`CheckPause` is the NMI sub; a press made while paused and held through the
+  unpause is not a new press), round intro (`CODE_0B8196`), descent / transition / round setup, bonus games (`coopP2Active`
+  = 0 there), game over and continue screens, ending, and any tick with both players in the round.
+- Dropped (request cleared, the player must press again): `roundFlags & $3F` != 0 (round clear `$18`, prize drop after a
+  bonus game `$10`, bonus game pending `$20`, round change `$07`), the resident dying or respawning (`playerState` =
+  `PLAYER_STATE_DEAD`; the respawn happens inside that state), the resident's lives < 2.
+- Deferred: slot `OSLOT_P2` (39) still holds a bubble (with P2 out it is the 20th bubble slot). The request waits there,
+  re-checking every tick, and is dropped if one of the conditions above fails meanwhile. (A bubble cannot be taken from
+  the slot: it may carry an enemy or be the resident's shot.)
+
+**The borrow** (`CoopBorrowTick`, PRG-RAM, 147 B): resident `DEC playerLives`; other player lives 1, hearts 1; his per-life
+init by the round-start code (`CoopInitOther` = `CODE_08812A` with him swapped in, `roundFlags` / `wideScrollDir` kept;
+was inline in `CoopRoundStartP2`, now shared); Y 193 and X / facing from `CoopSpot` (partner in the round, so the round-20
+centre rule applies when the camera moved); `CoopSpawnAt` (the slot-39 part of `CoopSpawnP2`: objState 1, animation by the
+facing, image from slot 0, `coopP2Active` = `$80`, bubble budget 19/18, first animation step); 120 i-frames; `livesCurrentPos
+|= 3` (both HUD blocks are redrawn by the HUD job in the same tick); `snExtraLife`; request cleared; then `$A000` is mapped
+back to the caller's bank through the window's restore tail (`CoopBankRestore`, Rule 9 order). His score, extra-life
+accumulator and power-up bits are kept. Every co-op mechanism is gated by `coopP2Active` bit 7 or works by slot / physical
+id, so from the next tick the windows, targeting, items, HUD, camera leash, draw pair etc. run for him as after a round
+start; with exchanged roles physical P1 comes back as the non-resident in slot 39 (`coopRoles` stays 1, `currentPlayer` = 0
+inside his window: pad 1, P1's score digits). Repeated borrows work (each needs a new press); a rejoined player who dies
+again follows the normal rules (respawn, or out again with `$40`). Game over is unchanged: the last player in the round
+losing his last life with nobody able to lend reaches `CoopResidentOut` with bit 7 clear -> roles put back -> game over.
+
+**Re-checked "out stays out" assumptions (Phase 7a).** `CoopRoundStartP2` (other out: not spawned, now `$40`);
+`CoopAddScoreTeam` (`ctxOther_playerLives` gate: a rejoined player gets team bonuses again); `CoopExtraLifeOther` (bit 7:
+runs again after the rejoin); `CoopResidentOut` (partner = bit 7; with `$40` -> game over path); the out check in the
+window (unchanged); `CoopTargetTick` / `CoopSelectTarget` (bit 7); `CoopCaptureOther` (`BIT` gate: never with `$40`, so
+`coopShotSwapped` is 0 at a rejoin); HUD (`HudPlayerData` reads lives by physical id; out rule `00` until the rejoin);
+round-20 camera / shifter / Ruckus (bit 7); the continue (`CoopContinue`) and new game (unchanged).
+
+### Sites and bytes
+| site | where | change | bytes |
+|---|---|---|---|
+| `RoundUpdate` end | bank 9 | `BIT/BPL/JSR CoopExtraLifeOther` -> `LDA/BEQ/JSR CoopTickOther` | 0 |
+| `CODE_0595E3` | bank 5 | `JSR CoopRespawnX / STA playerDir / JSR CODE_0599FF` (was `LDA #anPlayerR/STA objAnim`, `LDA #2/STA playerDir`) | -7 |
+| `CoopRespawnX` | bank 5 | via `CoopSpot` | -12 |
+| `CoopP2Window` | COOP_CODE2 | P2 out: `JSR CoopSwapOut` for the swap back; `CoopBankRestore` label on the restore tail | 0 |
+| `CoopResidentOut` | COOP_CODE2 | `JSR CoopP2DeactOut` for `JSR CoopP2Deactivate` | 0 |
+| `CoopRoundStartP2` | COOP_CODE2 | other out: spot default, `$40`, unarmed (16 B inline); P2 init -> `JSR CoopInitOther` | -20 |
+| `CoopSpawnP2` / `CoopSpawnAt` | COOP_CODE2 | stores `coopP2StartX`; split entry `CoopSpawnAt` (A = animation) | +3 |
+| `CoopSwapOut`, `CoopP2DeactOut`, padding | COOP_CODE2 | new (6, 4) + 4 B pad: `CoopNewGame` and everything after it keep their p94c addresses (`.assert`) | +14 |
+| `CoopP2Deactivate` | COOP_CODE2 | stores A into `coopP2Active` and `coopBorrowReq` | +3 |
+| `CoopTickOther` | COOP_CODE2 | new (2 + `JMP` 3) | +5 |
+| `CoopSpot`, `CoopInitOther`, `CoopBorrowTick` | PRG-RAM, after `coop_pairtab.inc` (the end) | new (31, 38, 147) | +216 |
+| COOP_BSS | | `coopP2StartX`, `coopBorrowReq` (at the end) | +2 |
+| coop.inc | | `COOP_P2_OUT`, `COOP_BORROW_UNARMED`, `COOP_P1_SPOT_X`, `COOP_P2_START_X`, `COOP_RESPAWN_Y`, `COOP_RESPAWN_INV`, `COOP_LEND_MIN`, `COOP_DIR_L/R` | 0 |
+
+Free space after the phase: PRG-RAM code area **5 B** (was 221), COOP_CODE2 29 (34), bank 5 281 (262; 278 with
+`COOP_FORCE`), bank 9 7 (1 with `COOP_SWAPTEST`), COOP_CODE 18, bank 7 13, bank F 213, banks 1 572, D 492 (unchanged). The
+PRG-RAM area is now full: further co-op code needs a free PRG bank (`$0E`, `$0F`, `$11-$1D`) or the boot-copy slot of bank
+`$10` (`$B039-$BFFF`, only mapped while `CoopBoot` runs).
+
+### Layout (found by the full pipeline of `p95a`)
+`verify.py full p95a` showed co-op +5468 play cycles (+3.29 %) against p94c. Most of it is a different game (the first P2
+respawn moves P2, below), so the code cost was measured on throwaway builds with the old P2 spot forced back in `CoopSpot`
+(`p95x` = p95a, `p95z` = p95b; not committed): both are RAM-identical to p94c in all 7 co-op scenarios (`ramid_p95x.txt`,
+`ramid_p95z.txt`). `p95x` cost +11..+12 cycles per play tick: +2 on odd ticks (`CoopTickOther`) and +19..+21 on every even
+tick (per-tick csv diff). The +20 came from layout, not from new work: the 9.5 edits had moved the hot COOP_CODE2 routines
+(`CoopP2Shoot` .. `CoopRoundStartP2` +8 B, `CoopSpawnP2` .. `CoopResidentOut` -6 B: `CoopSelectTarget`,
+`CoopCaptureOther`, `CoopProjCheckP2`, ... run per enemy / projectile on even ticks), so some branches and indexed reads
+crossed pages differently; the 9.5 PRG-RAM routines had also been inserted before the 9.1 tables. `p95b` puts the PRG-RAM
+routines at the end of the segment (`apply4.py`: every older PRG-RAM label keeps its p94c address) and keeps the
+COOP_CODE2 addresses of p94c from the window up to `CoopResidentOut` (`apply5.py`: same-size window and
+`CoopResidentOut`, helpers `CoopSwapOut` / `CoopP2DeactOut`, a 4-byte pad before `CoopDespawnAll` and an `.assert` on
+`CoopNewGame`'s offset; only the cold `CoopSpawnP2`, `CoopDespawnAll`, `CoopP2Deactivate` and the tail after
+`CoopResidentOut` move). `p95z` vs p94c: **+2 cycles per play tick in all 7 scenarios, p95 +1..+3 (c64 +29), lag +0 (c64
++1)** (`stats_coop_p95z_vs_p94c.txt`).
+
+### Cost
+- 1P: `stats p95b --vs p94c`: 0 cycles per play tick in all 12 scenarios, lag +0 (total +1). The hook has the same size and
+  timing. A respawn costs +18 cycles once (`CoopSpot`), a round setup a few.
+- Co-op, both in: +2 cycles per tick (`CoopTickOther`'s `BPL`), measured above.
+- One player out: the borrow check ~55 cycles per `RoundUpdate` tick (pad read, arming, request test; 7 before).
+- The co-op scenarios of the pipeline (`final_stats_coop.txt`): c01 -339, c05 +477, c17 +2994, c20 +2, c22 -189, c50
+  +1214, c64 +1248 per play tick, lag -46 .. +240: different games from the first P2 respawn on (verification item 2),
+  not code cost (c20, the same game, +2).
+- A borrow: one swap pair + `CODE_08812A` + the spawn, ~2k cycles once (the same work as a round-start spawn).
+
+### Verification (build `p95b`)
+ROM md5 `0057ff6f5a916a8fe27805fb3b2fa10a` (p95bf `587ea3bd...`, p95bt `7070438e...`).
+1. Builds p95b / p95bf / p95bt assemble. `regress base p95b --reuse-base`: REGRESSION PASS 12/12, no new exclusion
+   (`regress_p95b.txt`). `stats p95b --vs p94c` (1P): 0 cycles per play tick in every scenario, total +1, lag +0.
+2. Co-op RAM identity `regress p94c p95b --reuse-base --scen c01 c05 c17 c20 c22 c50 c64` (`ramid_p95b.txt`): c20 PASS
+   (no P2 death in its 3000 ticks); the other six differ first at exactly the tick of the first P2 respawn (c01 t1264,
+   c05 t1038, c17 t1462, c22 t1189, c50 t1046, c64 t1588; p95verify logs of the same runs), and there only in `objX+39`
+   `$1F` -> `$E1`, `objAnim+39` 2 -> 1 (anPlayerL), `objImgOfs+39` and the OAM bytes of P2 (X, flip) and of the sprites
+   after him: the new spot and facing. From there on the games differ. The old-spot builds `p95x` / `p95z` are
+   RAM-identical to p94c in all seven (see Layout), so nothing else in 9.5 changes a game with both players in.
+3. **p95verify** (`p95/p95verify.py`, generated by `mkverify95.py`: p90verify + `p95lua.py`), 37 runs = the 32 p90verify
+   scenarios (test option `nb`: the out player's A/B are masked at the borrow check, so these games stay "out stays out"
+   as in p94c, apart from the P2 spot) + the 5 new borrow scenarios: every rc 0, **violations p5 0, p6 0, p6b 0, p7 0,
+   Phase 8 0** (`p95verify_p95b_full.txt`). Changes against p90verify (each one is a rule that assumed "out stays out" or
+   the old P2 spot; nothing else was touched):
+   - lives model: a borrow (exec hook on the `DEC playerLives` in `CoopBorrowTick`) moves one life: lender -1, borrower
+     = 1, the borrower is no longer out;
+   - p8lua's round-20 respawn rule: "X = 31 if the camera is at 1" -> `coopP2StartX` for physical P2 (31 for P1);
+   - `v_alone_act` (roles 1 had to mean "P2 alone"): legal after a rejoin of physical P1 (until a continue / new game);
+   - ctxOther writer whitelist: + `CoopBorrowTick` (PRG-RAM PCs mapped to their label; it writes the borrower's lives,
+     hearts, `playerDir`, i-frames);
+   - `v_role_partner_no_lives` -> info when the partner is dying on his last life (both on their last life, P1's death
+     ends first: the 7a flow, the game over follows; reached by o3's changed game, p94c's o3 did not reach it);
+   - `v_kill_sum` -> info for the first multi-kill award after a continue (pre-existing, see Open items; reached by k2).
+   With these rules the old checker's 72087 p7 + 96 p5 + 4 Phase-8 violations in `verify.py full p95b` (item 6) are covered
+   one for one: p95verify without `nb` (`P95_NATURAL=1`), i.e. the same 32 games as `verify.py`'s p90verify
+   (`p95verify_p95b_natural.txt`), gives **0 violations** with 24 borrows (= the 96 / 4 old `v_ctxwrite` hits): 10 by
+   physical P1 after a role exchange, 14 by P2 (4 in round 20); 14 requests waited for slot 39, 33 were dropped.
+   New Lua checks (`p95lua.py` docstring): the spot model at every respawn (objX, facing, Y 193); the spot store at every
+   round start and on `CoopRoundStartP2`'s out path; the borrow model at every `CoopBorrowTick` call (request with arming,
+   drop / wait / borrow, and after a borrow: both lives, hearts 1, i-frames 120, spot, facing in `playerDir` and
+   `objAnim`, objState, `$80`, request cleared, `currentPlayer` unchanged, HUD flag, extra-life sound, `prgBankB` back).
+4. Probes (the 5 new scenarios; logged evidence in `runs/fullb/p95b_k*_p7.txt`):
+
+   | scen | what | result |
+   |---|---|---|
+   | k1 (rounds 1-3) | P2 out; pause with A+B on pad 2 held over the unpause; A+B during a round clear; 3 borrows, P2 out again after each; A+B with P1 at x01; P1's last death; continue | pause: no check runs, no borrow after the unpause (held, not new); round clear `$18`: dropped; borrows at t3001 / t3601 / t4201 (P1 4->3->2->1, P2 0->1 each) at (225,193) facing left; at x01: dropped; game over t4555; continue t4703, both back t4917 |
+   | k2 (rounds 5-6) | P1 out -> role exchange; P2 respawn as resident; pad 1 A+B; respawns of both afterwards | P2 (resident, roles 1) respawns at 225; borrow t2601 P2 5->4, P1 0->1 in slot 39 at (31,193) facing right, roles stay 1; P1 then respawns in his window at 31 and P2 as resident at 225; with both in and roles 1 the window ran on every tick (688 ticks), enemies targeted slot 39, both objects drawn, HUD both blocks |
+   | k3 (rounds 3-5) | round clear, transition / intro, P1 dying, bonus game, then normal play | `$18`: dropped twice; transition / intro / the whole bonus game (`coopP2Active` 0, 8561 ticks): no check, ignored; P1 dying: dropped; after the bonus game the first press in play with P1 alive borrows (t12551) |
+   | k4 (round 1) | P1 blows bubbles until slot 39 is busy, then A+B on pad 2 | the request waits 559 ticks (slot 39 `$80` emerging, then `$01` rising) and borrows on the tick the slot is free |
+   | k20 (round 20) | respawns with the camera moved / at the start; rejoins with the camera moved / at the start | respawns at 128 with the camera moved, P2 at 225 facing left with the camera at 1 (t4198, partner in); rejoin at 128 with the camera at 131 (t2801), at 225 with the camera at 1 (t4001) |
+
+   Totals over the 37 runs: 8 borrows (7 by P2, 1 by P1 with roles 1), every borrow check passed; respawns: P1 own 93
+   (+7 round 20) and centre 23, P2 own 75 in his window + 15 as resident with roles 1 (+4 / +2 round 20) and centre 19,
+   physical P1 in the window with roles 1: 2. `hudcheck.py` (p95 copy, set k): HUDCHECK PASS, 0 job / cell / stale
+   errors, max lag 1-2 ticks (both blocks show a borrow in the same tick).
+5. Screenshots `tmp/coop_scripts/p95/shots/`: `p2_respawn_own_spot_round1_k1_t1047.png` (P2 bottom right facing left,
+   i-frames); `borrow_before_k1_t2995.png` / `borrow_after_k1_t3006.png` (HUD 1P x04 / 2P x00 -> 1P x03 / 2P x01, P2 back
+   at his spot); `p1_out_roles1_before_k2_t2595.png` / `p1_rejoined_roles1_k2_t2607.png` (P1 back bottom left after the
+   role exchange, HUD 1P x01 / 2P x04); `r20_p2_respawn_camera_start_k20_t4203.png`, `r20_p2_rejoin_centre_k20_t2806.png`.
+6. `verify.py full p95b --prev p94c --p90ref tmp/verify/p94c_full/final_p90verify.txt` (once on the final build,
+   `tmp/verify/p95b_full`, 26:57, 166 Mesen runs): PASS regress1p, hudcheck r2 / p8 / coop / 1p, tractor 1-6, swapcheck x2
+   (0 failures), menutest a-f. The FAIL / INFO lines, explained:
+   - p90verify FAIL (p5 96, p7 72087, Phase 8 4): the old rules of item 3 (natural borrows in the o / b / bn / w20x /
+     w20y games: `v_lives_native` 18312, `v_lives_other` 50796, `v_lives_before_dec` 25, `v_out_window_model` 15,
+     `v_alone_act` 2938, `v_ctxwrite` 96, `v_role_partner_no_lives` 1; `v8_respawn_x` 4 = P2 respawns at 225 with the
+     camera at 1). cmpverify: 712 counter differences, because the games differ (P2 spot, borrows).
+   - tractor 7 / 8 FAIL: they run the "1P rule" model on the `--prev` build p94c, which already has the 9.3 co-op tractor;
+     the result is identical to p94c's own pipeline against p93b (MISMATCH 81 / 86); the runs came from the run cache
+     (3-4 s), which is why they were so short.
+   - pixcmp vs base FAIL: 19 differing samples, all split-line (round 20), the same 19 as in p94c's run; vs p94c: PASS.
+   - INFO: stats co-op +5408 (+3.26 %): different games (item 2; c20, the same game, +2 per tick); windowchk: no access
+     inside any window; pairchk set P1 ok 12331 / P2 ok 12534, bad 0; charge set bad 0; flick: no player line dropped.
+
+### Deviations
+- P2 respawns (and rejoins at his own spot) facing left, as he starts a round; the brief named only the spot. One byte
+  (`LDY #COOP_DIR_L` in `CoopSpot`) if the owner prefers facing right as P1.
+- Arming of the A+B request (above): a refinement of "new press" found necessary in the first probe run.
+- Deferred request while slot 39 holds a bubble (the brief allowed "ignored (or deferred)"); every other non-allowed case
+  ignores / drops the press.
+- The brief's "rounds where P1's start differs" do not exist (`CODE_0884CF`); several rounds were probed instead.
+- p90verify (the Phase 9.0 checker that `verify.py` calls by fixed path) assumes "out stays out" and the old P2 spot; it was
+  not changed. The rules moved to the copy `p95/p95verify.py` (listed above); `verify.py full`'s p90verify step therefore
+  reports the expected old-rule violations (verification item 6).
+- `p95a` (the first build) cost +11 cycles per co-op tick through layout; fixed in `p95b` (see Layout).
+
+### Open items
+- PRG-RAM code area full (5 B).
+- After a role exchange and a rejoin the roles stay exchanged for the rest of the game (until a game over / continue / new
+  game): physical P2 then walks in on the left at round starts and physical P1 is spawned on the right, while the respawn
+  rule stays per physical player (P1 left, P2 right). Option: put the roles back at the next round start when both are in.
+- `ram_051A` (kills since the last multi-kill award) survives a continue while the per-player counts are reset at every
+  despawn; the first award after a continue can credit a stale kill to the current player (pre-existing since 7a; the
+  checker copy counts it as info).
+- Natural (random-input) play borrows quickly whenever a player is out and the partner has lives (24 borrows in 32 runs):
+  the old Phase 7 scenarios now need the `nb` test option to keep their "out" games.
