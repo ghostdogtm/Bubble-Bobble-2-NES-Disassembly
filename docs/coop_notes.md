@@ -3180,3 +3180,194 @@ The 13 item-spawn statistics `$053F-$054B` (`rewardsEaten` food, `shootCounter` 
 add to one counter, so items appear about twice as often as in 1P and either player may collect them; collecting zeroes
 the entry for both. Not taken: (b) per-player counters (more code at every writer/reader/reset, two items could spawn at
 once); (c) shared but doubled thresholds in co-op (1P-like item frequency).
+
+## Phase 9.4: performance round 2
+
+Code commits `e879c50` (step 1), `f00264a` (step 2), `91810c8` (step 3). Builds `p94a` (step 1), `p94b` (+ step 2), `p94c` (+ step 3
+= HEAD; `p94cf` = `COOP_FORCE`, `p94ct` = `COOP_SWAPTEST`). Scripts and results: `tmp/coop_scripts/p94/` (`STATE.md`, `gtprobe.py`,
+`brpage.py`, `apply_step3.py`, `stats_*.txt`, `prof_*.txt`, `cover_p94b.txt`), full pipeline `tmp/verify/p94c_full`. Pure speed
+changes to original code (owner-approved): game behaviour unchanged in both modes. Not in scope and not touched: the co-op swap
+liveness, the "MMC3 selector always 7" rule.
+
+### Step 1: P1 bubble-touch early-out (`CODE_098149`, bank 9)
+- **Idea.** 9.2's P2 pre-test applied to P1's path. `UpdateBubbles` reaches `CODE_098149` for every bubble in state 1-5
+  (RISING, EXPIRING, ENEMY, ENEMY_EXPIRING, POWER); it called `CODE_098932`, which returns at once when
+  |player X - bubble X| >= 16 (89.5 % of the calls: 98,357 of 109,894 over the 19 scenarios), and then `CODE_098258` (drift).
+  Now `CODE_098149` makes the X test itself (`LDA objX / SEC / SBC objX+OSLOT_BUBBLE,X`, |dx| from the carry, `CMP #$10`) and
+  calls `CODE_098932` only when near. The `TXA / PHA / PLA / TAX` around `JSR CODE_098258` is gone too.
+- **Equivalence.** The early return of `CODE_098932` writes only scratch2/3/6/7 (scratch4/5 are written by `CODE_098149`
+  before it). `CODE_098258` always runs next and always writes scratch0/1 (itself), scratch2 (`CODE_0FF5E6`, both paths),
+  scratch5/6/7 (`CODE_0FF986`) and scratch4 (`CODE_0FF5E6`'s `LDA scratch5 / STA scratch4`), each before reading it. So of
+  the early return only scratch3 = objY + 2 survives; it is written first (`LDA objY / CLC / ADC #2 / STA scratch3`, the same
+  instruction sequence; on the near path `CODE_098932` rewrites it with the same value first). The test is the same decision
+  as `CODE_098932`'s (`scratch2 = objX`, `CMP scratch4`, `SBC`, `CMP #$10`). Y is not touched on the far path (the early return
+  does not touch it either); A and the flags are redefined by `CODE_098258`'s first `LDA` and its `CMP`s before any use.
+  `CODE_098258` / `CODE_0FF5E6` / `CODE_0FF986` never write X (X is only an index there), and at `CODE_09815D` A and the
+  flags are dead (`INX / CPX bubbleSlotEnd`, then `LDA #$00` or `LDA roundFlags`); the removed PHA only changes a stack byte
+  below SP (the game has no TSX; 9.2 removed PHP/PLP pairs the same way). No interrupt handler reads scratch0-9 (IRQ
+  handlers: `ram_0020/24/25` only; NMIShort: audio RAM). The checkers hook only the late paths of `CODE_098932` (bounce, push,
+  pop), which still run.
+- **Cost.** Far call 29-32 cycles instead of ~88 (incl. the push/pull), near call +17 .. +20 (pre-test and the early scratch3). Bank 9: +21 B (28 -> 7 free;
+  `COOP_SWAPTEST` 22 -> 1).
+- **Coverage (`cover p94a`, 19 scenarios).** 109,894 entries; |dx| from the borrow path 71,261, direct 38,633; near
+  (call made) 11,537, `@move` 109,894.
+
+### Step 2: GetTile and the terrain probes (bank F)
+**Measured first** (`profile` / `cover p93b`, co-op c01-c64, 21,000 ticks): `GetTile` 41.69M cycles = 1985 per tick (10.7 %),
+211,853 calls, 197 cycles per call; per call: irqEffect 0 path 123,644 (58 %), flow path (irqEffect 1/3/4) 62,576, wide (5)
+25,633; terrain-bank guard needed 24,348 of 149,277. The common path was ~182 cycles: dispatch 8, address 32, guard 10, the
+16x16 tile and `tile * 5` (16-bit, two separate adds) 75, the 8x8 quadrant index 33, the result 18 + JSR/RTS. Callers come in
+bursts (`GetTile` + `CODE_0FF07A` / `CODE_0FF7AC` + probe), but the probes' bank guards are already skips (10 cycles) and the
+remaining hoist would need the rule below.
+
+| site | change | cycles |
+|---|---|---|
+| GetTile tail (`CODE_0FF595`) | `tile * 5` with the low byte in A: `LDY #0 / STY scratch7 / ASL / ROL scratch7 / ASL / ROL scratch7 / ADC scratch3 / STA scratch6 / BCC / INC scratch7 / CLC / ADC terrainTypeDefs / ...` (was `STA scratch6`, 2 x `ASL/ROL` on memory, `LDA/CLC/ADC/STA`, `LDA/ADC #0/STA`, then the base add) | -22 per call |
+| `CODE_0FF8A7` (`CODE_0FF852`'s neighbour-tile path) | the same, result into scratch6/7 | -27 per call (40,526 calls) |
+| GetTile `CODE_0FF56E`, `CODE_0FF56Df`; `CODE_0FF632` | `CLC / ADC scratch2` -> `ORA scratch2` | -2 |
+| `CODE_0FF629`, `CODE_0FF5E6` irqEffect-1 path | dead `CLC` before the `LSR`s removed | -2 |
+| GetTile head | `BEQ CODE_0FF563` (was `BNE CODE_0FF4D2 / JMP CODE_0FF563`); the unreached irqEffect 2 block (`CODE_0FF50A`) moved after the RTS (its `BEQ CODE_0FF563` -> `BNE :+ / JMP`, and a `JMP CODE_0FF535` at its end), `CMP #2 / BEQ CODE_0FF50Aj` -> `JMP CODE_0FF50A` | -1 (the taken BEQ crosses a page) |
+| `CODE_0FF986` | the final 2-bit shift in A, stored once (was `STA scratch5` + `LSR scratch5` x 2 per step + `JMP`) | -6 per step (1.5 steps per call) |
+
+**Equivalence audit.**
+- `tile * 5`: before the ROLs scratch7 is 0, after the first ROL at most 1, so the second ROL leaves C = 0 and `ADC scratch3`
+  adds tile without a carry in; `BCC / INC scratch7` is the old `ADC #0`. scratch3 (tile, overwritten later in GetTile as
+  before), scratch6/7 (tile * 5; in `CODE_0FF8A7` the pointer `terrainTypeDefs + tile * 5`) and terrainTileDef end with the
+  same values; the last `ADC` has the same operands and carry in (`scratch7 + terrainTypeDefs+1 + C`, commutative), so C/V/N/Z
+  are the same. Y is reloaded right after (`LDY #$01` in GetTile, `LDY ram_075C` in `CODE_0FF8A7`).
+- `ORA` for `CLC / ADC scratch2`: GetTile irqEffect 0: A = X >> 4 <= $0F, scratch2 = Y & $F0; irqEffect 5: A <= $1F after
+  `ROR / LSR x 3`, scratch2 = (Y & $F0) << 1 (bits 5-7); flow path and `CODE_0FF5E6`: A <= $0F, scratch2 = (Y [+ ram_00D3]) &
+  $F0. The bits never overlap, so the sum has no carry and A / N / Z are the same. C differs (bit shifted out by the last LSR)
+  but is redefined before use (GetTile: `CMP prgBankB` of the guard, or the flow path's `ADC scratch3` after the tile load;
+  `CODE_0FF5E6`: `CMP prgBankB` in `CODE_0FF986`). V (0 after the ADC, now unchanged) is redefined by the `tile * 5` ADCs in
+  GetTile; at `CODE_0FF5E6`'s RTS it can differ: no code outside the audio bank reads V (no BVC/BVS; the one PHP/PLP pair,
+  `CoopDrawForeign`, only carries DrawObjects' flags through), the same argument as perf Phase 5.
+- Dispatch: the irqEffect 0 path enters `CODE_0FF563` with A = 0, Z = 1 as before (`LDA scratch0` follows); the other paths
+  see A / flags of `LDA irqEffect` as before. The moved block is unreached (CDL `- - - - - -`, 0 executions in every run) and
+  keeps its effect.
+- `CODE_0FF986`: Y = 3 and Z = C = 1, N = 0 (from `CPY #3`) at the RTS as before, scratch5 the same; A is the shifted value
+  (was the unshifted one), and the only caller, `CODE_0FF5E6`, does `LDA scratch5` right after.
+- **Call-by-call probe** (`p94/gtprobe.py p94a p94b`, all 19 scenarios, Lua exec hooks on the entry and every RTS of
+  `GetTile`, `CheckWall`, `CheckFloor`, `CODE_0FF852`, `CODE_0FF8F3` and (`GT_E=1`) `CODE_0FF5E6`): per call the entry
+  state (A X Y P, scratch0-7) and the exit state (A X Y P, scratch0-7, `$1F $27 $28 $40-$47 prgBankB $60 $61 $7C $80 $81 $D0-$D3
+  $075C` and the bank mapped at `$A000`): **identical in every record** (2.0M records, e.g. c01: 28,808 GetTile, 14,183
+  `CODE_0FF852`, 5,262 CheckWall, 5,076 CheckFloor, 5,813 `CODE_0FF5E6` calls). The `CODE_0FF5E6` exit P is compared without
+  V (above). scratch8/9 are not logged: they can hold a bank-9 pointer, which step 1 moved (p93b vs p94b differs there for that
+  reason only).
+- **Coverage (`cover p94b`, 19 scenarios):** GetTile 482,448 calls (irqEffect 0: 289,519; flow 152,012; wide 40,917); the
+  `INC scratch7` (carry) path 66,431; `CODE_0FF8A7` 40,526 (carry 2,309); `CODE_0FF632` 109,894 (`CODE_0FF629` 55,357, irqEffect 1
+  54,537); `CODE_0FF986` shift steps 161,099. **Not executed:** `CODE_0FF50Aj` and the moved `CODE_0FF50A` block (irqEffect 2,
+  unreached in the original as well; justified by analysis).
+- Bank F: 182 -> 208 B free.
+
+**Per call** (co-op profile, same 211,853 calls): GetTile 197 -> 171 cycles (41.69M -> 36.18M, -262 per co-op tick);
+`CODE_0FF852` -465k, `CODE_0FF986` -468k, `CODE_0FF5E6` -186k.
+
+### Step 3: `PlayerCheckEnemyCollision` (bank F) and the icon hide
+**Measured first:** 296 cycles per co-op tick, 6.22M over the co-op set (one call per even tick for each player; 9 enemy slots
+per call, most of them empty or far). The slot lived in scratch1: `LDX scratch1` per slot, `INC scratch1 / LDX scratch1 /
+CPX #9 / BEQ / JMP` per step and a `JMP @next` trampoline for invalid slots (28 cycles per empty slot).
+- **Change.** The slot is kept in X. The loop step `@next: INX / CPX #9 / BEQ @done` is placed in front of `@checkslot` and
+  falls into it (no taken branch per slot; the tests branch back to it on the same page; `JMP @checkslot` once at the start).
+  `@done: STX scratch1 / RTS`; `STX scratch1` added at "Collision confirmed". 28 -> 13 cycles per empty slot, about -14 per
+  valid slot.
+- **Equivalence.** scratch1 is written where the original exits leave it (the slot before the collision code, which may call
+  `AddScore` as before; 9 at the loop end); all other instructions of the body are unchanged, so A and Y at both exits are the
+  last slot's as before, X = 9 / the slot, and the flags at the loop end come from `CPX #9` (Z = C = 1, N = 0) as before. The
+  intermediate scratch1 values are not read by anything (no interrupt reads scratch). Probe (`GT_C=1 gtprobe.py p94b p94c`,
+  19 scenarios, entry + both RTSs, same state list plus collW/collH/playerDmgType): identical on every call (c01 2,032
+  calls ... camp03 2,518).
+- **Coverage (`cover p94c`):** 28,664 calls, `@checkslot` 250,896 slot visits, `@done` 27,708, `STX scratch1` at a collision
+  956 (rewards 10). The `ENEMY_CARRYHELI` test (original code) never runs in the scenarios.
+- **Cost:** -1.68M cycles over the co-op set (296 -> 216 per co-op tick), -1.67M over the 1P set. Bank F: 208 -> 213 B free.
+- **A far-enemy early-out was not added:** after the loop change a far valid enemy costs ~80 cycles, of which the `collW` /
+  `collH` loads (14) are the only skippable part, and they are outputs (the last valid slot's mask stays in `collW/collH`), so
+  a pre-test would need the 9.2-style rebuild after the loop for a few cycles per enemy.
+- **Icon hide: not changed.** Measured `CoopDrawObjects1P` 42 cycles per 1P tick (126k over r33's 3000 ticks), co-op
+  `CoopDrawObjectsC` 41. Of that, the three icon tests (22), the hide / restore stores (24) and the JSR into the body are needed
+  for the result; a cheaper variant would change DrawObjects' slot loop or keep a flag that every writer of the icon's
+  `objAnim` would have to maintain. Not worth it for <= 10 cycles.
+
+### Result
+Per play tick, `stats p94c --vs p93b` (co-op) and per step (d_play):
+
+| scen | play p93b | play p94c | d | d % | step 1 | step 2 | step 3 | lag p93b | lag p94c |
+|---|---|---|---|---|---|---|---|---|---|
+| c01 | 20751 | 20051 | -700 | -3.37 % | -179 | -392 | -129 | 99 | 82 |
+| c05 | 22611 | 21946 | -665 | -2.94 % | -126 | -429 | -110 | 125 | 95 |
+| c17 | 28386 | 27475 | -911 | -3.21 % | -307 | -470 | -134 | 633 | 568 |
+| c20 | 16636 | 16168 | -468 | -2.82 % | -5 | -329 | -134 | 0 | 0 |
+| c22 | 21483 | 20826 | -657 | -3.06 % | -122 | -431 | -104 | 138 | 121 |
+| c50 | 30510 | 29521 | -989 | -3.24 % | -332 | -539 | -117 | 663 | 598 |
+| c64 | 30857 | 29987 | -870 | -2.82 % | -199 | -547 | -124 | 1161 | 1011 |
+
+Co-op lag frames: 2819 -> 2475 (-344, -12 %); p95 -675 .. -2286.
+
+1P (`stats p94c --vs p93b`, 12 scenarios):
+
+| scen | play p93b | play p94c | d | d % | lag p93b | lag p94c |
+|---|---|---|---|---|---|---|
+| natural | 9934 | 9686 | -248 | -2.49 % | 5 | 5 |
+| r01 | 18261 | 17680 | -581 | -3.18 % | 151 | 121 |
+| r08 | 17942 | 17446 | -496 | -2.76 % | 68 | 51 |
+| r17 | 20137 | 19526 | -611 | -3.04 % | 250 | 206 |
+| r20 | 14556 | 14238 | -318 | -2.18 % | 0 | 0 |
+| r33 | 18423 | 17975 | -448 | -2.43 % | 1 | 1 |
+| r40 | 14383 | 14042 | -341 | -2.37 % | 2 | 1 |
+| r50 | 24358 | 23613 | -745 | -3.06 % | 320 | 281 |
+| r64 | 20079 | 19622 | -457 | -2.28 % | 14 | 10 |
+| r69 | 17458 | 16934 | -524 | -3.00 % | 0 | 0 |
+| r70 | 11668 | 11384 | -284 | -2.43 % | 0 | 0 |
+| camp03 | 13912 | 13502 | -410 | -2.95 % | 0 | 0 |
+
+1P play-mean sum -5464 (-2.72 %; steps -1462 / -3312 / -690), lag 811 -> 676. Against the original ROM (`stats p94c --vs base`):
+-12.06 % (r50) .. -15.70 % (r70) per play tick, sum -30923 (-13.65 %; Phase 6 of the perf work ended at -12.70 %), lag -643
+frames over the 12 scenarios (base 1319 -> 676).
+
+Profile (exec counters, co-op set): busy cycles 390.36M -> 379.31M (-11.06M, -527 per tick over all ticks incl. the intro):
+GetTile -5.51M, `CODE_098932` -2.27M (P1's skipped calls), `PlayerCheckEnemyCollision` -1.68M, `CODE_0FF852` -0.47M,
+`CODE_0FF986` -0.47M, `CODE_0FF5E6` -0.19M (bank-9 routine names shift because bank 9 moved: only totals there).
+
+### Verification
+Per step: `verify.py quick` PASS for p94a, p94b, p94c (1P regress 12/12 with the same scratch-byte counts as p93b, p90verify 6 runs
+0 violations, hudcheck, menutest; pairchk totals equal); co-op RAM identity `regress p93b BUILD --reuse-base --scen c01 c05 c17
+c20 c22 c50 c64` **7/7 PASS** for p94a, p94b and p94c (`p94/ramid_p94*.txt`; c20 identical incl. the lag pattern, the others
+differ only in the lag-dependent bytes, as in 9.2; no scratch-byte difference at all); the call probes above.
+
+Once at the end, `verify.py full p94c --prev p93b --p90ref tmp/verify/p93b_full/final_p90verify.txt` (`tmp/verify/p94c_full`,
+26:55 wall, 168 Mesen runs). ROM md5 `72b036666891563aaba76a0ac119e203` (p94cf `f8eff639...`, p94ct `2223ab29...`).
+- PASS: 1P regress 12/12 (no new exclusion); p90verify 32 runs rc 0, violations p5 0 p6 0 p6b 0 p7 0, Phase 8 0, and
+  `cmpverify` against p93b's run: **0 differences** (every per-run counter and total equal); hudcheck r2 / p8 / coop / 1p;
+  tractor 1-6 (this build: P1 alone 84, P2 alone 81, both 7, the same as 9.3); swapcheck x2 (0 failures); menutest a-f.
+- tractor 7 and 8 FAIL as expected with `--prev p93b`: they run the "1P rule" model (P1 only) on the `--prev` build, which was
+  the pre-9.3 build p92g in 9.3's pipeline; p93b already has the co-op tractor, so the 81 P2-alone triggers count as mismatches
+  there. Nothing about p94c.
+- INFO, checked: windowchk identical to p93b's (same window / full-swap counts, no access); pairchk set: P1 ok 13031, P2 ok 12948,
+  bad 0 (= p93b); charge set (frame-polled input, so the game differs with the lag): P1 bad 0, P2 bad 9, all the known stuck
+  player in bank `$5B` class (here P2 is the stuck one; p93b: P1 34); flick: 0 frames with a player line dropped or cut, other
+  objects 19.95 % dropped; pixcmp natural 0 differing (vs base and p93b), r20 vs base 19 = 18 split-line + t2064 (the known
+  area), vs p93b 26, all split-line (r20 logic is ~320 cycles per tick faster, the split line moves).
+- No RAM-identity step in this pipeline (no `--alt`); it is the per-step check above.
+
+### Free space after the phase
+bank 9 7 B (28; `COOP_SWAPTEST` 1), bank F 213 (182); unchanged: PRG-RAM code area 221, COOP_CODE2 34, COOP_CODE 18, bank 7 13,
+banks 1 572, D 492, 5 262 (259 with `COOP_FORCE`), 2 231, 6 134. Free PRG banks `$0E`, `$0F`, `$11-$1D` were not needed.
+
+### Deviations
+- Step 3's loop change goes beyond the brief's "early-out for far enemies": the measurement showed the loop overhead (scratch1
+  as the counter, 18 cycles per slot) as the larger part, and the early-out alone was not worth it (above).
+- New probe `p94/gtprobe.py` (per-call register / memory state of the terrain routines between two builds); `tools/perf` is
+  unchanged.
+
+### Open items / options for the owner
+- **Probe guards (a new bank-switch rule, not done).** `CheckWall`, `CheckFloor`, `CODE_0FF852` and `CODE_0FF8F3` still test
+  `terrainBank` against `prgBankB` (10 cycles); the switch was never needed in any run since Phase 2+3 (every caller calls
+  them right after GetTile, which leaves `terrainBank` mapped, with only `CODE_0FF07A` / `CODE_0FF7AC` / register code in
+  between - 42 call sites). Dropping the guards saves ~87 cycles per co-op tick and ~56 per 1P tick, but makes "call the
+  probes only right after GetTile" a rule for all future code (CheckWall / CheckFloor do not read `$A000` at all; only
+  `CODE_0FF852` / `CODE_0FF8F3` do). Options: (a) keep the guards (now); (b) drop them, with a static check of the 42 sites
+  and a runtime check in the harness (bank at `$A000` == terrainBank at every probe entry).
+- **Flow rounds (irqEffect 1/3/4):** GetTile maps bank 6 (`RoundsFlowTable`) and then the terrain bank on every call (152k of
+  482k calls). A RAM copy of the round's two flow tables (via `ram_0027` and `flowAdr`) at round setup would remove both
+  switches (~25 cycles per flow call) but changes the bank-6 mapping pattern; not measured further.
+- The co-op swap (~1.2k cycles per co-op tick) is still the largest co-op item (liveness, later; out of scope here).
