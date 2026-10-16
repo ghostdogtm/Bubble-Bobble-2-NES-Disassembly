@@ -3204,23 +3204,18 @@ CoopMoveX:
 	BNE CODE_0594F8
 	BEQ CODE_0594EF
 
-; (co-op 8) X of the in-place respawn (CODE_0595E3; was LDA #31 / STA objX). Both players in round 20 and the camera
-; not at the round start (the camera stays where it is, see CODE_0595C1): the bottom centre of the screen, which is
-; floor at every camera position but the start (the hole in the floor is at world X 64-96). Else 31, as in 1P.
+; (co-op 8, 9.5) X and facing of the in-place respawn (CODE_0595E3; was LDA #31 / STA objX, anPlayerR, playerDir 2):
+; the dying player's own spot (CoopSpot, PRG-RAM; currentPlayer = his physical id): P1 X 31 facing right as in 1P,
+; P2 his start X of the round facing left. Both players in round 20 and the camera not at the round start (the camera
+; stays where it is, see CODE_0595C1): the bottom centre of the screen, which is floor at every camera position but the
+; start (the hole in the floor is at world X 64-96). Out: objX set, A = facing (playerDir = objAnim id). X/Y clobbered.
 CoopRespawnX:
-	BIT coopP2Active
-	BPL @p31
-	LDA wideRound
-	BEQ @p31
-	LDA wideHScroll
-	CMP #$01
-	BEQ @p31
-	LDA #COOP_RESPAWN_XMID
-	BNE @set
-@p31:
-	LDA #31
-@set:
+	LDA coopP2Active
+	ASL A						;C = the partner is in the round
+	LDA currentPlayer
+	JSR CoopSpot
 	STA objX
+	TYA
 	RTS
 
 CODE_059502:
@@ -3336,14 +3331,11 @@ CODE_0595C1:
 	CODE_0595E3:
 		LDA #193					;C - - - - - 0x00B5F3 02:95E3: A9 C1
 		STA objY				;C - - - - - 0x00B5F5 02:95E5: 8D 8B 05
-		JSR CoopRespawnX			;(co-op 8) was LDA #31 / STA objX: 31, or the screen centre in round 20
-		LDA #anPlayerR_ID					;C - - - - - 0x00B5FD 02:95ED: A9 02
-		STA objAnim				;C - - - - - 0x00B5FF 02:95EF: 8D 7B 06
-		JSR CODE_0599FF				;C - - - - - 0x00B602 02:95F2: 20 FF 99
+		JSR CoopRespawnX			;(co-op 8, 9.5) was LDA #31 / STA objX: the player's own spot, or the screen centre in round 20
+		STA playerDir				;(9.5) facing from CoopRespawnX (1P: 2 = right, as the LDA #$02 / STA playerDir below did)
+		JSR CODE_0599FF				;objAnim = A: anPlayerR_ID (was LDA #anPlayerR_ID / STA objAnim) or anPlayerL_ID
 		LDA #120					;C - - - - - 0x00B605 02:95F5: A9 78
 		STA playerInvFrames				;C - - - - - 0x00B607 02:95F7: 8D 77 04
-		LDA #$02					;C - - - - - 0x00B60A 02:95FA: A9 02
-		STA playerDir				;C - - - - - 0x00B60C 02:95FC: 85 77
 		LDA livesCurrentPos				;C - - - - - 0x00B60E 02:95FE: AD 98 04
 		ORA #$03					;C - - - - - 0x00B611 02:9601: 09 03
 		STA livesCurrentPos				;C - - - - - 0x00B613 02:9603: 8D 98 04

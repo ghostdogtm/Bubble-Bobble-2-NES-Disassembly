@@ -117,6 +117,21 @@ COOP_CAM_RZONE  = 176           ;   holding RIGHT at X >= 176 pushes it right
 COOP_RESPAWN_XMID = 128         ; in-place respawn X in round 20 while the camera is not at the round start
 
 ; ---------------------------------------------------------------------------------------------
+; Phase 9.5: respawn spots, borrowing a life (see docs/coop_notes.md, Phase 9.5).
+; ---------------------------------------------------------------------------------------------
+COOP_P2_OUT     = $40           ; coopP2Active while the non-resident player is out and the resident plays alone (co-op
+                                ; only; bit 7 clear, so every BIT/BPL and BIT/BMI gate reads it as "P2 not in the round")
+COOP_P1_SPOT_X  = 31            ; physical P1's respawn X (the original in-place respawn, CODE_0595E3)
+COOP_P2_START_X = 256-$1F       ; physical P2's start X when CoopSpawnP2 did not run for him this round: the mirror of
+                                ; P1's start X ($1F, CODE_0884CF)
+COOP_RESPAWN_Y  = 193           ; Y of the in-place respawn (CODE_0595E3) and of a rejoin
+COOP_RESPAWN_INV = 120          ; i-frames of the in-place respawn (CODE_0595E3) and of a rejoin
+COOP_BORROW_UNARMED = COOP_P2_OUT ; coopBorrowReq until the out player has released A and B (bit 6; a request is 1..3)
+COOP_LEND_MIN   = 2             ; a borrow needs the lender's playerLives >= 2 (he keeps >= 1: never out, never game over)
+COOP_DIR_L      = 1             ; playerDir left / right
+COOP_DIR_R      = 2
+
+; ---------------------------------------------------------------------------------------------
 ; Phase 9.0: co-op code in PRG-RAM. PRG-RAM $6000-$6FFF = data (COOP_BSS), $7000-$7FFF = code (COOP_WRAM_CODE).
 ; The code image is linked at $A000 of bank $10 (MEM_X10, page-aligned) to run at $7000; CoopBoot (bank $10, $B000)
 ; copies all COOP_WRAM_CODE_PAGES pages once at power-on (from Begin, NMI off). Nothing else may write $7000-$7FFF

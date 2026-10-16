@@ -177,7 +177,7 @@ CoopP2Window:
 	LDA playerState
 	CMP #PLAYER_STATE_DEAD
 	BEQ @in
-	JSR CoopSwap+COOP_SWAP_WIN_OFS
+	JSR CoopSwapOut					;(9.5) the swap back; A = COOP_P2_OUT: P2 may borrow a life from P1 (CoopBorrowTick)
 	JSR CoopP2Deactivate
 	JMP @restore
 @in:
@@ -196,6 +196,7 @@ CoopP2Window:
 @swapback:
 	JSR CoopSwap+COOP_SWAP_WIN_OFS	;P1 resident again (coopResident = 0, currentPlayer = 0)
 @restore:
+CoopBankRestore:					;(9.5) also the end of CoopBorrowTick: $A000 := the bank on the stack (A = it)
 	PLA
 	CMP prgBankB					;$A000 always holds prgBankB (Rule 9), so equal = nothing to do
 	BEQ @banksok
@@ -550,27 +551,16 @@ CoopAnimateP2:
 CoopRoundStartP2:
 	LDA coopMode
 	BEQ @done
-	LDA ctxOther_playerLives		;(7a) the other player is out (no lives left): he stays out until a continue
-	BEQ @done
-	LDA roundFlags
-	PHA
-	LDA wideScrollDir
-	PHA
-	JSR CoopSwap
-	LDA #.LOBYTE(CODE_08812A)
-	STA bankedSub
-	LDA #.HIBYTE(CODE_08812A)
-	STA bankedSub+1
-	LDA #.BANK(CODE_08812A)
-	STA bankedSubBank
-	LDA #.BANK(CODE_0884AB)			;the caller's bank stays at $8000
-	STA bankedSubRetBank
-	JSR RunBankedSub
-	JSR CoopSwap
-	PLA
-	STA wideScrollDir
-	PLA
-	STA roundFlags
+	LDA ctxOther_playerLives		;(7a) the other player is out (no lives left): not spawned; (9.5) he may borrow a
+	BNE :+							;life from the resident in this round: coopP2Active = COOP_P2_OUT, request unarmed,
+	LDA #COOP_P2_START_X			;and physical P2's spot is the default (he did not start this round)
+	STA coopP2StartX
+	LDA #COOP_P2_OUT
+	STA coopP2Active
+	STA coopBorrowReq
+	RTS
+:	LDA #.BANK(CODE_0884AB)			;the caller's bank stays at $8000
+	JSR CoopInitOther				;(9.5) moved to PRG-RAM (shared with the rejoin)
 	JMP CoopSpawnP2
 @done:
 	RTS
@@ -594,10 +584,14 @@ CoopSpawnP2:
 	BCC :+
 	LDA #COOP_P2_XMAX
 :	STA objX+OSLOT_P2
+	STA coopP2StartX				;(9.5) physical P2's spot (with exchanged roles the resident is P2 and also started at
+	LDA #.LOBYTE(anPlayerL_ID)		;$1F, so the value is the mirror of P1's start either way)
+; CoopSpawnAt (9.5): the rest of the spawn, also used by a rejoin (CoopBorrowTick). A = objAnim (anPlayerL_ID or
+; anPlayerR_ID), objX / objY of OSLOT_P2 already set. Clobbers A/X/Y.
+CoopSpawnAt:
+	STA objAnim+OSLOT_P2
 	LDA #$01
 	STA objState+OSLOT_P2
-	LDA #.LOBYTE(anPlayerL_ID)
-	STA objAnim+OSLOT_P2
 	LDA #.HIBYTE(anPlayerL_ID)
 	STA objAnimHI+OSLOT_P2
 	STA objChrSlot+OSLOT_P2			;(A = 0) CHR slot 0, palette 0 (see coop_notes Phase 3)
@@ -616,7 +610,23 @@ CoopSpawnP2:
 	STA bubbleSlotEnd
 	LDA #BUBBLE_SLOTS-2
 	STA bubbleSlotLast
-	JMP CoopAnimateP2				;load the first frame of anPlayerL
+	JMP CoopAnimateP2				;load the first frame of objAnim
+.assert .HIBYTE(anPlayerL_ID) = 0 && .HIBYTE(anPlayerR_ID) = 0, error, "CoopSpawnAt: player anims need high byte 0"
+
+; (9.5) CoopSwapOut: the P2 window's swap back when P2 is out (A = COOP_P2_OUT for CoopP2Deactivate). CoopP2DeactOut: the
+; same for CoopResidentOut's role exchange. Clobber A/X (as CoopSwap / CoopP2Deactivate).
+CoopSwapOut:
+	JSR CoopSwap+COOP_SWAP_WIN_OFS
+	LDA #COOP_P2_OUT
+	RTS
+CoopP2DeactOut:
+	LDA #COOP_P2_OUT
+	BNE CoopP2Deactivate
+.assert COOP_P2_OUT = COOP_BORROW_UNARMED, error, "CoopP2Deactivate stores one value into coopP2Active and coopBorrowReq"
+; (9.5) layout: the routines from CoopNewGame on keep their p94c addresses (page crossings of the hot co-op code)
+COOP_95_PAD = 194 - (* - CoopRoundStartP2) - 54		;54 = CoopDespawnAll + CoopP2Deactivate (asserted at CoopNewGame)
+.assert COOP_95_PAD >= 0, error, "CoopRoundStartP2 .. CoopP2Deactivate grew past its p94c length"
+	.res COOP_95_PAD, $FF
 
 ; ---------------------------------------------------------------------------------------------
 ; CoopP2Deactivate: P2 leaves the round. Called from CODE_0FE36B (bank F), the routine that despawns
@@ -641,11 +651,12 @@ CoopDespawnAll:
 	LDA #$00
 	STA coopKills
 	STA coopKills+1
-CoopP2Deactivate:
+CoopP2Deactivate:					;(9.5) A = the new coopP2Active and coopBorrowReq: 0 (CoopDespawnAll falls in with A = 0),
+	STA coopP2Active				;or COOP_P2_OUT = COOP_BORROW_UNARMED (CoopSwapOut / CoopP2DeactOut: out, may borrow)
+	STA coopBorrowReq
 	JSR CoopShotRestore
 	JSR CoopForRestore				;(9.1) a sprite slot lent for the last DrawObjects call gets its bank back
 	LDA #$00
-	STA coopP2Active
 	STA objState+OSLOT_P2
 	LDA #BUBBLE_SLOTS
 	STA bubbleSlotEnd
@@ -658,6 +669,7 @@ CoopP2Deactivate:
 ; shadow context starts clean, then ResetLivesAndScore runs for P2 (3 lives, 1 heart, score 0).
 ; Clobbers A/X/Y.
 ; ---------------------------------------------------------------------------------------------
+.assert * - CoopRoundStartP2 = 194, error, "(9.5) CoopNewGame must keep its p94c offset from CoopRoundStartP2"
 CoopNewGame:
 	LDA #$00
 	STA coopRoles					;(7a) physical P1 resident again (currentPlayer = 0 was set by the caller)
@@ -1156,7 +1168,7 @@ CoopResidentOut:
 	EOR #$01
 	STA coopRoles
 	STA currentPlayer				;= coopResident (0) ^ coopRoles: still the partner's id
-	JSR CoopP2Deactivate			;the out player (now in ctxOther / slot OSLOT_P2) leaves the round
+	JSR CoopP2DeactOut				;the out player (now in ctxOther / slot OSLOT_P2) leaves the round; (9.5) he may borrow
 	LDA livesCurrentPos				;HUD refresh (score, lives, hearts) for the new resident player
 	ORA #$03
 	STA livesCurrentPos
@@ -1225,6 +1237,10 @@ CoopDoorOther:
 ; him while CODE_099D3B runs (it indexes the extra-life accumulator by currentPlayer and increments playerLives;
 ; bubblesLifespanLevel and the HUD flag livesCurrentPos are shared). Bank 9 is mapped. Clobbers A/X/Y.
 ; ---------------------------------------------------------------------------------------------
+; (9.5) CoopTickOther: the RoundUpdate hook (LDA coopP2Active / BEQ / JSR, N = bit 7 of coopP2Active on entry):
+; $80 -> CoopExtraLifeOther, COOP_P2_OUT -> CoopBorrowTick (PRG-RAM).
+CoopTickOther:
+	BPL CoopTickBorrow
 CoopExtraLifeOther:
 	JSR @xchg
 	JSR CODE_099D3B
@@ -1237,6 +1253,8 @@ CoopExtraLifeOther:
 	EOR #$01
 	STA currentPlayer
 	RTS
+CoopTickBorrow:
+	JMP CoopBorrowTick
 
 ; =============================================================================================
 ; Phase 7a: score attribution (COOP_CODE). Scores granted by code that runs with P1 resident go to the player
@@ -2539,6 +2557,145 @@ CoopBlkBase:							;first tile of block A B C D
 CoopImgBlk:								;player image offset / 2 (< $20) -> block (tables 1 and 2; $12/$14 = SmallL/R, table 2)
 	.byte $FF, $00, $01, $02, $00, $01, $02, $03, $03, $00, $00, $FF, $FF, $FF, $FF, $FF
 .include "coop/coop_pairtab.inc"
+
+; =============================================================================================
+; Phase 9.5: respawn spots, borrowing a life (PRG-RAM; see docs/coop_notes.md, Phase 9.5).
+; =============================================================================================
+
+; CoopSpot: the spot of an in-place respawn (CoopRespawnX, bank 5) or of a rejoin (CoopBorrowTick), per PHYSICAL player.
+; A = physical player (0 / 1), C = 1 if the partner is in the round. Round 20 with the partner in the round and the camera
+; not at the round start (wideHScroll != 1): the screen centre COOP_RESPAWN_XMID, facing right (Phase 8). Else the
+; player's own spot: P1 X 31 facing right (the original respawn), P2 coopP2StartX facing left (his start of the round).
+; Out: A = X, Y = facing (COOP_DIR_L / COOP_DIR_R = anPlayerL_ID / anPlayerR_ID). X clobbered.
+CoopSpot:
+	BCC @own
+	LDX wideRound
+	BEQ @own
+	LDX wideHScroll
+	DEX
+	BEQ @own
+	LDA #COOP_RESPAWN_XMID
+	BNE @right
+@own:
+	TAX
+	BNE @p2
+	LDA #COOP_P1_SPOT_X
+@right:
+	LDY #COOP_DIR_R
+	RTS
+@p2:
+	LDA coopP2StartX
+	LDY #COOP_DIR_L
+	RTS
+.assert COOP_DIR_L = anPlayerL_ID && COOP_DIR_R = anPlayerR_ID, error, "CoopSpot: facing = playerDir = player anim id"
+
+; CoopInitOther: the other player's per-life init by the code P1's uses (CODE_08812A, bank 8, run with the other
+; player swapped in; was inline in CoopRoundStartP2). CODE_08812A also writes two shared bytes (wideScrollDir = 0,
+; roundFlags &= 7); they are saved and restored. A = the bank the caller has at $8000 (RunBankedSub maps it back).
+; Clobbers A/X/Y.
+CoopInitOther:
+	STA bankedSubRetBank
+	LDA roundFlags
+	PHA
+	LDA wideScrollDir
+	PHA
+	JSR CoopSwap
+	LDA #.LOBYTE(CODE_08812A)
+	STA bankedSub
+	LDA #.HIBYTE(CODE_08812A)
+	STA bankedSub+1
+	LDA #.BANK(CODE_08812A)
+	STA bankedSubBank
+	JSR RunBankedSub
+	JSR CoopSwap
+	PLA
+	STA wideScrollDir
+	PLA
+	STA roundFlags
+	RTS
+
+; CoopBorrowTick: RoundUpdate end (CoopTickOther) while coopP2Active = COOP_P2_OUT: co-op, the other player (ctxOther,
+; physical currentPlayer ^ 1) is out and the resident plays alone. Bank 9 at $8000 (RoundUpdate).
+;   request: A and B both held on the out player's own pad (pad 2 for physical P2, pad 1 for physical P1) and one of them
+;            pressed this tick (a new A+B press) -> coopBorrowReq. Only once armed: coopBorrowReq = COOP_BORROW_UNARMED
+;            from the moment he is out (or a round starts with him out) until a tick with A and B both released, so an
+;            A+B held or mashed from the play before his last death does not borrow.
+;   a request is dropped unless: normal play (roundFlags & $3F = 0: no round clear, prize drop, bonus game or round
+;            change pending), the resident is not dying (playerState != PLAYER_STATE_DEAD) and has a spare life
+;            (playerLives >= COOP_LEND_MIN); it waits while slot OSLOT_P2 still holds a bubble.
+;   borrow:  resident lives - 1, the other player lives 1 and 1 heart, his per-life init (CoopInitOther), spawned at his
+;            spot (CoopSpot with the partner in the round; CoopSpawnAt: coopP2Active = $80, bubble budget 19) with the
+;            respawn's 120 i-frames; HUD redraw (both blocks), the extra-life sound.
+; The caller's $A000 bank (prgBankB) is mapped back (CoopSpawnAt maps AnimTable). Clobbers A/X/Y.
+CoopBorrowTick:
+	LDX #heldP2-heldP1				;the out player's pad
+	LDA currentPlayer
+	BEQ :+
+	LDX #$00
+:	LDA heldP1,X
+	AND #KEY_A|KEY_B
+	BNE @held
+	BIT coopBorrowReq				;A and B released: arm (A = 0)
+	BVC @req
+	STA coopBorrowReq
+	BEQ @req						;(A = 0: no request)
+@held:
+	CMP #KEY_A|KEY_B
+	BNE @req
+	AND pressedP1,X
+	BEQ @req
+	BIT coopBorrowReq
+	BVS @rts						;not armed yet
+	STA coopBorrowReq				;request (1..3)
+@req:
+	LDA coopBorrowReq
+	AND #KEY_A|KEY_B				;0 or COOP_BORROW_UNARMED: no request
+	BEQ @rts
+	LDA roundFlags
+	AND #$3F
+	BNE @drop
+	LDA playerState
+	CMP #PLAYER_STATE_DEAD
+	BEQ @drop
+	LDA playerLives
+	CMP #COOP_LEND_MIN
+	BCC @drop
+	LDA objState+OSLOT_P2
+	BNE @rts						;slot OSLOT_P2 still a bubble: wait
+	DEC playerLives
+	LDA #$01
+	STA ctxOther_playerLives
+	STA ctxOther_playerHearts
+	LDA prgBankB
+	PHA
+	LDA #.BANK(RoundUpdate)
+	JSR CoopInitOther
+	LDA #COOP_RESPAWN_Y
+	STA objY+OSLOT_P2
+	LDA currentPlayer
+	EOR #$01
+	SEC
+	JSR CoopSpot
+	STA objX+OSLOT_P2
+	STY ctxOther_playerDir
+	TYA
+	JSR CoopSpawnAt
+	LDA #COOP_RESPAWN_INV
+	STA ctxOther_playerInvFrames
+	LDA livesCurrentPos
+	ORA #$03
+	STA livesCurrentPos
+	LDA #snExtraLife_ID
+	STA soundTrigger
+	LDA #$00
+	STA coopBorrowReq
+	JMP CoopBankRestore				;$A000 back to the caller's bank (pushed above), race-free order (Rule 9)
+@drop:
+	LDA #$00
+	STA coopBorrowReq
+@rts:
+	RTS
+
 
 ; =============================================================================================
 ; Phase 9.0: CoopBoot (bank $10, $B000; COOP_BOOT segment). Called once from Begin with bank $10 mapped at $A000 (Rule 9

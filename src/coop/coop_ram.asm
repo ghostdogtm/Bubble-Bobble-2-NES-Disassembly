@@ -117,3 +117,10 @@ coopTouchSkip:  .res 1          ; (9.2) CoopP2BubbleTouch: the last bubble whose
 
 ; Phase 9.3: OAM order.
 coopDrawSave:   .res 1          ; (9.3) CoopDrawBodyC / CoopP2ObjHide: objState of the player drawn first, hidden for the body's scan
+
+; Phase 9.5: respawn spots, borrowing a life.
+coopP2StartX:   .res 1          ; physical P2's spot X of this round: the X CoopSpawnP2 gave slot OSLOT_P2 (the mirror of the
+                                ; resident's start), or COOP_P2_START_X when the round started with the other player out
+coopBorrowReq:  .res 1          ; 1..3: the out player pressed A+B; CoopBorrowTick lends him a life when slot OSLOT_P2 is
+                                ; free (the request is dropped when a condition fails, and at every CoopDespawnAll);
+                                ; COOP_BORROW_UNARMED ($40): out, but A and B not yet released since; 0: armed, no request

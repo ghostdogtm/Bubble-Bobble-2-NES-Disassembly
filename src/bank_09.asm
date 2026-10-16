@@ -3573,9 +3573,9 @@ CODE_099796:
 	JMP (roundAnimSub)				;C - - - - - 0x0137B4 04:97A4: 6C 59 00
 @bganimret:
 	JSR CODE_099D3B				;C - - - - - 0x0137B7 04:97A7: 20 3B 9D
-	BIT coopP2Active			;(co-op 7a) the other player's extra life
-	BPL :+
-		JSR CoopExtraLifeOther
+	LDA coopP2Active			;(co-op 7a) $80: the other player's extra life; (9.5) COOP_P2_OUT: his borrow check
+	BEQ :+						;(same size and 1P cycles as BIT / BPL; CODE_099BE7 reloads A)
+		JSR CoopTickOther
 :
 	JSR CODE_099BE7				;C - - - - - 0x0137BA 04:97AA: 20 E7 9B
 	JSR CheckPause				;C - - - - - 0x0137BD 04:97AD: 20 58 9A
