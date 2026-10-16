@@ -3371,3 +3371,8 @@ banks 1 572, D 492, 5 262 (259 with `COOP_FORCE`), 2 231, 6 134. Free PRG banks 
   482k calls). A RAM copy of the round's two flow tables (via `ram_0027` and `flowAdr`) at round setup would remove both
   switches (~25 cycles per flow call) but changes the bank-6 mapping pattern; not measured further.
 - The co-op swap (~1.2k cycles per co-op tick) is still the largest co-op item (liveness, later; out of scope here).
+
+### Owner decision (2026-10-16): terrain probe guards stay
+(a) CheckWall, CheckFloor, `CODE_0FF852` and `CODE_0FF8F3` keep their per-call terrain-bank guard (10 cycles). Not taken:
+(b) drop the guards (~87 cycles per co-op tick, ~56 per 1P tick) with a new rule "call only right after GetTile", a static
+check of the 42 call sites and a harness runtime check.
