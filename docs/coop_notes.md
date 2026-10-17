@@ -3863,3 +3863,115 @@ No crash, hang, memory corruption or gameplay fault was found.
 `verify.py full` / `quick`, the full p90verify / p95verify sets, hudcheck sets, pairchk / windowchk / flick, menutest,
 pixcmp, `perf.py regress / stats / profile` (the main session runs the 1P regress), a restore with physical P1 dying at the
 setup, a natural clock pickup (the freeze was forced by a Lua write), more seeds of the soak.
+
+## Phase 9.7: P2 visible during the pause, checker update
+
+The two fixes from the Phase 10 QA findings 1 and 2. Code commit `0e800b7`, tools commit `22b4c23`. Builds `p97a`
+(`p97af` = `COOP_FORCE`, `p97at` = `COOP_SWAPTEST`). Scripts and results: `tmp/coop_scripts/p97/` (`STATE.md`,
+`mkverify97.py` -> `coopverify.py`, `p97lua.py`, `run*_*.txt`, `runs/`, `shots/`).
+
+| build | md5 |
+|---|---|
+| p97a | `9e37c2553d375c1e9074ba7ec5fb2cbc` |
+| p97af (`COOP_FORCE`) | `faa4de23a8f963f824217363045c1372` |
+| p97at (`COOP_SWAPTEST`) | `b2cf3ab9172815482e7dbf8a2a25c045` |
+
+### Fix 1: P2 stays visible during the pause
+**Cause.** The pause draws once. Pad 1 START -> `CheckPause` -> `StorePauseObj`: the PAUSE text in slot 1
+(`SpawnAnnounceObj`), `AnimateNonBubbles`, `DrawObjects` with `ram_0475` = 2. In co-op this goes through
+`CoopDrawPair` -> `CoopDrawObjectsC` -> `CoopDrawBodyC`. With `ram_0475` != 0 that takes the original order
+(`DrawObjectsBody`), which draws only slots < 2: the resident and the text. While paused, `nmiBankedSub` is
+`CheckPause`, which draws nothing, so the OAM from the press stays on screen until the unpause. Slot 39 (P2, or
+physical P1 after a role exchange and a rejoin) is not in it.
+
+**Change.** The original-order exit of `CoopDrawBodyC` (`@orig`, PRG-RAM) now jumps to `CoopDrawPause` (bank F, fixed)
+instead of `DrawObjectsBody`. If `roundPaused` is set and slot 39's `objState` != 0, it draws in this order:
+`DrawObjectsBody` (slots 0-1 as before), then slot 39 through `CoopDrawSlot` (one step of the body's slot loop at
+`oamBufferPos`, after the resident and the text), then slot 39's chrBank write, last, as the even-tick co-op order
+makes it. Otherwise it jumps to `DrawObjectsBody` as before. The exit is the same as `DrawObjectsBody`'s (X = 0, Z = 1,
+N = 0, C = 1).
+- Only reached with `coopP2Active` bit 7 set: `CoopDrawBodyC` is only called from `CoopDrawPair` paths. Slot 39 is
+  drawn whatever it holds, so the role-exchanged case (physical P1 in slot 39) is covered.
+- Same sprite and frame as at the press: slot 39 is not animated by the press (`AnimateNonBubbles` covers slots
+  0-19), and nothing runs while paused. `CoopDrawPair` has already applied its pair bank / image-copy redirect
+  for this call (memo key with the announcement's `sprPrgBank`). After the body it writes `chrBankC` := pair bank as
+  in play, so both frames come from one KB.
+- `roundPaused` is set only by `CheckPause` (and by the bonus-game pause in bank 7, where `coopP2Active` is 0). The
+  announcements with `ram_0475` = 2 and `roundPaused` 0 (`CODE_089CEA`) and the blink case keep the plain body.
+- The enemies, bubbles and items stay hidden while paused, as in the original game (slots >= 2).
+- 1P never reaches it (`CoopDrawObjects` -> `CoopDrawObjects1P`). ROM against p96a: 2 bytes differ (the JMP operand in
+  the WRAM code image) plus 34 bytes added at the end of bank F. No label moved.
+
+| site | change | bytes |
+|---|---|---|
+| `CoopDrawBodyC` `@orig` (PRG-RAM) | `JMP DrawObjectsBody` -> `JMP CoopDrawPause` | 0 |
+| `CoopDrawPause` (bank F, after `CoopRoundRoles`) | new | +34 |
+
+Cost: 1P 0. Co-op: +10 cycles per draw that takes the original order without a pause (blink of the player who would be
+last; announcements): the test of `roundPaused` and one extra JMP. A pause press: one `CoopDrawSlot` (~550 cycles),
+once.
+Free space after the phase: bank F 151 (was 185); PRG-RAM code area 5, banks 1 572, D 492, 5 281 (278 with
+`COOP_FORCE`), 9 7 (1 with `COOP_SWAPTEST`): unchanged.
+
+### Fix 2: verify.py uses the current co-op checker (owner-approved tools change)
+**Checker.** A new copy, not an edit of p10verify: `p97/mkverify97.py` generates `p97/coopverify.py` from
+`p10/p10verify.py`, following the earlier copies (p90 -> p95 -> p10). `p10verify` stays as the record of the Phase 10
+runs. Every p5 / p6 / p6b / p7 / Phase 8 / 9.5 / 9.6 / Phase 10 check and test option stays. Changes:
+- p8lua's 8.6 bonus window now ends at the entry of `CoopRoundRoles` (the round setup, before the 9.6 restore), or at
+  `CoopRoundStartP2` if that comes first. Only one end runs: the second finds no window. Before, the window ended at
+  `CoopRoundStartP2`, after the restore. The restore's `currentPlayer` 1 -> 0 was then counted on every tick from the
+  setup to the round start (`v86_player_changed` 160 in p10's j4), and the partner context check saw the swapped
+  `ctxOther` (`v86_partner_ctx_changed` 1). The checks at the end (partner lives / hearts / score / context) now run at
+  the setup, so they still cover the whole bonus game.
+- `p97lua.py`: a pause check. At the first `CheckPause` call of each pause, in co-op, it counts the visible OAM
+  entries near slot 0 and near slot 39. With bit 7 set, slot 39 in use and no entry near it, it counts
+  `v_pause97_slot39_hidden` (a p7 violation). Also scenario `q1`: j1's opening (P1 out, borrow, physical P1 rejoined
+  in slot 39 with roles 1), then a pause pair.
+- Default tag `coopverify`; runs in `p97/runs/TAG`.
+
+**verify.py** (`tools/perf/verify.py`; `perf.py`, its regress rules and the harness are unchanged):
+- The `p90verify` step is now `coopverify` (`COOPVERIFY` = `p97/coopverify.py`, cwd `tmp/coop_scripts`). It runs the
+  same scenarios: full = the 32 of `FULL_P90`, quick = c01 c17 c50 c64 w20n bn2. The `nb` option is not passed on the
+  command line: `p95lua.optparts` sets it for every old scenario, as in 9.5's p95verify set. Results go to
+  `final_coopverify.txt`.
+- Verdict `v_coop` (was `v_p90`, same rule): PASS when every run has rc 0 and the checker reports 0 violations (p5 p6
+  p6b p7 and Phase 8). Runs whose HUD line says ERRORS are counted and shown as information only.
+- Full mode no longer reuses hudcheck's r2 / p8 runs. Those runs contain p90verify's Lua, not coopverify's, so the
+  reuse test can never match, and the step would wait for both hudcheck sets and then run the 23 scenarios anyway.
+  coopverify runs all 32 itself (23 more Mesen runs than before).
+- `--p90ref` / `--p90tag` became `--cvref` / `--cvtag` (the old names still work; default tag `cvfy`, quick `cvfyq`).
+  cmpverify reads `steps/coopverify.out` and writes `final_coopverify_cmp.txt`. The reference must be an earlier
+  coopverify output.
+- The run-time estimate for a new step is computed per tick, like the old p90verify's (`"coopverify" in step`).
+- tractor 7 / 8 are dropped. They ran the "1P rule" model on the `--prev` build. That was 9.3's pre-tractor reference
+  (p92g, where the model held). Every later `--prev` has the co-op tractor, so the steps could only FAIL (as in 9.5's
+  pipeline), and they never tested BUILD. Pointing them at p92g would only re-test a fixed old ROM. BUILD's own 1P
+  r50 check (tractor 6) and the co-op checks (1-5) stay.
+- Everything else in the pipeline is unchanged.
+
+### Runs (owner budget: 6 Mesen runs, 323 s of wall time)
+| run | command | ticks | result |
+|---|---|---|---|
+| r1 | `coopverify p97a --shots 1350,2550 f1 q1` | 3000 + 2800 | rc 0 x2, violations 0 (all kinds), HUD OK. Pause f1 (t1302, roles 0): slot 39 at (224,45), 6 entries near it, 17 visible. Pause q1 (t2502, roles 1, physical P1 rejoined in slot 39 at (31,196), physical P2 resident at (80,84)): 6 near, 17 visible |
+| r2 | `coopverify p97a j4` | 11800 | rc 0, violations 0 including Phase 8 (p10 on p96a: 161). BONUS over at t10460 (8360 ticks) = the `CoopRoundRoles` entry, restore right after (roles 1 -> 0), HUD OK |
+| cvfyq | `python p97/coopverify.py p97a --tag cvfyq c01 b2` (verify.py's quick command line, 2 of its scenarios) | 3000 + 4500 | rc 0, violations 0, HUD OK; b2 ran with `nb = true`; `v_coop` -> PASS |
+| r4 | `coopverify p96a f1` (control, before the fix) | 3000 | `v_pause97_slot39_hidden` 1: no entry near slot 39, 11 visible (p97a: 17 = P2's 6 sprites more); every other counter as in r1's f1 |
+
+`v_coop` on p10's run3 output (j2 + j4 on p96a with the old window): FAIL (Phase 8 161), as expected. The job list
+of both modes was checked by importing `verify.pipeline` (no runs). Screenshots `tmp/coop_scripts/p97/shots/`:
+`f1_t01350_pause_roles0_P2_visible.png`, `q1_t02550_pause_roles1_P1_in_slot39_visible.png`.
+Deviation: r2 (j4) is 11800 ticks, over the 5000-tick limit per run. The restore after a bonus game cannot be reached
+sooner, because the bonus game alone lasts ~8400 ticks.
+
+### Not run (owner budget)
+`verify.py full` / `quick` (the whole pipeline), the full coopverify set, hudcheck / pairchk / windowchk / flick,
+menutest, pixcmp, swapcheck, `perf.py regress / stats` (the main session runs the 1P regress). `p97af` / `p97at` were
+only assembled. Not probed: a pause while slot 39 blinks or dies, a pause in round 20 with the camera moved, the
+first full-mode run of coopverify on all 32 scenarios (their HUD Lua and the 9.6 / Phase 10 checks have so far run
+only on the Phase 10 and 9.7 scenarios plus c01 / b2).
+
+### Open items
+- Announcements that set `ram_0475` = 2 in co-op (`CODE_089CEA`, the round-number text) still draw slots 0-1 only. It
+  is not checked whether P2 is spawned at that point.
+- `verify.py full` takes longer: 23 more coopverify runs, and each coopverify run is heavier than a p90verify run
+  (HUD Lua, 9.6 and Phase 10 checks). The step has no ETA history at its first run.
