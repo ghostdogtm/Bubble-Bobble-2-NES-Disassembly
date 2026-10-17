@@ -2,14 +2,17 @@
 """One-at-a-time verification runner: runs the checker scripts in parallel under one scheduler, with a lock, progress,
 a status command, hang detection, a run cache and a clean kill of every child process.
 
-  verify.py full  BUILD [--prev P] [--alt A] [--base BASE] [--p90ref FILE] [--jobs N] [--out DIR] [--no-cache]
+  verify.py full  BUILD [--prev P] [--alt A] [--base BASE] [--cvref FILE] [--jobs N] [--out DIR] [--no-cache]
                                  the checks of tmp/coop_scripts/p93/verify_all.sh (Phase 9.3), parametrised:
                                  BUILD (BUILDf = COOP_FORCE and BUILDt = COOP_SWAPTEST must exist), P = co-op compare
                                  base (default p92g), A = optional intermediate build (default none; the 9.3 run used
                                  p93a: RAM identity P -> A, ramdiff A -> BUILD, stats vs A), BASE = 1P base (base),
-                                 --p90ref = an earlier p90verify output for cmpverify (skipped if not given)
-  verify.py quick BUILD [...]    development subset (~5 min): 1P regress (12 scenarios), p90verify on c01 c17 c50 c64
-                                 w20n bn2, hudcheck c01,c20,c50, pairchk c01 c50, menutest
+                                 --cvref = an earlier coopverify output for cmpverify (skipped if not given)
+  verify.py quick BUILD [...]    development subset: 1P regress (12 scenarios), coopverify on c01 c17 c50 c64 w20n
+                                 bn2, hudcheck c01,c20,c50, pairchk c01 c50, menutest
+The co-op rule checker is COOPVERIFY (Phase 9.7: tmp/coop_scripts/p97/coopverify.py, generated from p10verify: every
+p5 .. Phase 8 / 9.5 / 9.6 rule and test option; it replaced the Phase 9.0 p90verify, whose rules predate 9.5 / 9.6).
+The old scenarios get its nb option by themselves (the out player's A/B masked at the borrow check: "out stays out").
   verify.py status               what the running (or last) pipeline is doing, from tmp/verify/progress.json
 Results: OUT (default tmp/verify/BUILD_MODE)/final_*.txt (the names of p93's verify_all.sh), run.log (console lines),
 summary.txt (PASS / FAIL / INFO per step with its result files).
@@ -60,6 +63,7 @@ PROGRESS = os.path.join(VDIR, "progress.json")
 HISTORY = os.path.join(VDIR, "history.json")
 CACHE = os.path.join(VDIR, "cache")
 COOP = os.path.join(TMP, "coop_scripts")
+COOPVERIFY = "p97/coopverify.py"   # the current co-op checker (cwd COOP); its runs go to p97/runs/TAG
 MESEN_DIR = os.path.join(TMP, "mesen")
 PERF = os.path.join(ROOT, "tools", "perf", "perf.py")
 HEARTBEAT = 30
@@ -466,7 +470,7 @@ class Runner:
 
     def _run(self, req, conn, cmd, step, script, label, hk, lua, key):
         m = re.search(r"ticks = (\d+)", lua)
-        est = self.prev_runs.get(hk) or (int(m.group(1)) if m else 3000) * (0.022 if "p90verify" in step
+        est = self.prev_runs.get(hk) or (int(m.group(1)) if m else 3000) * (0.022 if "coopverify" in step
                                                                             or step in ("hud_r2", "hud_p8") else 0.008)
         limit = max(3 * est, est + 300)
         if req.get("timeout"):
@@ -674,8 +678,6 @@ class Job:
 FULL_P90 = "c01 c05 c17 c20 c22 c50 c64 d13 d04 d25 o1 o2 o3 o4 o6 b2 b70 b70o b70p b40 o6b o7b w20n w20r w20k w20x " \
            "w20y w20b bn1 bn2 bn3 bn4".split()
 COOP_C = "c01 c05 c17 c20 c22 c50 c64".split()
-HUD_R2 = "d13 d04 d25 o1 o2 o3 o4 o6 b2 b70 b70o b70p b40 o6b".split()     # hudcheck.py SET_R2 / SET_P8
-HUD_P8 = "w20n w20k w20x w20y w20b bn1 bn2 bn3 bn4".split()
 
 
 def v_last(pattern, ok):
@@ -705,13 +707,15 @@ def v_info(pattern=None):
     return f
 
 
-def v_p90(txt):
+def v_coop(txt):
+    """coopverify verdict: PASS = every run rc 0 and 0 violations (p5 p6 p6b p7, Phase 8); HUD errors shown as info"""
     rcs = re.findall(r"^===== \S+ rc=(\S+)", txt, re.M)
     v = re.findall(r"===== VIOLATIONS (.*)", txt)
     v8 = re.findall(r"===== PHASE 8 VIOLATIONS (\d+)", txt)
     ok = rcs and all(r == "0" for r in rcs) and v and all(n == "0" for n in re.findall(r"(?<![a-z\d])\d+", v[-1])) and v8[-1:] == ["0"]
+    hud = len(re.findall(r"^  HUD jobs .* -> ERRORS", txt, re.M))
     return ("PASS" if ok else "FAIL"), f"{len(rcs)} runs, rc!=0: {sum(r != '0' for r in rcs)}, violations {v[-1] if v else '?'}," \
-                                       f" phase 8 {v8[-1] if v8 else '?'}"
+                                       f" phase 8 {v8[-1] if v8 else '?'}, runs with HUD errors {hud}"
 
 
 def md5_func(builds):
@@ -734,9 +738,9 @@ def pipeline(a):
     if a.mode == "quick":
         J.append(Job("regress1p", f"1P regress {BASE} -> {B} (12 scenarios)", perf("regress", BASE, B, "--reuse-base"),
                      out=("final_regress.txt", 0), verdict=v_last(r"^REGRESSION", "PASS")))
-        J.append(Job("p90verify", f"p90verify {B} (6 co-op runs)",
-                     py("p90/p90verify.py", B, "--tag", "vfyq", "c01", "c17", "c50", "c64", "w20n", "bn2"), cwd=COOP,
-                     out=("final_p90verify.txt", 0), verdict=v_p90))
+        J.append(Job("coopverify", f"coopverify {B} (6 co-op runs)",
+                     py(COOPVERIFY, B, "--tag", "cvfyq", "c01", "c17", "c50", "c64", "w20n", "bn2"), cwd=COOP,
+                     out=("final_coopverify.txt", 0), verdict=v_coop))
         J.append(Job("hud_coop", "hudcheck c01,c20,c50", py("p90/hudcheck.py", B, "--scen", "c01,c20,c50", "--tag", a.hudtag),
                      cwd=COOP, out=("final_hudcheck.txt", 0), filt=r"^ {8}lag", verdict=v_last(r"^HUDCHECK", "PASS")))
         J.append(Job("pairchk", "pairchk c01 c50", py(chk("pairchk.py"), B, "c01", "c50"), cwd=a.checkers,
@@ -747,18 +751,15 @@ def pipeline(a):
     builds = [B, B + "f", B + "t"] + ([A] if A else [])
     J.append(Job("md5", "ROM md5", func=md5_func(builds), out=("final_md5.txt", 0), verdict=v_info()))
     # long runs first (the runner starts steps in this order when slots allow; LPT works on their runs)
-    # p90verify takes the runs of hudcheck's r2 / p8 sets (hudcheck's Lua there = p90verify's Lua + the HUD add-on;
-    # same build and scenario): --reuse waits for each of them and checks ROM md5, exit code 0 and the Lua; its own
-    # runs (the other scenarios) go on meanwhile; if a hudcheck run is missing when both sets are done, it runs it
-    reuse = [s for s in FULL_P90 if s in HUD_R2 + HUD_P8]
-    done = ",".join(os.path.join(a.out, "steps", f"hud_{s}.done") for s in ("r2", "p8"))
-    J.append(Job("p90verify", f"p90verify {B} ({len(FULL_P90)} scenarios, {len(reuse)} from hudcheck's runs)",
-                 py("p90/p90verify.py", B, "--tag", a.p90tag, "--reuse", a.hudtag, "--reuse-scen", ",".join(reuse),
-                    "--reuse-done", done, *FULL_P90), cwd=COOP, out=("final_p90verify.txt", 0), verdict=v_p90))
-    if a.p90ref:
-        J.append(Job("cmpverify", f"cmpverify {a.p90ref} vs this run",
-                     py(chk("cmpverify.py"), a.p90ref, os.path.join(a.out, "steps", "p90verify.out")), deps=["p90verify"],
-                     out=("final_p90verify_cmp.txt", 0), verdict=v_info(r"differences")))
+    # coopverify (Phase 9.7; replaced p90verify) runs all its scenarios itself: hudcheck's r2 / p8 runs carry
+    # p90verify's Lua, not coopverify's, so the old --reuse of those runs cannot apply (the HUD Lua is in its own runs)
+    J.append(Job("coopverify", f"coopverify {B} ({len(FULL_P90)} scenarios)",
+                 py(COOPVERIFY, B, "--tag", a.cvtag, *FULL_P90), cwd=COOP, out=("final_coopverify.txt", 0),
+                 verdict=v_coop))
+    if a.cvref:
+        J.append(Job("cmpverify", f"cmpverify {a.cvref} vs this run",
+                     py(chk("cmpverify.py"), a.cvref, os.path.join(a.out, "steps", "coopverify.out")), deps=["coopverify"],
+                     out=("final_coopverify_cmp.txt", 0), verdict=v_info(r"differences")))
     for s in ("r2", "p8", "coop", "1p"):           # started heaviest first; the file keeps verify_all.sh's order
         J.append(Job("hud_" + s, f"hudcheck set {s}", py("p90/hudcheck.py", B, "--scen", s, "--tag", a.hudtag), cwd=COOP,
                      out=("final_hudcheck.txt", ("coop", "p8", "r2", "1p").index(s)), filt=r"^ {8}lag",
@@ -766,7 +767,9 @@ def pipeline(a):
         J[-1].header = f"== set {s}\n"
     trac = [(B, "coop", "both", "c50 t50a t50b"), (B, "coop", "p2only", "c50 t50a t50b"),
             (B, "coop", "p1only", "c50 t50a t50b"), (B, "coop", "p2high", "c50 t50a"), (B, "coop", "p1high", "c50 t50a"),
-            (B, "p1", "both", "r50"), (P, "p1", "both", "c50 t50a t50b"), (P, "p1", "p2only", "c50 t50a")]
+            (B, "p1", "both", "r50")]
+    # (9.7) 9.3's steps 7 / 8 ("1P rule" on the --prev build) are dropped: they were 9.3's pre-tractor reference (p92g);
+    # every later --prev has the co-op tractor, so they could only FAIL, and they never tested BUILD
     for i, (b, rule, mode, sc) in enumerate(trac):
         J.append(Job(f"tractor{i + 1}", f"tractor {b} {rule} {mode} {sc}", py(chk("tractor.py"), b, rule, mode, *sc.split()),
                      cwd=a.checkers, out=("final_tractor.txt", i), verdict=v_last(r"^RESULT", "PASS")))
@@ -1009,10 +1012,12 @@ def main():
         s.add_argument("--prev", default="p92g", help="co-op compare base (flick, tractor, stats, pixcmp)")
         s.add_argument("--alt", default=None, help="intermediate build (RAM identity / ramdiff / stats); none by default")
         s.add_argument("--base", default="base", help="1P base build")
-        s.add_argument("--p90ref", default=None, help="earlier p90verify output for cmpverify")
+        s.add_argument("--cvref", "--p90ref", dest="cvref", default=None,
+                       help="earlier coopverify output (final_coopverify.txt) for cmpverify")
         s.add_argument("--checkers", default=os.path.join(COOP, "p93"), help="dir of ramdiff/swapcheck/windowchk/pairchk/"
                                                                             "flick/tractor/cmpverify.py")
-        s.add_argument("--p90tag", default="vfy", help="p90verify run tag (run files in p90/runs/TAG)")
+        s.add_argument("--cvtag", "--p90tag", dest="cvtag", default="cvfy",
+                       help="coopverify run tag (run files in p97/runs/TAG)")
         s.add_argument("--hudtag", default="hud93", help="hudcheck tag (1P base runs are reused from p90/runs/TAG)")
         s.add_argument("--jobs", type=int, default=4, help="Mesen processes at once (4 = measured best on 4 cores)")
         s.add_argument("--max-steps", type=int, default=10, help="step scripts at once")
@@ -1023,8 +1028,8 @@ def main():
     a = p.parse_args()
     if a.mode == "status":
         return cmd_status(a)
-    if a.p90ref:
-        a.p90ref = os.path.abspath(a.p90ref)
+    if a.cvref:
+        a.cvref = os.path.abspath(a.cvref)
     a.checkers = os.path.abspath(a.checkers)
     return cmd_pipeline(a)
 
