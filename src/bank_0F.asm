@@ -5387,6 +5387,31 @@ SwapPrgBankB:
 	RTS							;C - - - - - 0x01FF7E 07:FF6E: 60
 
 
+; ---------------------------------------------------------------------------------------------
+; CoopRoundRoles (co-op 9.6): CODE_088000 (bank 8, the round setup) calls this instead of CODE_0FE36B.
+; CODE_0FE36B despawns every object (CoopDespawnAll: P2 out of the round, shot bytes and lent sprite slot put
+; back). Then, if the physical players are exchanged (coopRoles = 1: physical P2 resident since P1 went out, and
+; P1 has since borrowed a life) and the non-resident (physical P1) has lives, the roles are put back exactly as the
+; game-over path of CoopResidentOut does: CoopSwapCtx (contexts and powerUps bits; the objects are all despawned and
+; slot 0 is set up again by CODE_0880C8 right after), coopResident / coopRoles / currentPlayer = 0. So physical P1
+; walks in on the left as the resident and CoopRoundStartP2 spawns physical P2 on the right. coopRoles is always 0
+; outside co-op (CoopReset, CoopNewGame), so 1P only pays the test. Clobbers A/X (CODE_088000 reloads both).
+; ---------------------------------------------------------------------------------------------
+CoopRoundRoles:
+	JSR CODE_0FE36B
+	LDA coopRoles
+	BEQ @rts
+	LDA ctxOther_playerLives		;physical P1 out (0 lives): the roles stay exchanged (he is not spawned)
+	BEQ @rts
+	JSR CoopSwapCtx					;physical P1's context native (coopResident 1, currentPlayer 1 ^ 1 = 0)
+	LDA #$00
+	STA coopResident
+	STA coopRoles
+	STA currentPlayer
+@rts:
+	RTS
+
+
 
 
 ;Vectors

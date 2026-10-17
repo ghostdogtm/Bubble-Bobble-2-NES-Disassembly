@@ -33,7 +33,7 @@ CODE_088033:
 	STA ram_054C				;C - - - - - 0x010048 04:8038: 8D 4C 05
 	STA ram_054D				;C - - - - - 0x01004B 04:803B: 8D 4D 05
 	STA bonusRewardEarned				;C - - - - - 0x01004E 04:803E: 8D 51 05
-	JSR CODE_0FE36B				;C - - - - - 0x010051 04:8041: 20 6B E3
+	JSR CoopRoundRoles			;(co-op 9.6) JSR CODE_0FE36B, then the roles put back when both players are in
 
 	LDA currentRound				;C - - - - - 0x010054 04:8044: A5 D8
 	CMP #20					;C - - - - - 0x010056 04:8046: C9 14
