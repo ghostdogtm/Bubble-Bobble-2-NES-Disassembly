@@ -3975,3 +3975,166 @@ only on the Phase 10 and 9.7 scenarios plus c01 / b2).
   is not checked whether P2 is spawned at that point.
 - `verify.py full` takes longer: 23 more coopverify runs, and each coopverify run is heavier than a p90verify run
   (HUD Lua, 9.6 and Phase 10 checks). The step has no ETA history at its first run.
+
+## Phase 9.8: cheaper player-data swap
+
+Code commit `6c693e1`. Build `p98a` (`p98af` = `COOP_FORCE`, `p98at` = `COOP_SWAPTEST`); reference `p97a`. Scripts and
+results: `tmp/coop_scripts/p98/` (`STATE.md`, `wintrace.py`, `wtsum.py`, `pcmap.py`, `livetab.md`, `regress1.txt`,
+`final_swapcheck.txt`). Pure speed change: co-op RAM identical to p97a on every tick.
+
+### Measurement: what a P2 window touches
+`p98/wintrace.py p97a` (Lua memory callbacks): inside every P2 window, i.e. from the window's swap in to its swap back,
+every read and write of every swapped byte (the 30 scalars and their `ctxOther` shadows, slot 0 and slot 39 of the 12
+object arrays, `powerUps` and its shadow), by PC, and per window the first access of each byte. Accesses made by the swap
+code itself are not counted; NMI / IRQ code that runs inside a window is. Scenarios c01 c05 c17 c20 c22 c50 c64 c40 cgo:
+19972 windows (odd 9727, even 9723, intro 522; one P2 death that ended a window, in cgo). `pcmap.py` maps a callback PC
+(the address after the accessing instruction) to the source line in every bank.
+
+Findings:
+- No shadow byte and no slot-39 byte is read or written inside any window (P1's saved state is never looked at).
+- The swap's cost is in bytes the window reads first (they need P2's value) or may write (the swap back must carry the
+  new value out). For the "written but never read" bytes (`inflateTime`, `ram_077B`, `objAnimTimer` / `Progress` /
+  `HI`) nothing can be saved: the swap back cannot know whether the window wrote them (a compare against the saved
+  value fails when the window writes P1's value), so the window still has to load and save them.
+- Two classes can be cut, both proved from the code (the trace agrees on every window):
+  - **wf** (written first in every window): `playerHeld`, `playerPressed` (`CODE_058E83` loads them from the pad
+    before anything else reads them), `ram_0078`, `hBlocked` (`CODE_058E83` calls `CODE_059AFA` for every state but
+    FLOATING, and FLOATING's handler starts with `CODE_059BD3`; both begin `LDA #0 / STA ram_0078 / STA hBlocked`;
+    nothing between the swap in and those stores reads them: the window glue, `RunBankedSub`, `roundFlags` /
+    `playerDmgType`, the pad load, `playerState`, `objY`, `currentRound`). P2's old value is dead on entry, so the swap
+    in only has to save P1's value; the swap back exchanges as before, so after the window both bytes hold exactly what
+    a full exchange leaves.
+  - **odd** (used only by the odd window's shot / bubble-touch part): `shootSlot`, `shootInitialSlot`. Every reference
+    in the source: bank 9 `HandleShooting` / `SpawnExtraBubbles` (lines 1637-1797), bank 9 `UpdateBubbles` (the
+    `CPX ctxOther_shootSlot` skip, `JSR CODE_0FFAB9`; P1 resident, outside the windows), bank B `CODE_0B9630` and bank F
+    `CODE_0FF9E8` .. `CODE_0FFB19` (called from the enemy / boss AI in banks 8 / B, from `UpdateBubbles` and from
+    `CoopP2Shoot`), and the co-op shot code (`CoopP2Shoot`, `CoopShotExchange`, `CoopCaptureOther`). None of it is
+    reachable from the player update (bank 5 at `$8000`, no bank call into 8 / 9 / B), from `PlayerCheckEnemyCollision`
+    (its only call is `AddScore`), from the window glue before the odd part, or from the NMI / IRQ. The trace: no access
+    in any even or intro window, and in odd windows only from `HandleShooting` (bank 9 `$8B58`-`$8C45`), `CoopP2Shoot`
+    and `CODE_0FFAB9`.
+- `ram_007A` was never touched in the traces, but the FLOATING handler reads and writes it (no window floated), so it
+  stays in the swap.
+
+Liveness table (window = odd / even / intro; first access counts; reads / writes = all accesses inside windows; slot 39,
+the shadows and the DRAW arrays (9.2) are never touched and not listed):
+
+| byte | addr | first access per window: odd / even / intro (R = read first, W = write first, n = none) | reads / writes in windows | decision |
+|---|---|---|---|---|
+| ram_0062 | $0062 | R5644 W1355 n2728 / R5644 W1343 n2736 / R224 W131 n167 | 11608 / 3357 | kept: read (or read first) in windows |
+| playerHeld | $0072 | W9727 / W9723 / W522 | 39296 / 19972 | wf: swap in saves only |
+| playerPressed | $0073 | W9727 / W9723 / W522 | 7494 / 19972 | wf: swap in saves only |
+| playerState | $0075 | R9727 / R9723 / R522 | 56406 / 73 | kept: read (or read first) in windows |
+| ram_0076 | $0076 | R8865 W18 n844 / R8860 W12 n851 / R522 | 53846 / 4501 | kept: read (or read first) in windows |
+| playerDir | $0077 | R9727 / R9723 / R522 | 51140 / 10421 | kept: read (or read first) in windows |
+| ram_0078 | $0078 | W9727 / W9723 / W522 | 31853 / 40212 | wf: swap in saves only |
+| hBlocked | $0079 | W9727 / W9723 / W522 | 83761 / 59916 | wf: swap in saves only |
+| ram_007A | $007A | n9727 / n9723 / n522 | 0 / 0 | kept: reachable (floating state reads/writes it), the traces never float |
+| ram_007B | $007B | R9727 / R9723 / R522 | 87831 / 23770 | kept: read (or read first) in windows |
+| playerDmgType | $007C | R6938 W1884 n905 / R6928 W2060 n735 / R522 | 18066 / 4066 | kept: read (or read first) in windows |
+| ram_007D | $007D | R7382 W2345 / R7383 W12 n2328 / R375 n147 | 15297 / 9954 | kept: read (or read first) in windows |
+| playerHazardTrigger | $007E | R8793 W934 / R8787 W12 n924 / R522 | 18148 / 9773 | kept: read (or read first) in windows |
+| playerHazardSlot | $007F | R24 W9702 n1 / R25 n9698 / n522 | 49 / 9726 | kept: read (or read first) in windows |
+| powerUps | $00DE | R4379 n5348 / R1171 n8552 / R141 n381 | 6265 / 30 | kept: read (or read first) in windows |
+| playerInvFrames | $0477 | R8804 W17 n906 / R8800 W12 n911 / R522 | 21724 / 7225 | kept: read (or read first) in windows |
+| playerHearts | $0478 | R19 W18 n9690 / R13 W12 n9698 / n522 | 32 / 61 | kept: read (or read first) in windows |
+| playerLives | $0479 | R9727 / R9723 / R522 | 20034 / 64 | kept: read (or read first) in windows |
+| ram_047A | $047A | R4 W20 n9703 / R6 W12 n9705 / n522 | 10 / 52 | kept: read (or read first) in windows |
+| ram_047B | $047B | R6674 W1222 n1831 / R6657 W1233 n1833 / R229 W126 n167 | 47469 / 28730 | kept: read (or read first) in windows |
+| inflateTime | $047C | W517 n9210 / W602 n9121 / W20 n502 | 0 / 1139 | kept: written in windows, never read; whether it was written is unknown at the swap back |
+| extraBubbles | $047D | R1241 W466 n8020 / R1240 W527 n7956 / R141 W17 n364 | 2622 / 1139 | kept: read (or read first) in windows |
+| ram_047E | $047E | R5696 W1417 n2614 / R5684 W1427 n2612 / R228 W136 n158 | 21078 / 3294 | kept: read (or read first) in windows |
+| shootSlot | $0513 | R2727 W1069 n5931 / n9723 / n522 | 5934 / 2113 | odd: exchanged around the odd tail only |
+| shootDir | $0514 | R3287 W497 n5943 / W590 n9133 / W20 n502 | 13148 / 1107 | kept: read (or read first) in windows |
+| shootTrigger | $0515 | R9229 W497 n1 / W590 n9133 / W20 n502 | 9726 / 2196 | kept: read (or read first) in windows |
+| shootQueuedBubbles | $0516 | R1554 W60 n8113 / W12 n9711 / n522 | 3182 / 1116 | kept: read (or read first) in windows |
+| shooting | $0517 | R9725 W1 n1 / R8769 n954 / R522 | 29603 / 2155 | kept: read (or read first) in windows |
+| shootInitialSlot | $0518 | R22 W1069 n8636 / n9723 / n522 | 44 / 1069 | odd: exchanged around the odd tail only |
+| bubbleVariant | $0519 | R1554 W18 n8155 / W12 n9711 / n522 | 2113 / 30 | kept: read (or read first) in windows |
+| objState (slot 0) | $0563 | R13 W20 n9694 / R10 W13 n9700 / n522 | 24 / 33 | kept: read (or read first) in windows |
+| objY (slot 0) | $058B | R9727 / R9723 / R522 | 110376 / 48554 | kept: read (or read first) in windows |
+| objX (slot 0) | $05B3 | R9727 / R9723 / R522 | 181981 / 19799 | kept: read (or read first) in windows |
+| objAnim (slot 0) | $067B | R9631 W6 n90 / R9632 n91 / R522 | 19785 / 1949 | kept: read (or read first) in windows |
+| objAnimTimer (slot 0) | $06A3 | W464 n9263 / W1448 n8275 / W38 n484 | 0 / 1979 | kept: as inflateTime |
+| objAnimProgress (slot 0) | $06CB | W464 n9263 / W1448 n8275 / W38 n484 | 0 / 1979 | kept: as inflateTime |
+| objAnimHI (slot 0) | $071B | W463 n9264 / W1448 n8275 / W38 n484 | 0 / 1949 | kept: as inflateTime |
+| ram_077B | $077B | W1817 n7910 / W1811 n7912 / n522 | 0 / 3628 | kept: as inflateTime |
+
+### Change
+| site | change | bytes |
+|---|---|---|
+| `coop.inc` `COOP_CTX_SCALARS` | optional third argument: class `wf` (4 entries) or `odd` (2 entries); the shadow list (`coop_ram.asm`, macro takes the argument) and `swapcheck.py`'s parser are unchanged | 0 |
+| `CoopSwap` (COOP_CODE) | order now DRAW arrays, `JSR CoopSwapOdd`, `wf` scalars, `COOP_CTX_ARRAYS`, the other scalars, `powerUps`, bookkeeping: the same complete exchange (order is free: independent bytes) | +3 |
+| `CoopSwapWinOut` (equate = the `wf` part of `CoopSwap`) | the window's swap back: `wf` exchange, arrays, other scalars, `powerUps`, bookkeeping (no DRAW arrays, no `odd`) | 0 |
+| `CoopSwapWinIn` (equate, after `CoopSwap`'s RTS) | the window's swap in: `LDA x / STA ctxOther_x` for the 4 `wf` scalars, then `JMP` into the common part | +23 |
+| `CoopSwapCtx` | `JSR CoopSwapOdd`, the `wf` exchange (copy), `JMP CoopSwapRest`: the same complete scalar exchange | +51 |
+| `CoopSwapOdd` (equate, after `CoopSwapCtx`) | exchange of the 2 `odd` scalars, RTS (keeps Y) | +1 |
+| `CoopP2Window` (COOP_CODE2) | `JSR CoopSwapWinIn` / `JSR CoopSwapWinOut` instead of `CoopSwap+COOP_SWAP_WIN_OFS`; odd part `JSR CoopSwapOdd / CoopP2Shoot / CoopP2BubbleTouch / CoopSwapOdd` | +6 |
+| `CoopSwapOut` | `JSR CoopSwapWinOut` | 0 |
+| `CoopReset` | moved from COOP_CODE to the end of bank F (power-on only; segment `PRG_BANK_F` in `coop_engine.asm`, which is assembled after `bank_0F.asm`) | -75 / +75 |
+
+The new entry points are equates (`= *`), not labels: `labels.txt` gets no new name, so the checkers that attribute
+writes by the routine label (`coopverify` / p5 / p6b: ctxOther writers `CoopSwap`, `CoopSwapCtx`; the p6b "inside
+CoopSwap" range up to the label after `CoopSwapCtx`) see every swap write where they saw it before. Unchanged callers of
+the complete swap: `CoopProjCheckP2` / `CoopProjSwapBack`, `CoopItemOtherTest` / `CoopItemEnd`, `CoopInitOther`,
+`CoopResidentOut`, the role restore (`CoopRoundRoles`), `CoopResetOther` / continue / game over (`CoopSwapCtx`), the
+`COOP_SWAPTEST` hook. The shot-byte restore (`CoopShotExchange` before the swap in, `CoopP2Deactivate` after the swap
+back) is outside the window and unchanged; `UpdateBubbles` reads `ctxOther_shootSlot` after the window, when the odd part
+has put P2's value back.
+
+Equivalence: after the window's swap back every byte is what the two complete exchanges left before. `wf`: in = shadow :=
+P1, the player update writes P2's value, out = exchange (shadow := P2's new value, native := P1). `odd`: native = P1 and
+shadow = P2 outside the odd part, exchanged and exchanged back around it; the P2-death exit (`CoopSwapOut`) leaves the
+window before the odd part. Everything else as before.
+
+### Cycles
+Static, per window swap including the JSR, typical case (the eq entries equal; 9.2 numbers): p97a in = out = ~541.
+p98a: swap in -52 (the `wf` exchange; -62 when `playerPressed` differs) -32 (`odd`) +31 (`wf` save 28, JMP 3) = ~488;
+swap back -32 = ~509. The odd part pays 2 x (JSR + 32 + RTS) = 88. Per co-op tick: even and intro ticks -85 (-95), odd
+ticks +3 (-7): about -41 to -45 per tick on average. Complete swaps (`CoopSwap`) +12 (JSR / RTS): 612 instead of 600 in
+the natural swap test; `CoopSwapCtx` +15. Measured (`stats p98a --vs p97a`, play ticks):
+
+| scen | play p97a | play p98a | d_play | lag p97a | lag p98a |
+|---|---|---|---|---|---|
+| c01 | 19712 | 19686 | -26 (-0.13%) | 304 | 303 |
+| c05 | 22424 | 22384 | -40 (-0.18%) | 159 | 157 |
+| c17 | 30469 | 30425 | -44 (-0.15%) | 808 | 808 |
+| c20 | 16170 | 16128 | -42 (-0.26%) | 0 | 0 |
+| c22 | 20640 | 20597 | -43 (-0.21%) | 75 | 75 |
+| c50 | 30738 | 30693 | -45 (-0.15%) | 776 | 775 |
+| c64 | 31233 | 31166 | -67 (-0.21%) | 1172 | 1153 |
+
+(lag = lag NMIs per 3000 ticks, perf's column.) The swap was ~1.08k cycles per co-op tick before (two window swaps);
+this removes ~4 % of it. That is what liveness allows: the rest are bytes the window reads first or may write.
+
+### Verification (owner budget)
+1. Builds p98a `22a9dcb28b689ba2411b33922d8e5bb8`, p98af `d58f618abe6217b378f4801d565155d6`, p98at
+   `d7bfe753556822f809f61929ebfcb380`.
+2. Co-op RAM identity, `perf.py regress p97a p98a --reuse-base --scen c01 c05 c17 c20 c22 c50 c64`: REGRESSION PASS 7/7,
+   every tick identical; c01 c05 c50 c64 note "lag pattern differs from tick N" (audio-engine RAM excluded after it, as
+   in every earlier speed change); c17 c20 c22 lag pattern unchanged. No other difference. (Run once.)
+3. `p93/swapcheck.py p98at r01 --inject` and `natural` (the two verify.py steps): 2032 swaps / 20443952 checks / 0
+   failures; 3446 / 34670206 / 0. The complete swap still exchanges every byte, changes nothing else, and is undone by
+   the second swap.
+4. `perf.py stats p98a --vs p97a` on the 7 co-op scenarios (reused the regress runs, no new run): table above.
+Mesen runs: trace 1 + 8 (391 s), regress 7 (184 s), swapcheck 2 (106 s): 18 runs, about 11.5 minutes of wall time.
+Not run (owner budget): 1P regress (the main session runs it), verify.py, coopverify, windowchk, pairchk, hudcheck.
+
+### Checkers
+- `coopverify` (p97): no change needed (writers and ranges by label, see above; it hooks `CoopP2Window`, `CoopSwap`'s
+  entry and the JSRs to `CoopSwap`, `CoopSwapCtx`, `CoopP2Deactivate`, which are all still there).
+- `windowchk.py` (p93, informational step of verify.py) toggles "in window" on the one window entry; with two entries it
+  would see only the swap backs. `tmp/coop_scripts/p98/windowchk.py` is a copy that finds both JSR targets in
+  `CoopP2Window` (first = swap in, the other = swap back) and works on older builds too (checked: p98a `$D199` / `$CF8E`,
+  p97a `$CFD6` for both). Not run. verify.py still points at p93 (`--checkers`); tools/perf was not changed.
+- `swapcheck.py` (p93) parses the scalar list with `M (\w+)`: the class argument does not disturb it.
+
+### Free space after the phase
+COOP_CODE 15 B (18), COOP_CODE2 23 (29), bank F 76 (151), bank 9 7, bank 5 281, bank 1 572, bank D 492, PRG-RAM code 5.
+
+### Open items
+- Odd ticks gain nothing (the `odd` exchange moved into a JSR pair inside the window); inlining it in the window would
+  save 24 cycles per odd tick but needs ~48 B in bank E and puts ctxOther writes in `CoopP2Window` (checker whitelist).
+- Further cuts would need write detection for the "written, never read" bytes (hooks in 1P code) or a smaller player
+  context (code changes in bank 5): not done.
+- `windowchk`'s p98 copy has to be used (verify.py `--checkers`, or copying it to p93) before the next full pipeline.
