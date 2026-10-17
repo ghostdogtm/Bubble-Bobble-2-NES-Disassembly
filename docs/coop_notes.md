@@ -3614,3 +3614,152 @@ ROM md5 `0057ff6f5a916a8fe27805fb3b2fa10a` (p95bf `587ea3bd...`, p95bt `7070438e
   checker copy counts it as info).
 - Natural (random-input) play borrows quickly whenever a player is out and the partner has lives (24 borrows in 32 runs):
   the old Phase 7 scenarios now need the `nb` test option to keep their "out" games.
+
+## Phase 9.6: roles put back at the round start
+
+Code commit `19e41b8`. Owner request: players are always on their own sides at a round start. Before this phase, after
+P1 went out (role exchange, `coopRoles` = 1) and came back by borrowing a life (9.5: as the non-resident in slot 39), the
+roles stayed exchanged until a game over / continue / new game, so at every later round start physical P2 walked in on
+the left and physical P1 was spawned on the right. Now the roles are put back at the next round setup in which both
+players have lives. Build `p96a` (`p96af` = `COOP_FORCE`, `p96at` = `COOP_SWAPTEST`). No test was run (owner order, see
+"Not tested").
+
+### Restore point: the round setup `CODE_088000`, right after its despawn-all
+`CODE_088000` (bank 8) is the round setup. Its `JSR CODE_0FE36B` now calls `CoopRoundRoles` (bank F), which runs
+`CODE_0FE36B` first and then the restore. Why there:
+- **No objects of the old round remain.** `CODE_0FE36B` clears `objState` / `objAnimHI` of all 40 slots, and its hook
+  `CoopDespawnAll` takes P2 out of the round (`coopP2Active` = 0, `coopBorrowReq` = 0, slot 39 free, bubble budget 20/19),
+  puts exchanged shot bytes back (`CoopShotRestore`, so `coopShotSwapped` = 0 before the swap, as every swap requires),
+  gives a lent sprite slot back (`CoopForRestore`) and resets the owner records (`coopBubOwner`, `coopKiller`,
+  `coopKills`). Nothing in flight can carry an old owner across the restore.
+- **Before anything per player of the new round.** Right after it come the slot-0 setup and the palette (`CODE_0880C8`,
+  colour by `LDX #0` since 7b-2), the resident's per-life init (`CODE_08812A`), the descent / boss-cave fade, the walk-in
+  (`CODE_0884AB`) and `CoopRoundStartP2`, which inits and spawns the non-resident. All of them now see physical P1
+  resident.
+- **Every round start passes it.** `CODE_088000` is entered as `updateSub` / `nmiBankedSub` from the round clear
+  (`CODE_0FFE9A` table entry 0, also after a bonus game and a boss round), the continue / round restart (`CODE_058DBE`),
+  `CODE_0589D5` (bank 5) and the debug round select. Rounds 20 / 40 go through it before the boss-cave fade
+  (`CODE_0880BB` -> `CODE_059CD8` -> `CODE_059D9A` -> walk-in). The only round start without it is the adventure start
+  (`CODE_0587D4`, new game), where `CoopNewGame` has already cleared `coopRoles`.
+- Not at `CODE_0FE36B` in general: it also runs at the bonus-round start, title, new game, continue and ending. The bonus
+  game stays the resident's game as before (8.6); the restore follows at the next round setup.
+
+### The restore
+```
+CoopRoundRoles:  JSR CODE_0FE36B
+                 LDA coopRoles / BEQ @rts             ; roles not exchanged (always in 1P)
+                 LDA ctxOther_playerLives / BEQ @rts  ; physical P1 out: roles stay exchanged
+                 JSR CoopSwapCtx                      ; coopResident 0 -> 1, currentPlayer = 1 ^ 1 = 0
+                 LDA #0 / STA coopResident / STA coopRoles / STA currentPlayer
+@rts:            RTS
+```
+It is the game-over branch of `CoopResidentOut` (`@nopartner`) in effect, behind the despawn and with the "partner has
+lives" test. `CoopSwapCtx` (not `CoopSwap`): the objects are despawned and slot 0 is set up again by `CODE_0880C8`; see
+"Slot 0 position" below.
+
+Why it keeps everything with the right physical player:
+- `CoopSwapCtx` exchanges every `COOP_CTX_SCALARS` byte (lives, hearts, state, i-frames, direction, shot bytes, damage /
+  hazard bytes, ...) and the per-player `powerUps` bits (candy, shoe) with `ctxOther`, then sets `currentPlayer =
+  coopResident ^ coopRoles`. After the stores `coopResident` = 0 and `coopRoles` = 0, so the invariant `currentPlayer =
+  coopResident ^ coopRoles` = the physical id of the native context holds (0 = physical P1 native, physical P2 in
+  `ctxOther`).
+- Everything else is keyed by the physical id, not by the slot or the residency, so it needs no change: score digits
+  (`scoreDigits` / `scoreDigitsP2` by `currentPlayer` / `HudPlayerData`), extra-life accumulators (`$049A-$04A0` by
+  `currentPlayer`), pad index (`currentPlayer`), `coopKills` / `coopBubOwner` / `coopKiller` (physical ids; reset by the
+  despawn just before), `coopHazOwner` (set per hazard test), `coopP2StartX` (physical P2's spot; written again by
+  `CoopSpawnP2` this round start), `coopTarget` / camera bytes (per tick), the 9.1 draw caches (per slot, keyed by the
+  slot's image bytes).
+- HUD: both blocks are drawn by physical player (7b-2) from the native variables when he is `currentPlayer`, else from
+  `ctxOther`. The swap and the `currentPlayer` change are one step inside the logic, so the HUD shows the same numbers
+  in the same blocks before and after; no HUD flag is set (the round start's HUD init redraws anyway).
+- Palette: slot 0's colour is `PlayerSpecificColor[0]` for any resident since 7b-2; P2's object uses palette 0 too. Nothing
+  visible changes.
+
+### Slot 0 position (walk-in)
+`CODE_0FE36B` keeps `objX` / `objY`; `CODE_0884AB` walks slot 0 from where it is to (`$1F`, `$C4`). `CoopSwapCtx` leaves the
+object arrays alone, so physical P1 walks in from the spot where physical P2 (the old resident) ended the round: exactly
+the path and length slot 0 would have had without the restore, so the round-start timing is unchanged. Exchanging the
+arrays too (`CoopSwap`) would make him start from his own last position, but slot 39's X/Y are only his when he was in
+the round at its end (after a bonus game, or after a stretch with slot 39 back in the bubble budget, they are another
+object's), so a stale position could lengthen the walk-in by up to ~200 ticks. Cosmetic only; option for the owner below.
+
+### State before / after (both players in, roles exchanged)
+| | before (`CoopRoundRoles`, after `CODE_0FE36B`) | after |
+|---|---|---|
+| native context | physical P2 | physical P1 |
+| `ctxOther` | physical P1 (lives >= 1) | physical P2 (lives >= 1) |
+| slot 0 / slot 39 | all `objState` 0; slot 0 X/Y = P2's end position; slot 39 X/Y stale | unchanged (set up later by `CODE_0880C8` / walk-in / `CoopSpawnP2`) |
+| `coopResident` / `coopRoles` / `currentPlayer` | 0 / 1 / 1 | 0 / 0 / 0 |
+| `coopP2Active` / `coopBorrowReq` / `coopShotSwapped` | 0 / 0 / 0 (despawn) | unchanged |
+| `livesCurrentPos` | unchanged | unchanged |
+
+Then, in the same round start: `CODE_0880C8` (slot 0, colour index 0), `CODE_08812A` for physical P1, walk-in to `$1F`,
+`CoopRoundStartP2`: `ctxOther_playerLives` (physical P2) != 0 -> `CoopInitOther` + `CoopSpawnP2` -> physical P2 at `$E1`
+facing left in slot 39, `coopP2Active` = `$80`, `coopP2StartX` = `$E1`. The P2 windows then run physical P2 with
+`currentPlayer` = 1 (pad 2, P2's digits): a normal co-op game.
+
+### Audit of the paths into a round start
+| path | `coopRoles` at `CODE_088000` | non-resident lives | result |
+|---|---|---|---|
+| 1P (any) | 0 (CoopReset, CoopNewGame) | - | test only (`LDA / BEQ`), no RAM write |
+| co-op, no exchange | 0 | - | nothing |
+| P2 out (roles 0) | 0 | - | nothing; `CoopRoundStartP2` -> `$40` as before |
+| P1 out, no rejoin | 1 | 0 | nothing: roles stay exchanged, physical P2 plays alone (required) |
+| P1 rejoined (borrow) in an earlier round, both in | 1 | >= 1 | restore |
+| P1 rejoined in this round, then the round is cleared | 1 | >= 1 | the borrow round ends with roles exchanged (no mid-round swap); restore at the next setup |
+| P1 rejoined, then out again | 1 | 0 | nothing (he is out) |
+| P1 rejoined, then physical P2 (resident) goes out | 0: `CoopResidentOut` swaps mid-round and sets `coopRoles` 1 ^ 1 = 0 (7a) | - | nothing at the setup (already put back) |
+| P1 dying (slot 39) when the round is cleared, lives >= 1 left | 1 | >= 1 | restore; `CODE_08812A` then ends his death state natively, as `CoopInitOther` did before |
+| P1 dying on his last life when the round is cleared | 1 | 0 | nothing; he is out at the round start (as before) |
+| round clear -> bonus game -> next round | 1 during the bonus game (`StartBonusRound` calls `CODE_0FE36B` directly) | >= 1 | bonus game played by the resident (physical P2) as before (8.6); restore at the round setup after it |
+| rounds 20 / 40 (boss-cave fade), round-20 camera | as above | | restore at `CODE_088000`, before the fade and the walk-in; camera bytes are shared / per tick |
+| game over / continue | 0 (`CoopResidentOut` put them back before the game over) | | nothing; `CoopContinue` resets both, round restart through `CODE_088000` |
+| new game (adventure start, no `CODE_088000`) | 0 (`CoopNewGame`) | | nothing |
+| ending | not a round setup | | not changed (a 1-player screen; `coopRoles` is cleared by the next `CoopNewGame`) |
+
+The resident always has lives >= 1 at a round setup: a resident at 0 lives that is not dying is handled at the end of
+`RoundUpdate` (`CoopResidentOut`: swap to the partner, or game over), and the round clear waits while the resident is dying.
+Other checks: `CODE_088000` runs as a banked NMI sub with `coopResident` = 0 (never inside a P2 window). Before the hook it
+reads only `playerHearts` (the unreached "hearts 0 -> lose a life" branch, 7a.3), i.e. the old resident's; hearts are
+never 0 there for either player. A/X are reloaded by `CODE_088000` after the call (`LDA currentRound`, `LDX #$00`), Y is
+kept (`CoopSwapCtx` preserves Y). Banks: `CoopRoundRoles` and `CODE_0FE36B` (bank F) and `CoopSwapCtx` (bank E) are
+fixed-bank code; no switch.
+
+### Sites and bytes
+| site | where | change | bytes |
+|---|---|---|---|
+| `CODE_088000` | bank 8 | `JSR CODE_0FE36B` -> `JSR CoopRoundRoles` | 0 |
+| `CoopRoundRoles` | bank F, end of `PRG_BANK_F` (`$FF2B`) | new | +28 |
+
+No other address moved: `labels.txt` of p96a and p95b differ only by the new label, and the ROMs differ in 30 bytes (the
+JSR operand and the new routine).
+
+### Cost
+1P: once per round setup, `JSR` / `RTS` + `LDA` / `BEQ` = 19 cycles; 0 per play tick. Co-op: the same, plus one
+`CoopSwapCtx` (a few hundred cycles) at a round setup with a restore. Per tick: 0.
+
+### Builds
+| build | md5 |
+|---|---|
+| p96a | `45d7fbc5756316788d2ba14dedf237f2` |
+| p96af (`COOP_FORCE`) | `db15a93df064dec2acd4b0aa5bce12ed` |
+| p96at (`COOP_SWAPTEST`) | `bc2d3a539173dbc53e7c01c5ee062d03` |
+
+Free space after the phase: bank F 185 (was 213), bank 5 281 (278 with `COOP_FORCE`), bank 9 7 (1 with `COOP_SWAPTEST`),
+bank 8 8, bank 1 572, bank D 492, PRG-RAM code area 5, COOP_CODE2 unchanged.
+
+### Not tested
+Owner order: no test, Mesen run, `verify.py`, `perf.py regress` / `stats` / `run`, probe or pipeline was run in this
+phase; only the three builds above. The main session runs the 1P regression (`regress base p96a --reuse-base`; expected
+PASS: 1P writes no new RAM, the extra stack depth is in the excluded stack page). Not checked dynamically: a co-op game
+with a role exchange, a borrow by physical P1 and a following round start (expected: physical P1 walks in on the left,
+physical P2 spawns at `$E1`, HUD blocks unchanged). The 9.5 checker copy (`p95verify`) still allows `coopRoles` = 1 until a
+continue / new game (`v_alone_act`); for this phase it would need the rule "after `CoopRoundRoles` with both lives > 0,
+`coopRoles` = 0, `currentPlayer` = 0".
+
+### Open items
+- Walk-in start: after a restore physical P1 walks in from physical P2's end position (see "Slot 0 position"). Owner
+  option: also exchange `objX` / `objY` of slots 0 and 39 when slot 39 was a player at the round end (needs a flag, since
+  `coopP2Active` is already 0 there).
+- Checker rule / probe for the restore (above), when tests are allowed again.
+- From 9.5, still open: `ram_051A` across a continue; natural play borrows quickly.
