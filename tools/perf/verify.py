@@ -63,6 +63,8 @@ PROGRESS = os.path.join(VDIR, "progress.json")
 HISTORY = os.path.join(VDIR, "history.json")
 CACHE = os.path.join(VDIR, "cache")
 COOP = os.path.join(TMP, "coop_scripts")
+# windowchk: the Phase 9.8 copy (finds the window's two swap entries CoopSwapWinIn / CoopSwapWinOut; older builds too)
+WINDOWCHK = os.path.join(COOP, "p98", "windowchk.py")
 COOPVERIFY = "p97/coopverify.py"   # the current co-op checker (cwd COOP); its runs go to p97/runs/TAG
 MESEN_DIR = os.path.join(TMP, "mesen")
 PERF = os.path.join(ROOT, "tools", "perf", "perf.py")
@@ -794,7 +796,7 @@ def pipeline(a):
                      out=(f"final_stats_coop_a_vs_{P}.txt", 0), verdict=v_info(r"TOTAL")))
     J.append(Job("profile", f"profile {B} co-op", perf("profile", B, "--scen", *COOP_C, "--top", "400"), deps=["runcoop"],
                  out=("final_profile_coop.txt", 0), verdict=v_info(r"estimated busy")))
-    J.append(Job("windowchk", "windowchk", py(chk("windowchk.py"), B, *COOP_C, "c40", "c70", "cnat", "cgo"), cwd=a.checkers,
+    J.append(Job("windowchk", "windowchk", py(WINDOWCHK, B, *COOP_C, "c40", "c70", "cnat", "cgo"), cwd=os.path.dirname(WINDOWCHK),
                  out=("final_windowchk.txt", 0), verdict=v_info()))
     J.append(Job("pairchk", "pairchk set", py(chk("pairchk.py"), B, "set"), cwd=a.checkers, out=("final_pairchk.txt", 0),
                  verdict=v_info(r"^TOTAL")))

@@ -4141,3 +4141,9 @@ COOP_CODE 15 B (18), COOP_CODE2 23 (29), bank F 76 (151), bank 9 7, bank 5 281, 
 
 ### Owner decision (2026-10-17): co-op sounds
 The owner played two-player co-op and found the sounds fine. Plan item 9.3 (audio check) is closed without changes.
+
+### verify.py: windowchk from p98 (2026-10-17, owner request)
+The windowchk step of `verify.py full` now runs `tmp/coop_scripts/p98/windowchk.py` (constant `WINDOWCHK`), the copy
+that finds both window swap entries of 9.8 (`CoopSwapWinIn` / `CoopSwapWinOut`). Other checkers still come from
+`--checkers` (p93). Check on c01: p98 copy on p98a = 3542 windows, 4 full swaps, no accesses (same as the p93 script on
+p97a); the p93 script on p98a sees only 1770 windows and reports the window's own reads/writes as accesses.
