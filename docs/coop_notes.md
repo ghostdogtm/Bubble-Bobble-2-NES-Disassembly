@@ -4147,3 +4147,18 @@ The windowchk step of `verify.py full` now runs `tmp/coop_scripts/p98/windowchk.
 that finds both window swap entries of 9.8 (`CoopSwapWinIn` / `CoopSwapWinOut`). Other checkers still come from
 `--checkers` (p93). Check on c01: p98 copy on p98a = 3542 windows, 4 full swaps, no accesses (same as the p93 script on
 p97a); the p93 script on p98a sees only 1770 windows and reports the window's own reads/writes as accesses.
+
+### 9.8 follow-up: P2_bad in the fs23 charge run (no code change)
+`pairchk --charge fs23` on p98a: P2_bad 14 (keys `bad_P2_5B0058/5B005A_other_430006/490004`); p97a / p96a: 0. Cause: not
+the swap, but the charge style's input, which is generated per polled frame (`chargelua`), so a lag change changes the
+play. The two runs' csv are identical up to tick 987: p97a lagged there (logic 28833 cycles), p98a did not (28738, the 9.8
+saving); from tick 988 the frame count and from tick 989 pad 2 differ, and p98a plays a different game from then on.
+In that game P2 meets the known 9.1 residual (Phase 9.1, "Open items"): at ticks 1726-1739 (`p98/stuckchk*.py`, 5 runs) P2
+is in `playerState` `$0C` with `playerDir` = 3 (LEFT and RIGHT held together: `UpdatePlayerDir` stores held >> 6 = 3, the
+generator holds both), and the `$0C` handler's `LDY playerDir / LDA DATA_059952,Y / JSR CODE_0599FF` (bank 5 `CODE_0599BB`,
+a 2-entry table, original code) reads past the table: anim `$A5` (`anInvaderDie`, CHR bank `$5B`), written by the player
+update inside P2's window (P2 resident, bank 5 `CODE_0599FF`). With no sprite slot holding or lending `$5B` (R2-R5 =
+`43/49 50 59 5C`), P2 is drawn from the wrong KB: the same class P1 showed 38-96 times in earlier `fsset` runs. The
+per-tick-input co-op identity (7 scenarios, every tick equal to p97a) is unaffected. No fix in 9.8; the out-of-table read
+is original 1P behaviour (LEFT+RIGHT together is impossible on a stock pad) and a change would be a game change for the
+owner to decide (e.g. clamp `playerDir` to 1-2 in that handler, both modes).
