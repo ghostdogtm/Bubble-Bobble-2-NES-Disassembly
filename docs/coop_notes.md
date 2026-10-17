@@ -3763,3 +3763,8 @@ continue / new game (`v_alone_act`); for this phase it would need the rule "afte
   `coopP2Active` is already 0 there).
 - Checker rule / probe for the restore (above), when tests are allowed again.
 - From 9.5, still open: `ram_051A` across a continue; natural play borrows quickly.
+
+### Owner decision (2026-10-17): walk-in start after a role restore stays as is
+After the 9.6 restore, physical P1 floats to the start from the spot where physical P2 ended the round (slot 0 X/Y are
+not exchanged). Cosmetic only; the owner keeps it for now. Option on record: exchange slot 0 / slot 39 objX/objY with
+the roles, guarded by a flag because slot 39 can hold another object's position (e.g. after a bonus game).
