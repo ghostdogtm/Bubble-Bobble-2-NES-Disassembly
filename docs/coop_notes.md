@@ -3768,3 +3768,98 @@ continue / new game (`v_alone_act`); for this phase it would need the rule "afte
 After the 9.6 restore, physical P1 floats to the start from the spot where physical P2 ended the round (slot 0 X/Y are
 not exchanged). Cosmetic only; the owner keeps it for now. Option on record: exchange slot 0 / slot 39 objX/objY with
 the roles, guarded by a flag because slot 39 can hold another object's position (e.g. after a bonus game).
+
+## Phase 10: QA (light)
+
+Build under test `p96a` (md5 `45d7fbc5756316788d2ba14dedf237f2`, HEAD `77c8556`). Owner order: a simple, cheap pass
+(about 20 short Mesen runs, about 30 minutes of emulation); no game code changed. Scripts and results:
+`tmp/coop_scripts/p10/` (`STATE.md`, `p10lua.py`, `mkverify10.py` -> `p10verify.py`, `run*_*.txt`, `runs/run1..run5`,
+`shots/`).
+
+### Coverage map (plan "Phase 10 - QA matrix")
+COVERED = checked in an earlier phase and nothing in that area changed since; STALE = checked, but 9.5 / 9.6 changed
+code on that path; GAP = never checked in a game. Totals: **11 COVERED, 2 STALE, 5 GAP** (the 1P regression is the main
+session's).
+
+| item | earlier evidence | status | this phase |
+|---|---|---|---|
+| R1-R5 basics: movement, bubbles, pops, food | Phases 3-5 (c01 c05, cnat; p3/p4/p5verify 0 violations); p95b `verify.py full` | COVERED (9.6 is a test-and-return with roles 0) | every p10 run carries the p5-p95 checks |
+| score attribution, both score displays | 7a owner model (p7verify), 7b-2 / 7b-3 hudcheck (0 job / cell / stale errors), p95b hudcheck | COVERED | hudcheck Lua in every p10 run |
+| double / triple bubbles per player | Phase 4 `--hold` set (P2: 26 queued shots, 30 extras; 0 violations) | COVERED | - |
+| candy power-up per player | 6b (candy touches P1 3 / P2 5 natural, 10 magnet; effect to the collector) | COVERED | - |
+| simultaneous same-frame shots x20 | Phase 4 counted ticks with both players' bubbles emerging (523), not same-tick shot starts | GAP | s1: 46 ticks in which both players spawned a bubble, all p4/p5 checks 0 |
+| Needler homes on the nearer player | 6a (n03 .. n55, state-6 climbs toward P1 / P2, Lua nearest recompute, 0 violations); targeting code unchanged since | COVERED | p6 checks in every run |
+| Snagger damages the attacked player only | 6a (s12 .. s58: damage P1 54 / P2 38, `CoopDamageTarget` model) | COVERED | - |
+| deaths: P1 / P2 / same tick / during the other's death | 7a o1-o6 (3 same-tick, 26 during the other's), p95b k1 / k2 | COVERED | j3 / s1 again (same-tick deaths after a borrow) |
+| death with 0 lives, continue screen | 7a o2 / o3, 7b-3 padtest (11 cases), 9.5 k1 (game over, continue after borrows) | COVERED (9.5 re-verified its out paths with p95b) | s1: 2 game overs, 2 continues |
+| wide round 20: leash, pulling, boss, shifter, respawn | Phase 8 w20n / w20r / w20k / w20x / w20y / w20b, 9.5 k20 (respawn / rejoin spots) | COVERED | j2: restore into round 20 |
+| between-round transition, both alive / one out | 7a o1 / o2 / o6, cnat, 9.5 k1 / k2 | STALE (9.6: `CoopRoundRoles` in every round setup) | j1 j2 j3 j4 s1 (below) |
+| frozen-enemies item (clock) | reading only (Phase 3: "enemies only"); no run collected a clock | GAP | f1 (forced) |
+| trash cans | Phase 5 / 6a extra run x35 (round 35 has trash cans; rounds 24 / 33 / 35) | COVERED | s1 played round 24 (role exchange, rejoin) |
+| hidden / bonus rounds | 8.6 bn1-bn4, 9.5 k3 | STALE (9.6 restore after a bonus game) | j4 |
+| EXTEND-style bonuses | none in BB2 (no EXTEND letters in the source); score extra lives: 7a, 7b-3 b2 | COVERED | - |
+| soak, pause / resume, code-region checksum | WRAM-code write guard on every harness run since 9.0; longest co-op run 14500 ticks; one pause test (k1) | GAP | s1 (20000 ticks) |
+| 9.6 role restore at the round setup (new) | none: 9.6 "Not tested" | GAP | j1 j2 j4 (+ stay cases j1, s1) |
+| borrow + death edges beyond k1-k4 (new) | 9.5 k1-k4, k20 | GAP for: lender left at x01 then out -> exchange to the borrower; resident P2 out while P1 (rejoined, roles 1) is in slot 39; same-tick deaths after a borrow | j3 |
+
+### Probes (5 invocations, 8 Mesen runs, 882 s of wall time)
+`p10verify.py` = `p95verify.py` (every p5 / p6 / p6b / p7 / Phase 8 / 9.5 check and test option) + `p10lua.py`, with the
+p95 HUD checker's Lua in the same Mesen run. New Lua checks (docstring of `p10lua.py`):
+- **9.6 restore model.** At `CoopRoundRoles`'s `LDA coopRoles` (after the despawn) both PHYSICAL players are snapshotted
+  (lives, hearts, candy / shoe bits, `playerState`, the 7 score digits, the 7 extra-life accumulator digits). At the return
+  in `CODE_088000`: kind restore (roles 1 and partner lives > 0) -> roles 0, `coopResident` 0, `currentPlayer` 0; kind
+  stay (physical P1 out) / plain -> flags unchanged; every physical value unchanged. At `CoopRoundStartP2`: slot 0 at
+  (`$1F`,`$C4`) and the flags of the kind; at the round-start `CoopSpawnAt`: slot 39 X `$E1`; at the first play tick:
+  restore -> `coopP2Active` `$80` and both objects present, stay -> `$40`, roles 1, `currentPlayer` 1. For 900 ticks after:
+  bubble spawns per physical player, `coopTarget` at tick ends.
+- **Always:** `coopP2Active` in {0, `$40`, `$80`}, `coopRoles` in {0, 1}, lives <= 99 at every co-op tick end (the p7
+  checks already cover `currentPlayer == coopResident ^ coopRoles`, `coopResident` 0, the lives model).
+- **Soak:** a hash of `$7000-$7FFF` every 64 ticks compared with the first; objX / objY / objState of the 40 slots
+  unchanged for 600 in-play ticks = frozen; the longest stretch without an in-play tick; plus the harness's WRAM-code
+  write guard and its TIMEOUT (logic stopped) test.
+
+| run | scenario | ticks | result |
+|---|---|---|---|
+| run1 | j1 (first timing) | 4900 | the rejoined P1 died naturally before the clear (no restore); scenarios re-timed with top-ups |
+| run2 | j1 (round 5) | 5000 | P1 out t1516 -> borrow t2301 (P2 3->2, P1 0->1, slot 39, roles 1) -> clear -> **restore** t2784 (roles 1->0, cp 1->0; P1 lives 2 score 300, P2 lives 2 score 7200 on both sides of the call) -> round 6: slot 0 (31,196) cp 0, P2 spawned at (225,196), first play tick `$80` roles 0 cp 0; 900 ticks: both in 635, spawns P1 40 / P2 32, target P1 342 / P2 293. Then P1 out again t3764 -> clear -> **stay** t4118 (P1 lives 0): round 7 `$40`, roles 1, cp 1, P1 not spawned |
+| run2 | j2 (round 19) | 4300 | P2 cleared round 19 alone before the borrow: **stay** into round 20, Ruckus removed -> team bonus -> bonus game with roles 1 |
+| run2 | j3 (round 1) | 4900 | borrow request waits for slot 39 (3 ticks) then borrows; P2 borrows with P1 at x02 (P1 -> x01); P1's last death -> role exchange to the borrower (t2180); P1 borrows with roles 1 (t2601); resident P2 out while P1 is in slot 39 -> mid-round swap back, roles 1 -> 0 (t3076); request refused at x01 (t3301); borrow again (t3501); natural round clear (plain); same-tick deaths of both on the first play ticks of round 2 (P2 on his borrowed life -> out, P1 respawns); P2 out at round 3 start (not spawned); game over |
+| run3 | j2 (re-timed) | 3300 | borrow t1651 -> clear -> **restore** at the round-20 setup t2088 -> boss-cave fade -> round 20: slot 0 (31,196), P2 (225,196), `$80`, roles 0; 900 ticks both in, spawns 27 / 30, target 505 / 395 |
+| run3 | j4 (round 20) | 11800 | P1 out t1577 -> borrow t1751 (camera at 1) -> Ruckus removed -> bonus game (round 21, played by physical P2, roles 1, 8520 ticks) -> **restore** at the round-21 setup t10460 -> round 21 both in, roles 0 |
+| run4 | s1 soak (rounds 23-30) | 20000 | rc 0; WRAM guard silent; code-area hash unchanged on 307 checks; longest unchanged object state 1 tick; longest stretch without play 493 ticks (round transitions); 15267 play ticks (13383 both in, 1884 one out); 47 deaths, 6 natural borrows (2 by P1 with roles 1), 3 role exchanges, 5 window outs, 2 game overs + continues, 1 stay round start, 12 pause presses (450 paused ticks), 46 same-tick shots |
+| run5 | f1 (round 5, freeze forced 4x) | 3000 | 1402 frozen-enemy ticks with both in; pops / kills during the freeze P1 14, P2 28; pause pair |
+
+Totals over the 8 runs: **violations p5 0, p6 0, p6b 0, p7 0, 9.5 0, Phase 10 0; HUD 0 job / cell / stale errors** in
+every run (max lag 1-4 ticks); every rc 0. Restore: 3 (rounds 6, 20, 21 after a bonus game); stay: 3 (rounds 7, 20, 24);
+every physical value unchanged across `CoopRoundRoles`.
+
+Phase 8 counters in j4 only: `v86_player_changed` 160 and `v86_partner_ctx_changed` 1. Not a game fault: p8lua's 8.6
+check treats StartBonusRound .. `CoopRoundStartP2` as the bonus window, and the 9.6 restore happens inside it (at the
+round-21 setup, t10460, 160 ticks before `CoopRoundStartP2` at t10620): `currentPlayer` becomes 0 and `ctxOther` holds
+physical P2 from then on, exactly as 9.6 intends. The rule predates 9.6 (as p90verify's rules predated 9.5).
+
+Screenshots `tmp/coop_scripts/p10/shots/`: `j1_t02650_roles1_P1_rejoined_before_clear.png` (both in with roles 1),
+`j1_t03189_round6_after_restore.png` (P1 bottom left, P2 bottom right, HUD 1P x02 / 2P x02 unchanged),
+`j1_t04582_round7_P1_out_roles_stay.png` (one dragon, HUD 1P x00), `j2_restore_r20_t02394.png`,
+`j4_restore_r21_t10810.png` (after the bonus game), `s1_t03132_round24_trashcan_stay.png`, `s1_soak_t12000.png`,
+`f1_t01150_frozen_enemies.png`, `f1_t01350_pause_hides_P2.png`.
+
+### Findings
+No crash, hang, memory corruption or gameplay fault was found.
+1. **Cosmetic, open since Phase 3: the pause hides P2.** While paused (`ram_0475` = 2) `DrawObjects` draws slots 0-1
+   only, so physical P2 in slot 39 (or physical P1 after a role exchange and a rejoin) vanishes until the unpause
+   (`f1_t01350_pause_hides_P2.png`). Reproduce: any co-op round with both in, pad 1 START (f1, t1300). Suggested fix:
+   in `CoopDrawPair`'s pause path (`ram_0475` != 0) also draw slot 39 through `CoopDrawSlot` when `coopP2Active` bit 7
+   is set (bank E / PRG-RAM space is tight: ~10 bytes).
+2. **Test tool (not game): p8lua's 8.6 bonus window** flags the 9.6 restore after a bonus game (above). Suggested fix in a
+   checker copy: end the bonus window at `CoopRoundRoles` (or accept `currentPlayer` / `ctxOther` changes made by it).
+   Like p90verify after 9.5, `verify.py full`'s fixed-path checkers will report this for any natural game that has a
+   rejoin before a bonus game.
+3. Not reached (argued in 9.6's audit, not probed): the rejoined P1 still dying in slot 39 at the round setup. Damage
+   is not taken after the enemies are removed, and a death started just before the clear ends before the setup (the
+   setup follows the clear by ~85-100 ticks, a death takes ~40-80), so it needs a long fall at the exact clear tick.
+
+### Not run (owner budget)
+`verify.py full` / `quick`, the full p90verify / p95verify sets, hudcheck sets, pairchk / windowchk / flick, menutest,
+pixcmp, `perf.py regress / stats / profile` (the main session runs the 1P regress), a restore with physical P1 dying at the
+setup, a natural clock pickup (the freeze was forced by a Lua write), more seeds of the soak.
