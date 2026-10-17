@@ -4162,3 +4162,8 @@ update inside P2's window (P2 resident, bank 5 `CODE_0599FF`). With no sprite sl
 per-tick-input co-op identity (7 scenarios, every tick equal to p97a) is unaffected. No fix in 9.8; the out-of-table read
 is original 1P behaviour (LEFT+RIGHT together is impossible on a stock pad) and a change would be a game change for the
 owner to decide (e.g. clamp `playerDir` to 1-2 in that handler, both modes).
+
+### Owner decisions (2026-10-17): playerDir 3 table read, drop-in
+- The out-of-table read in the SLUGGISH state (`DATA_059952,Y` with `playerDir` = 3 after LEFT+RIGHT together; wrong
+  sprite for a few frames) is original code and impossible on a stock pad: left as is (also in 1P).
+- Joining a 1P game mid-game with pad 2 (drop-in): not wanted.
