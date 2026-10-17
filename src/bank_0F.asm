@@ -5411,6 +5411,33 @@ CoopRoundRoles:
 @rts:
 	RTS
 
+; ---------------------------------------------------------------------------------------------
+; CoopDrawPause (co-op 9.7): CoopDrawBodyC's original-order exit (only reached with P2 in the round: coopP2Active
+; bit 7). The pause press draws once (StorePauseObj: AnimateNonBubbles + DrawObjects with ram_0475 = 2, so slots 0-1
+; only: the resident and the PAUSE text) and the OAM stays as it is until the unpause, so slot 39 (P2, or physical P1
+; after a role exchange) vanished. While roundPaused is set and slot 39 is drawn in play (objState != 0), it is drawn
+; after the body as one step of the body's loop (CoopDrawSlot: its frame at the press, not animated), then its chrBank
+; write as the even-tick co-op order makes it (last; CoopDrawPair's pair bank, if any, is written after this).
+; Announcements (ram_0475 set, roundPaused 0) and the blink case keep the plain body. Exit as DrawObjectsBody's
+; (X = 0, Z = 1, N = 0, C = 1). 1P never gets here (CoopDrawObjects -> CoopDrawObjects1P).
+; ---------------------------------------------------------------------------------------------
+CoopDrawPause:
+	LDA roundPaused
+	BEQ @body
+	LDA objState+OSLOT_P2
+	BEQ @body
+	JSR DrawObjectsBody
+	LDY #OSLOT_P2
+	JSR CoopDrawSlot
+	LDX objChrSlot+OSLOT_P2
+	LDA objChrBank+OSLOT_P2
+	BEQ :+
+	STA chrBankC,X
+:	LDX #$00
+	RTS
+@body:
+	JMP DrawObjectsBody
+
 
 
 

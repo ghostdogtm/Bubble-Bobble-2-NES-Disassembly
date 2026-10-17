@@ -2397,6 +2397,7 @@ CoopDrawObjectsC:
 
 ; CoopDrawBodyC: DrawObjectsBody with both players first (see above). The original order when ram_0475 is set (pause,
 ; announcements: slots >= ram_0475 skipped) or when the player who would be last is not drawn (objState 0: blink, ...).
+; (9.7) The original order goes through CoopDrawPause (bank F), which also draws slot 39 while the round is paused.
 ; Exit as DrawObjectsBody's (X = 0, Z = 1, N = 0, C = 1); A and Y are the body's or the bank write's (no caller reads them).
 CoopDrawBodyC:
 	LDA ram_0475
@@ -2440,7 +2441,7 @@ CoopDrawBodyC:
 :	LDX #$00
 	RTS
 @orig:
-	JMP DrawObjectsBody
+	JMP CoopDrawPause					;(9.7) bank F: DrawObjectsBody, + slot 39 while paused
 
 ; CoopDrawMap: what DrawObjectsBody does before its scans: the image bank at $A000 (Rule 9 order) and oamBufferPos = 0.
 CoopDrawMap:
