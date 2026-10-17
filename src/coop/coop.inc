@@ -23,15 +23,21 @@ COOP_CANARY3    = $50           ; 'P'
 ; when equal, 20-22 when not, against 14-16 for the plain exchange). The result is the same either way.
 ; (shootCounter, $0546, is NOT here since Phase 6b: it is rewardsEaten+7, the shared "bubbles blown" statistic that
 ; spawns the candy item, like the other rewardsEaten entries; see docs/coop_notes.md, Phase 6b)
+; (9.8) A third argument puts an entry in a class for the P2 window's swaps (CoopSwapWinIn / CoopSwapWinOut, see
+; coop_engine.asm and docs/coop_notes.md, Phase 9.8); every other swap (CoopSwap, CoopSwapCtx) exchanges all entries:
+;   wf   written first in every P2 window (the player update rewrites it before any read): the window's swap in only
+;        saves the resident's value into the shadow; its swap out exchanges as usual
+;   odd  read or written only by the odd window's shot / bubble-touch part (HandleShooting and what CoopP2Shoot /
+;        CoopP2BubbleTouch reach): exchanged around that part (CoopSwapOdd), not by the window's swaps
 .macro COOP_CTX_SCALARS M
 	M ram_0062
-	M playerHeld
-	M playerPressed, eq
+	M playerHeld, , wf
+	M playerPressed, eq, wf
 	M playerState, eq
 	M ram_0076
 	M playerDir
-	M ram_0078
-	M hBlocked
+	M ram_0078, , wf
+	M hBlocked, , wf
 	M ram_007A, eq
 	M ram_007B, eq
 	M playerDmgType, eq
@@ -46,12 +52,12 @@ COOP_CANARY3    = $50           ; 'P'
 	M inflateTime, eq
 	M extraBubbles, eq
 	M ram_047E
-	M shootSlot
+	M shootSlot, , odd
 	M shootDir
 	M shootTrigger, eq
 	M shootQueuedBubbles, eq
 	M shooting
-	M shootInitialSlot
+	M shootInitialSlot, , odd
 	M bubbleVariant, eq
 	M ram_077B, eq
 .endmacro
@@ -62,7 +68,7 @@ COOP_CANARY3    = $50           ; 'P'
 ; AnimateNonBubbles / AnimateObjectsFromX) and the title setup, objChrSlot / objAttr by the cutscene ops, the round setup
 ; (CODE_0880C8), the announcement / bubble spawners (other slots) and the title setup; all of them are read only by
 ; DrawObjects (and the co-op draw code). So the window's two swaps leave them in place: CoopSwap exchanges them first, and
-; CoopP2Window enters after them, at CoopSwap + COOP_SWAP_WIN_OFS. Every other CoopSwap call exchanges them as before.
+; the window's swaps (9.8: CoopSwapWinIn / CoopSwapWinOut) never touch them. Every other CoopSwap call exchanges them as before.
 ; (Checked dynamically by tmp/coop_scripts/p92/windowchk.py: no access inside any window.)
 .macro COOP_CTX_ARRAYS_DRAW M
 	M objImgOfs

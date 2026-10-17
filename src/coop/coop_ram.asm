@@ -12,7 +12,7 @@ coopCanary:     .res 4          ; "COOP" written at reset; shows PRG-RAM is mapp
 ; ctxOther: the non-resident player's context. One shadow byte per COOP_CTX_SCALARS entry (generated from
 ; the list in coop.inc, named ctxOther_<symbol>) plus one for the per-player bits of powerUps.
 ; The per-object arrays need no shadow: the non-resident player's object lives in slot OSLOT_P2.
-.macro COOP_CTX_SHADOW name, mode
+.macro COOP_CTX_SHADOW name, mode, cls
 .if .xmatch(name, playerLives)
 coopP2Lives:                    ; harness hook: a label (not an equate) so that it reaches labels.txt;
 .endif                          ; the harness keeps it topped up in co-op scenarios (P1 is resident at tick start)

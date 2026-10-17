@@ -3,8 +3,8 @@
 
 .import __COOP_BSS_RUN__, __COOP_BSS_SIZE__
 
-.segment "COOP_CODE"
-
+.segment "PRG_BANK_F"				;(9.8) CoopReset (once, at power-on) moved from COOP_CODE (bank E) to make room for the
+									;window swap entries; it lands at the end of bank F (this file is included last)
 CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 	LDA #$80						;MMC3 $A001: PRG-RAM enable, writes allowed
 	STA $A001
@@ -53,17 +53,27 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 
 	RTS								;(R2) COOP_FORCE now pre-selects the co-op line at the title (bank 5 @advance)
 
+.segment "COOP_CODE"
+
 ; ---------------------------------------------------------------------------------------------
 ; CoopSwap: exchange the resident player with the one stored in ctxOther / object slot OSLOT_P2.
 ;   - every COOP_CTX_SCALARS entry <-> its shadow byte ctxOther_<name>
 ;   - every COOP_CTX_ARRAYS_DRAW and COOP_CTX_ARRAYS array: slot 0 <-> slot OSLOT_P2
-;     (9.2: the P2 window enters at CoopSwap + COOP_SWAP_WIN_OFS, after the DRAW arrays, which stay in place for it)
+;     (9.2: the P2 window's swaps leave the DRAW arrays in place; 9.8: the window uses CoopSwapWinIn / CoopSwapWinOut)
 ;   - powerUps: only the bits in COOP_POWERUP_MASK are exchanged with ctxOther_powerUps
 ;   - coopResident ^= 1; currentPlayer = coopResident ^ coopRoles (the physical id of the new resident;
 ;     coopRoles = 1 after P1 went out and P2 became the resident player, Phase 7a)
 ; CoopSwapCtx (Phase 7a) is the same without the object arrays (for flows where the objects do not matter:
 ; continue, new game, game over). Clobbers A and X; preserves Y; flags undefined. Unrolled (lists in coop.inc).
 ; (9.2) Entries marked ", eq" in the lists, and the powerUps bits, are compared first and exchanged only when they differ.
+; (9.8) The P2 window has its own pair of entries (equates, not labels: the checkers attribute every write here to
+; CoopSwap / CoopSwapCtx, and the windows' JSRs stay inside CoopSwap .. CoopSwapCtx):
+;   CoopSwapWinIn   the window's swap in: the "wf" scalars are only saved (resident value -> shadow; the player update
+;                   rewrites them before any read), then the COOP_CTX_ARRAYS, the plain scalars, powerUps, bookkeeping
+;   CoopSwapWinOut  the window's swap back: the "wf" scalars exchanged, then the same as CoopSwapWinIn
+;   Neither touches the COOP_CTX_ARRAYS_DRAW (9.2) or the "odd" scalars: CoopSwapOdd exchanges those around the odd
+;   window's shot / bubble-touch part (the only window code that reads or writes them).
+; Every other caller gets the complete exchange (CoopSwap: arrays + all scalars; CoopSwapCtx: all scalars).
 ; ---------------------------------------------------------------------------------------------
 .macro COOP_SWAP_SCALAR name, mode
 .ifblank mode
@@ -79,6 +89,38 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 	STX name
 	STA .ident(.concat("ctxOther_", .string(name)))
 :
+.endif
+.endmacro
+
+; (9.8) class filters for COOP_CTX_SCALARS (third argument, see coop.inc)
+.macro COOP_SWAP_SC_MAIN name, mode, cls	;entries without a class
+.ifblank cls
+	COOP_SWAP_SCALAR name, mode
+.endif
+.endmacro
+
+.macro COOP_SWAP_SC_WF name, mode, cls		;"wf" entries: exchange
+.ifnblank cls
+.if .xmatch(cls, wf)
+	COOP_SWAP_SCALAR name, mode
+.endif
+.endif
+.endmacro
+
+.macro COOP_SAVE_SC_WF name, mode, cls		;"wf" entries: the window's swap in only saves the resident's value
+.ifnblank cls
+.if .xmatch(cls, wf)
+	LDA name
+	STA .ident(.concat("ctxOther_", .string(name)))
+.endif
+.endif
+.endmacro
+
+.macro COOP_SWAP_SC_ODD name, mode, cls		;"odd" entries: exchange
+.ifnblank cls
+.if .xmatch(cls, odd)
+	COOP_SWAP_SCALAR name, mode
+.endif
 .endif
 .endmacro
 
@@ -101,11 +143,13 @@ CoopReset:							;called once from Begin; NMI disabled; A/X/Y free
 
 CoopSwap:
 	COOP_CTX_ARRAYS_DRAW COOP_SWAP_ARRAY
-@win:								;(9.2) the P2 window's swaps start here (see COOP_CTX_ARRAYS_DRAW in coop.inc)
+	JSR CoopSwapOdd
+CoopSwapWinOut = *					;(9.8) the P2 window's swap back (equates, not labels: see above)
+	COOP_CTX_SCALARS COOP_SWAP_SC_WF
+CoopSwapWinBoth = *					;(9.8) the common part of the window's two swaps
 	COOP_CTX_ARRAYS COOP_SWAP_ARRAY
-COOP_SWAP_WIN_OFS = @win - CoopSwap
-CoopSwapCtx:
-	COOP_CTX_SCALARS COOP_SWAP_SCALAR
+CoopSwapRest = *
+	COOP_CTX_SCALARS COOP_SWAP_SC_MAIN
 
 	;powerUps: x = (powerUps ^ shadow) & mask; both bytes ^= x  (bits outside the mask are untouched;
 	;the shadow only ever holds mask bits, since it starts at 0 and only gets x bits flipped)
@@ -126,6 +170,19 @@ CoopSwapCtx:
 	STA coopResident
 	EOR coopRoles
 	STA currentPlayer
+	RTS
+
+CoopSwapWinIn = *					;(9.8) the P2 window's swap in (P1 resident)
+	COOP_CTX_SCALARS COOP_SAVE_SC_WF
+	JMP CoopSwapWinBoth
+
+CoopSwapCtx:
+	JSR CoopSwapOdd
+	COOP_CTX_SCALARS COOP_SWAP_SC_WF
+	JMP CoopSwapRest
+
+CoopSwapOdd = *						;(9.8) the "odd" scalars (keeps Y; clobbers A/X)
+	COOP_CTX_SCALARS COOP_SWAP_SC_ODD
 	RTS
 
 ; =============================================================================================
@@ -162,7 +219,7 @@ CoopP2Window:
 :
 	LDA prgBankB					;the caller's $A000 bank, restored below
 	PHA
-	JSR CoopSwap+COOP_SWAP_WIN_OFS	;P2 resident: context, slot 0 <-> OSLOT_P2 (9.2: not the DRAW arrays), currentPlayer = 1
+	JSR CoopSwapWinIn				;P2 resident: context, slot 0 <-> OSLOT_P2 (9.2: not the DRAW arrays; 9.8: wf saved, odd later), currentPlayer = 1
 	LDA #.LOBYTE(CODE_058E83)		;player update (reads pad 2 via currentPlayer)
 	STA bankedSub
 	LDA #.HIBYTE(CODE_058E83)
@@ -188,13 +245,15 @@ CoopP2Window:
 	LDA globalTimer
 	LSR
 	BCC @even
+	JSR CoopSwapOdd					;(9.8) P2's shootSlot / shootInitialSlot in (only this part uses them)
 	JSR CoopP2Shoot					;odd: P2's shot (HandleShooting runs on odd ticks), emerging/caught bubble
 	JSR CoopP2BubbleTouch			;odd: P2 touches bubbles (UpdateBubbles' player part)
+	JSR CoopSwapOdd					;(9.8) and out again
 	JMP @swapback
 @even:
 	JSR PlayerCheckEnemyCollision	;even: P2 vs enemies/food, exactly as RoundUpdate runs it for P1
 @swapback:
-	JSR CoopSwap+COOP_SWAP_WIN_OFS	;P1 resident again (coopResident = 0, currentPlayer = 0)
+	JSR CoopSwapWinOut				;P1 resident again (coopResident = 0, currentPlayer = 0)
 @restore:
 CoopBankRestore:					;(9.5) also the end of CoopBorrowTick: $A000 := the bank on the stack (A = it)
 	PLA
@@ -616,7 +675,7 @@ CoopSpawnAt:
 ; (9.5) CoopSwapOut: the P2 window's swap back when P2 is out (A = COOP_P2_OUT for CoopP2Deactivate). CoopP2DeactOut: the
 ; same for CoopResidentOut's role exchange. Clobber A/X (as CoopSwap / CoopP2Deactivate).
 CoopSwapOut:
-	JSR CoopSwap+COOP_SWAP_WIN_OFS
+	JSR CoopSwapWinOut
 	LDA #COOP_P2_OUT
 	RTS
 CoopP2DeactOut:
