@@ -4138,3 +4138,6 @@ COOP_CODE 15 B (18), COOP_CODE2 23 (29), bank F 76 (151), bank 9 7, bank 5 281, 
 - Further cuts would need write detection for the "written, never read" bytes (hooks in 1P code) or a smaller player
   context (code changes in bank 5): not done.
 - `windowchk`'s p98 copy has to be used (verify.py `--checkers`, or copying it to p93) before the next full pipeline.
+
+### Owner decision (2026-10-17): co-op sounds
+The owner played two-player co-op and found the sounds fine. Plan item 9.3 (audio check) is closed without changes.
