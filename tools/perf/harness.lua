@@ -11,6 +11,42 @@
 --   profile      (bool) write PRG-ROM exec counters to <out>.prof at the end
 --   style        (optional) "camper": stand still, shoot every 240 ticks
 --   shots        (optional) list of tick numbers to screenshot (<out>_tNNNNN.png)
+--   pad2         (bool, default false) drive pad 2 from a second, independent generator once the
+--                game has started (idle before that); always the normal (non-camper) play style
+--                (delivered with emu.setInput(inp, 0, 1): the Mesen config uses the 4-player adapter, so
+--                pad 2 is subport 1 of port 0; emu.setInput(inp, 1) would not reach the game)
+--   seed2        seed of the pad-2 generator (default seed + 7919)
+--   pokes        (optional) list of {tick=N, addr=A, val=V}: at the start of tick N (where the
+--                deferred round warp is applied) write V to CPU address A (emu.memType.nesMemory,
+--                so $6000-$7FFF reaches cartridge PRG-RAM if the mapper provides it)
+--   lives_addrs  (optional) list of CPU addresses topped up to 3 when < 2 if inf_lives is set
+--                (default {0x0479} = playerLives)
+--   coop_select  (optional) {mode = A, menu = M}: co-op scenario (R2). While the title menu runs
+--                (nmiBankedSub == M, TitleScreenMenu) and the byte at A (coopMode) is not 1, pad 1 taps
+--                SELECT (held 2 ticks, then 2 ticks with nothing pressed) instead of the generator's
+--                input; the generator's START taps then start the game. The run fails (csv line
+--                COOP_NOT_SELECTED, exit code 3) if the game starts with coopMode ~= 1 or if 4 SELECT
+--                taps did not set it. Without coop_select the input stream is unchanged.
+--   icon_trace   (optional, used with dump) {starts = {A, ...}, stops = {A, ...}, slot = N}: records which OAM entries
+--                (OAMBuffer $0200-$02FF, 64 entries of 4 bytes) were last written while DrawObjects drew object slot N
+--                (the HUD icon, OSLOT_ICON = 19). An exec of a `starts` address (the per-object draw path, where
+--                scratch4 = the slot being drawn) sets the current slot from scratch4; an exec of a `stops` address
+--                (DrawObjects entry, the fill of unused entries, the exits) clears it. Every OAMBuffer write marks its
+--                entry as drawn by slot N or not. At each RAM snapshot the marked entries are written to <out>.icon
+--                as "tick e1 e2 ..." (only ticks with at least one marked entry). perf.py regress uses it for the
+--                HUD-icon OAM rule (Phase 7b-1).
+--   wram_guard   (optional) {lo = A, len = N, img = O}: Phase 9.0 WRAM-code guard. The boot copy must write A .. A+N-1
+--                exactly once, in order, before the first logic tick; at the first tick start the area must equal the
+--                N bytes of PRG ROM at offset O (the code image). Afterwards ANY CPU write into A .. A+N-1, or an MMC3
+--                $A001 write other than $80 (PRG-RAM enabled, writable), fails the run: csv line WRAM_CODE_WRITE /
+--                WRAM_CODE_COPY / PRG_RAM_A001 at the end of that tick, exit code 4.
+--   profile      also writes the PRG-RAM exec counters to <out>.wprof (offsets from $6000) if Mesen has them
+--   prg_link     (optional, speed only) {{lo, hi, cpu}, ...}: PRG-ROM offset range [lo, hi) of every ROM segment and
+--                the CPU address it is linked at (perf.py passes it); see "Speed layer" below
+--
+-- CSV columns (perf.py reads columns 3 and 5, so new columns are only ever appended):
+--   tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2
+--   held2 = heldP2 ($0F) at tick end: proves pad 2 input reached the game
 --
 -- A "tick" is one full run of the game's NMI-driven logic: the game runs all its logic inside
 -- the NMI handler, guarded by nmiProgress ($15):  0 -> 1 (full NMI entered, vblank work)
@@ -23,9 +59,106 @@
 
 if not CFG then dofile("harness_cfg.lua") end
 
+------------------------------------------------------------------------------------------
+-- Speed layer (2026-10-15, tools/perf/verify.py work). Runs before any callback is registered (also those of the
+-- add-on Lua the co-op checkers append to this file) and changes no value any callback sees; it only makes Mesen do
+-- less work. Measured on a p90verify run (95 s): emu.getState() costs ~200 us per call (Mesen serializes the whole
+-- emulator, 323 keys) and was called 211k times (42 s); every registered exec callback is tested by Mesen on every
+-- executed instruction, one on emu.memType.nesPrgRom ~4x as costly as one on a CPU address (~110 of them: ~30 s).
+-- 1. getState memo: emu.getState() (no arguments) returns the table of the previous call while Mesen is still
+--    delivering the SAME memory access (or exec, or event) to the script: Mesen calls all callbacks matching one access
+--    one after the other, in registration order, before the CPU goes on. Each registered function is wrapped; a call
+--    belongs to the access of the previous call iff it has the same callback type, memory type and address and a
+--    higher registration number (a new access starts again at the lowest matching registration; a different location
+--    has another address or memory type). Event callbacks, and every emu.write*, drop the memo. (The table is shared:
+--    no checker writes into it.)
+-- 2. Exec-callback merge, only with CFG.prg_link: every single-address exec callback on the NES CPU, on a CPU address
+--    or on a PRG-ROM offset inside a ROM segment (then registered at the CPU address that segment is linked at, the
+--    only place its code runs), goes into a per-CPU-address list with ONE Mesen callback, which calls the entries in
+--    registration order (Mesen's order). A PRG-ROM entry runs only if emu.convertAddress maps the executed address to
+--    its offset (the test Mesen makes). Arguments are what Mesen passes to both kinds (CPU address, opcode); a returned
+--    integer replaces the value for later entries and is returned (as Mesen does); an error in one entry does not stop
+--    the others (as in Mesen). Everything else is registered unchanged (through the wrapper of 1).
+do
+  local realAdd, realEvt, realGetState = emu.addMemoryCallback, emu.addEventCallback, emu.getState
+  local memo = nil
+  local lastCt, lastMt, lastAddr, lastIdx = nil, nil, nil, -1
+  local nreg = 0
+  local function guard(fn, ct, mt)
+    nreg = nreg + 1
+    local idx = nreg
+    return function(a, v)
+      if not (ct == lastCt and mt == lastMt and a == lastAddr and idx > lastIdx) then memo = nil end
+      lastCt, lastMt, lastAddr, lastIdx = ct, mt, a, idx
+      return fn(a, v)
+    end
+  end
+  emu.getState = function(...)
+    if select("#", ...) ~= 0 then return realGetState(...) end
+    if memo == nil then memo = realGetState() end
+    return memo
+  end
+  for _, w in ipairs({"write", "write16", "write32", "writeWord"}) do
+    local real = emu[w]
+    if real then emu[w] = function(...) memo = nil; return real(...) end end
+  end
+  emu.addEventCallback = function(fn, ...)
+    return realEvt(function(...) memo = nil; lastCt = nil; return fn(...) end, ...)
+  end
+  local EXEC, NES = emu.callbackType.exec, emu.cpuType.nes
+  local PRG, CPUMEM = emu.memType.nesPrgRom, emu.memType.nesMemory
+  local link = CFG.prg_link
+  local lists = {}
+  local function linkAddr(o)
+    for _, sg in ipairs(link) do
+      if o >= sg[1] and o < sg[2] then return sg[3] + o - sg[1] end
+    end
+    return nil
+  end
+  local convert = emu.convertAddress
+  local function dispatcher(list)
+    return function(a, v)
+      local abs, ret, err = nil, nil, nil
+      for i = 1, #list do
+        local e = list[i]
+        local run = true
+        if e.off then
+          abs = abs or convert(a, CPUMEM)
+          run = abs ~= nil and abs.memType == PRG and abs.address == e.off
+        end
+        if run then
+          local ok, r = pcall(e.fn, a, v)
+          if not ok then err = err or r
+          elseif math.type(r) == "integer" then v = r; ret = r end
+        end
+      end
+      if err and ret == nil then error(err, 0) end
+      return ret
+    end
+  end
+  emu.addMemoryCallback = function(...)
+    local fn, ct, a1, a2, cpu, mt = ...
+    if link and select("#", ...) == 6 and ct == EXEC and cpu == NES and math.type(a1) == "integer" and a2 == a1
+        and (mt == CPUMEM or mt == PRG) then
+      local addr, off = a1, nil
+      if mt == PRG then off = a1; addr = linkAddr(a1) end
+      if addr ~= nil then
+        local l = lists[addr]
+        if l then l[#l + 1] = {fn = fn, off = off}; return nil end
+        l = {{fn = fn, off = off}}
+        lists[addr] = l
+        return realAdd(guard(dispatcher(l), EXEC, CPUMEM), EXEC, addr, addr, NES, CPUMEM)
+      end
+    end
+    return realAdd(guard(fn, ct, mt), select(2, ...))
+  end
+end
+------------------------------------------------------------------------------------------
+
 local NMI_PROGRESS = 0x15
 local CUR_ROUND    = 0xD8
 local PLAYER_LIVES = 0x0479
+local HELD_P2      = 0x0F
 
 local MT_CPU  = emu.memType.nesMemory
 local MT_RAM  = emu.memType.nesInternalRam
@@ -33,9 +166,11 @@ local MT_NT   = emu.memType.nesNametableRam
 local MT_PAL  = emu.memType.nesPaletteRam
 
 local csv = io.open(CFG.out .. ".csv", "w")
-csv:write("tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide\n")
+csv:write("tick,frame,vblank_cyc,logic_cyc,audio_cyc,lag_nmis,round,irq_effect,wide,held2\n")
 local dump = nil
 if CFG.dump then dump = io.open(CFG.out .. ".dump", "wb") end
+local iconf = nil
+if CFG.dump and CFG.icon_trace then iconf = io.open(CFG.out .. ".icon", "w") end
 
 local function cycles()
   return emu.getState()["cpu.cycleCount"]
@@ -44,72 +179,102 @@ end
 ------------------------------------------------------------------------------------------
 -- deterministic input generator (pure function of tick sequence)
 ------------------------------------------------------------------------------------------
-local rng = (CFG.seed or 1) % 2147483647
-if rng == 0 then rng = 1 end
-local function rand(n) -- 0..n-1
-  rng = (rng * 48271) % 2147483647
-  return rng % n
-end
-
 local pendingRound = nil  -- deferred round warp
 local started = false      -- new game has begun (currentRound written with 1)
 local startTick = 0
-local dir, dirLeft = nil, 0
-local jumpLeft = 0
-local shootWait = 0
 local curInput = {}
+local curInput2 = {}
 
 -- play is split into segments with different styles so that slow game paths (bubbles that
--- expire, trapped enemies that escape, idle player) get exercised, not just constant shooting
-local mode, modeLeft = "aggressive", 0
-local function genInput(tick)
-  local inp = {}
-  if not started then
-    -- title / menus: tap Start every 50 ticks
-    if tick % 50 >= 20 and tick % 50 < 24 then inp.start = true end
+-- expire, trapped enemies that escape, idle player) get exercised, not just constant shooting.
+-- Each generator owns its RNG and state; isP1 enables the pad-1-only parts (title-screen Start
+-- taps, "camper" style, start_taps).
+local function makeGen(seed, isP1)
+  local rng = (seed or 1) % 2147483647
+  if rng == 0 then rng = 1 end
+  local function rand(n) -- 0..n-1
+    rng = (rng * 48271) % 2147483647
+    return rng % n
+  end
+  local dir, dirLeft = nil, 0
+  local jumpLeft = 0
+  local shootWait = 0
+  local mode, modeLeft = "aggressive", 0
+  return function(tick)
+    local inp = {}
+    if not started then
+      -- title / menus: tap Start every 50 ticks (pad 1 only)
+      if isP1 and tick % 50 >= 20 and tick % 50 < 24 then inp.start = true end
+      return inp
+    end
+    if isP1 and CFG.style == "camper" then
+      -- stand still and blow a bubble now and then: lets bubbles and trapped enemies time out
+      if (tick - startTick) % 240 < 2 then inp.b = true end
+      if (tick - startTick) % 1200 == 600 then inp.left = true end
+      return inp
+    end
+    if modeLeft <= 0 then
+      local r = rand(8)
+      if r < 4 then mode = "aggressive" elseif r < 7 then mode = "passive" else mode = "idle" end
+      modeLeft = 150 + rand(450)
+    end
+    modeLeft = modeLeft - 1
+    if mode == "idle" then
+      -- stand still, very occasional jump
+      if rand(64) == 0 then inp.a = true end
+      return inp
+    end
+    if dirLeft <= 0 then
+      local r = rand(6)
+      if r == 0 or r == 1 then dir = "left" elseif r == 2 or r == 3 then dir = "right"
+      elseif r == 4 then dir = nil else dir = "down" end
+      dirLeft = 8 + rand(56)
+    end
+    dirLeft = dirLeft - 1
+    if dir then inp[dir] = true end
+    if jumpLeft > 0 then
+      jumpLeft = jumpLeft - 1
+      inp.a = true
+    elseif rand(16) == 0 then
+      jumpLeft = 1 + rand(12)
+      inp.a = true
+    end
+    if shootWait <= 0 then
+      inp.b = true
+      if mode == "aggressive" then shootWait = 2 + rand(9) else shootWait = 40 + rand(160) end
+    end
+    shootWait = shootWait - 1
+    -- after game over the continue screen needs Start; tap it rarely (deterministic)
+    if isP1 and CFG.start_taps and (tick - startTick) % 997 == 500 then inp.start = true end
     return inp
   end
-  if CFG.style == "camper" then
-    -- stand still and blow a bubble now and then: lets bubbles and trapped enemies time out
-    if (tick - startTick) % 240 < 2 then inp.b = true end
-    if (tick - startTick) % 1200 == 600 then inp.left = true end
-    return inp
+end
+
+local genInput = makeGen(CFG.seed, true)
+
+-- co-op scenarios: choose the co-op line of the title menu with SELECT (see coop_select above)
+local selHold, selGap, selTaps, coopFail = 0, 0, 0, nil
+local function coopSelect(inp)
+  local cs = CFG.coop_select
+  if not cs or started then return inp end
+  if selHold > 0 then selHold = selHold - 1; return { select = true } end
+  if selGap > 0 then selGap = selGap - 1; return {} end
+  if emu.read(0x16, MT_CPU) + emu.read(0x17, MT_CPU) * 256 == cs.menu and emu.read(cs.mode, MT_CPU) ~= 1 then
+    selTaps = selTaps + 1
+    if selTaps > 4 then coopFail = "SELECT did not set coopMode" end
+    selHold, selGap = 1, 2
+    return { select = true }
   end
-  if modeLeft <= 0 then
-    local r = rand(8)
-    if r < 4 then mode = "aggressive" elseif r < 7 then mode = "passive" else mode = "idle" end
-    modeLeft = 150 + rand(450)
-  end
-  modeLeft = modeLeft - 1
-  if mode == "idle" then
-    -- stand still, very occasional jump
-    if rand(64) == 0 then inp.a = true end
-    return inp
-  end
-  if dirLeft <= 0 then
-    local r = rand(6)
-    if r == 0 or r == 1 then dir = "left" elseif r == 2 or r == 3 then dir = "right"
-    elseif r == 4 then dir = nil else dir = "down" end
-    dirLeft = 8 + rand(56)
-  end
-  dirLeft = dirLeft - 1
-  if dir then inp[dir] = true end
-  if jumpLeft > 0 then
-    jumpLeft = jumpLeft - 1
-    inp.a = true
-  elseif rand(16) == 0 then
-    jumpLeft = 1 + rand(12)
-    inp.a = true
-  end
-  if shootWait <= 0 then
-    inp.b = true
-    if mode == "aggressive" then shootWait = 2 + rand(9) else shootWait = 40 + rand(160) end
-  end
-  shootWait = shootWait - 1
-  -- after game over the continue screen needs Start; tap it rarely (deterministic)
-  if CFG.start_taps and (tick - startTick) % 997 == 500 then inp.start = true end
   return inp
 end
+local genInput2 = CFG.pad2 and makeGen(CFG.seed2 or ((CFG.seed or 1) + 7919), false) or nil
+
+local pokes = {}
+for _, pk in ipairs(CFG.pokes or {}) do
+  pokes[pk.tick] = pokes[pk.tick] or {}
+  table.insert(pokes[pk.tick], pk)
+end
+local livesAddrs = CFG.lives_addrs or { PLAYER_LIVES }
 
 ------------------------------------------------------------------------------------------
 -- tick bookkeeping
@@ -128,12 +293,50 @@ local function readBlock(memType, base, len)
   for i = 0, len - 1 do t[i + 1] = emu.read(base + i, memType) end
   return string.char(table.unpack(t))
 end
+-- the same bytes as readBlock (len a multiple of 4), read 4 at a time (emu.read32, little endian): ~3x faster
+local FMT32 = {}
+local function readBlock32(memType, base, len)
+  local n = len // 4
+  local fmt = FMT32[n]
+  if not fmt then fmt = "<" .. string.rep("I4", n); FMT32[n] = fmt end
+  local t = {}
+  for i = 0, n - 1 do t[i + 1] = emu.read32(base + 4 * i, memType) end
+  return string.pack(fmt, table.unpack(t))
+end
 
 local vramSnap = nil
+
+-- WRAM-code guard (CFG.wram_guard, Phase 9.0; see the header)
+local wgFail, wgCheck = nil, nil
+if CFG.wram_guard then
+  local g = CFG.wram_guard
+  local copied = 0
+  emu.addMemoryCallback(function(addr, value)
+    if tick < 0 and copied < g.len and addr == g.lo + copied then copied = copied + 1; return end
+    if not wgFail then
+      wgFail = string.format("WRAM_CODE_WRITE $%04X = $%02X pc $%04X tick %d", addr, value, emu.getState()["cpu.pc"], tick)
+    end
+  end, emu.callbackType.write, g.lo, g.lo + g.len - 1, emu.cpuType.nes, MT_CPU)
+  emu.addMemoryCallback(function(addr, value)
+    if (addr & 1) == 1 and value ~= 0x80 and not wgFail then
+      wgFail = string.format("PRG_RAM_A001 $%04X = $%02X pc $%04X tick %d", addr, value, emu.getState()["cpu.pc"], tick)
+    end
+  end, emu.callbackType.write, 0xA000, 0xBFFF, emu.cpuType.nes, MT_CPU)
+  wgCheck = function()   -- at the first tick start: the copy is complete and the area holds the image
+    local bad = 0
+    for i = 0, g.len - 1 do
+      if emu.read(g.lo + i, MT_CPU) ~= emu.read(g.img + i, emu.memType.nesPrgRom) then bad = bad + 1 end
+    end
+    if (copied ~= g.len or bad > 0) and not wgFail then
+      wgFail = string.format("WRAM_CODE_COPY %d of %d bytes copied, %d differ from the image", copied, g.len, bad)
+    end
+  end
+end
 
 local function finish(code)
   csv:close()
   if dump then dump:close() end
+  if iconf then iconf:close() end
   if CFG.profile then
     local c = emu.getAccessCounters(emu.memType.nesPrgRom, emu.counterType.execCount)
     local p = io.open(CFG.out .. ".prof", "w")
@@ -142,6 +345,15 @@ local function finish(code)
       if v and v > 0 then p:write(string.format("%05X %d\n", i, v)) end
     end
     p:close()
+    if emu.memType.nesWorkRam then
+      c = emu.getAccessCounters(emu.memType.nesWorkRam, emu.counterType.execCount)
+      p = io.open(CFG.out .. ".wprof", "w")
+      for i = 0, #c do
+        local v = c[i]
+        if v and v > 0 then p:write(string.format("%04X %d\n", i, v)) end
+      end
+      p:close()
+    end
   end
   emu.stop(code)
 end
@@ -150,6 +362,23 @@ emu.addEventCallback(function()
   tNmi = cycles()
   nmisInTick = nmisInTick + 1
 end, emu.eventType.nmi)
+
+-- HUD-icon OAM trace (CFG.icon_trace, see the header)
+local iconOwner = {}
+if iconf then
+  local it = CFG.icon_trace
+  local curSlot = nil
+  for _, a in ipairs(it.starts) do
+    emu.addMemoryCallback(function() curSlot = emu.read(0x04, MT_CPU) end,
+      emu.callbackType.exec, a, a, emu.cpuType.nes, MT_CPU)
+  end
+  for _, a in ipairs(it.stops) do
+    emu.addMemoryCallback(function() curSlot = nil end, emu.callbackType.exec, a, a, emu.cpuType.nes, MT_CPU)
+  end
+  emu.addMemoryCallback(function(addr, value)
+    iconOwner[(addr - 0x200) >> 2] = (curSlot == it.slot)
+  end, emu.callbackType.write, 0x200, 0x2FF, emu.cpuType.nes, MT_CPU)
+end
 
 local lastProgress = 0
 emu.addMemoryCallback(function(addr, value)
@@ -160,6 +389,7 @@ emu.addMemoryCallback(function(addr, value)
     -- full NMI entered: new logic tick
     tick = tick + 1
     tStart = cycles()
+    if tick == 0 and wgCheck then wgCheck() end
     vblankCyc = 0
     nmisInTick = 1
     inTick = true
@@ -167,12 +397,18 @@ emu.addMemoryCallback(function(addr, value)
       emu.write(CUR_ROUND, pendingRound, MT_CPU)
       pendingRound = nil
     end
-    curInput = genInput(tick)
-    if CFG.inf_lives and started and emu.read(PLAYER_LIVES, MT_CPU) < 2 then
-      emu.write(PLAYER_LIVES, 3, MT_CPU)
+    if pokes[tick] then
+      for _, pk in ipairs(pokes[tick]) do emu.write(pk.addr, pk.val, MT_CPU) end
+    end
+    curInput = coopSelect(genInput(tick))
+    if genInput2 then curInput2 = genInput2(tick) end
+    if CFG.inf_lives and started then
+      for _, a in ipairs(livesAddrs) do
+        if emu.read(a, MT_CPU) < 2 then emu.write(a, 3, MT_CPU) end
+      end
     end
     if dump then
-      vramSnap = readBlock(MT_NT, 0, 0x800) .. readBlock(MT_PAL, 0, 0x20)
+      vramSnap = readBlock32(MT_NT, 0, 0x800) .. readBlock(MT_PAL, 0, 0x20)
     end
   elseif value == 3 and inTick then
     -- banked game logic finished
@@ -180,18 +416,32 @@ emu.addMemoryCallback(function(addr, value)
     logicCyc = tLogicEnd - tStart
     lagNmis = nmisInTick - 1
     if dump then
-      dump:write(readBlock(MT_RAM, 0, 0x800))
+      dump:write(readBlock32(MT_RAM, 0, 0x800))
       dump:write(vramSnap)
+    end
+    if iconf then
+      local t = {}
+      for e = 0, 63 do if iconOwner[e] then t[#t + 1] = e end end
+      if #t > 0 then iconf:write(tick .. " " .. table.concat(t, " ") .. "\n") end
     end
   elseif value == 0 and inTick then
     inTick = false
     local audio = cycles() - tLogicEnd
-    csv:write(string.format("%d,%d,%d,%d,%d,%d,%d,%d,%d\n", tick, frame, tStart - tNmi, logicCyc, audio,
-      lagNmis, emu.read(CUR_ROUND, MT_CPU), emu.read(0x1D, MT_CPU), emu.read(0x03B0, MT_CPU)))
+    csv:write(string.format("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", tick, frame, tStart - tNmi, logicCyc, audio,
+      lagNmis, emu.read(CUR_ROUND, MT_CPU), emu.read(0x1D, MT_CPU), emu.read(0x03B0, MT_CPU),
+      emu.read(HELD_P2, MT_CPU)))
     if shots[tick] then
       local png = emu.takeScreenshot()
       local g = io.open(string.format("%s_t%05d.png", CFG.out, tick), "wb")
       g:write(png); g:close()
+    end
+    if coopFail then
+      csv:write("COOP_NOT_SELECTED " .. coopFail .. "\n")
+      finish(3)
+    end
+    if wgFail then
+      csv:write(wgFail .. "\n")
+      finish(4)
     end
     if tick + 1 >= CFG.ticks then finish(0) end
   end
@@ -202,6 +452,9 @@ emu.addMemoryCallback(function(addr, value)
   if not started and value == 1 then
     started = true
     startTick = tick
+    if CFG.coop_select and emu.read(CFG.coop_select.mode, MT_CPU) ~= 1 then
+      coopFail = "game started with coopMode " .. emu.read(CFG.coop_select.mode, MT_CPU)
+    end
     -- the callback runs before the store commits, so apply the warp at the next tick start
     if CFG.start_round and CFG.start_round ~= 1 then pendingRound = CFG.start_round end
   end
@@ -209,6 +462,9 @@ end, emu.callbackType.write, CUR_ROUND, CUR_ROUND, emu.cpuType.nes, MT_CPU)
 
 emu.addEventCallback(function()
   emu.setInput(curInput, 0)
+  -- the Mesen config here uses the 4-player adapter on the expansion port: pads are subports of
+  -- port 0 (pad 2 = port 0, subport 1; a plain emu.setInput(inp, 1) does not reach the game)
+  if genInput2 then emu.setInput(curInput2, 0, 1) end
 end, emu.eventType.inputPolled)
 
 emu.addEventCallback(function()

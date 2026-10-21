@@ -86,13 +86,8 @@ CODE_078092:
 
 CODE_078093:
 	LDA #.BANK(DATA_04BA3B)					;C - - - - - 0x00E0A3 03:8093: A9 04
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00E0A5 03:8095: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00E0A7 03:8097: 20 56 FF
-.endif
 
 	LDA vScroll				;C - - - - - 0x00E0AA 03:809A: A5 29
 	AND #$F8					;C - - - - - 0x00E0AC 03:809C: 29 F8
@@ -144,13 +139,8 @@ CODE_0780CE:
 	STA scratch9				;C - - - - - 0x00E100 03:80F0: 85 09
 
 	LDA #.BANK(DATA_06B8B6)					;C - - - - - 0x00E102 03:80F2: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00E104 03:80F4: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00E106 03:80F6: 20 56 FF
-.endif
 
 	LDY #$00					;C - - - - - 0x00E109 03:80F9: A0 00
 	LDA (scratch8),Y			;C - - - - - 0x00E10B 03:80FB: B1 08
@@ -163,11 +153,6 @@ CODE_0780CE:
 	JSR CODE_078152				;C - - - - - 0x00E118 03:8108: 20 52 81
 	JSR CODE_078110				;C - - - - - 0x00E11B 03:810B: 20 10 81
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x00E11E 03:810E: 60
 
 CODE_07810F:
@@ -282,13 +267,8 @@ CODE_0781B0:
 
 CODE_0781B9:
 	LDA #.BANK(DATA_0ABF39)					;C - - - - - 0x00E1C9 03:81B9: A9 0A
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00E1CB 03:81BB: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00E1CD 03:81BD: 20 56 FF
-.endif
 
 	LDX currentRound				;C - - - - - 0x00E1D0 03:81C0: A6 D8
 	LDA DATA_0ABF39,X			;C - - - - - 0x00E1D2 03:81C2: BD 39 BF
@@ -306,11 +286,6 @@ CODE_0781B9:
 	JMP (scratch8)				;C - - - - - 0x00E1EA 03:81DA: 6C 08 00
 @ret:
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x00E1ED 03:81DD: 60
 
 DATA_0781DE:
@@ -363,9 +338,6 @@ CODE_07822D:
 	STA ram_00B7				;C - - - - - 0x00E241 03:8231: 85 B7
 	STA ram_00B8				;C - - - - - 0x00E243 03:8233: 85 B8
 	STA ram_00B9				;C - - - - - 0x00E245 03:8235: 85 B9
-.ifdef REGION_JP
-	STA ram_04CA				;- - - - - - 0x00E255 03:8245: 8D
-.endif
 	STA openingCycle				;C - - - - - 0x00E247 03:8237: 8D CD 04
 
 	LDA #$01					;C - - - - - 0x00E24A 03:823A: A9 01
@@ -399,13 +371,8 @@ CODE_07825F:
 
 CODE_07826D:
 	LDA #.BANK(DATA_0ABF9B)					;C - - - - - 0x00E27D 03:826D: A9 0A
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00E27F 03:826F: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00E281 03:8271: 20 56 FF
-.endif
 
 	LDA ram_04D0				;C - - - - - 0x00E284 03:8274: AD D0 04
 	BNE CODE_07827F				;C - - - - - 0x00E287 03:8277: D0 06
@@ -447,11 +414,6 @@ CODE_0782C6:
 	LDA #$00					;C - - - - - 0x00E2D9 03:82C9: A9 00
 	STA ram_04D1				;C - - - - - 0x00E2DB 03:82CB: 8D D1 04
 CODE_0782CE:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x00E2DE 03:82CE: 60
 
 CODE_0782CF:
@@ -486,11 +448,7 @@ CODE_0782CF:
 
 		LDA #$01					;C - - - - - 0x00E31F 03:830F: A9 01
 		STA enteringRound			;C - - - - - 0x00E321 03:8311: 85 37
-.ifdef REGION_JP
-		JMP CODE_07832E				;- - - - - - 0x00E33B 03:832B: 4C
-.else
 		BNE CODE_07832E				;C - - - - - 0x00E323 03:8313: D0 19
-.endif
 CODE_078315:
 	LDA #$30					;C - - - - - 0x00E325 03:8315: A9 30
 	STA colorBuffer+5				;C - - - - - 0x00E327 03:8317: 8D 05 03
@@ -602,12 +560,10 @@ CODE_0783CC:
 	ADC DATA_0783FE,X			;C - - - - - 0x00E3E0 03:83D0: 7D FE 83
 	STA scratch3				;C - - - - - 0x00E3E3 03:83D3: 85 03
 
-.ifndef REGION_JP
 	LDA ram_04CA				;C - - - - - 0x00E3E5 03:83D5: AD CA 04
 	BEQ CODE_0783E0				;C - - - - - 0x00E3E8 03:83D8: F0 06
 		DEC ram_04CA				;C - - - - - 0x00E3EA 03:83DA: CE CA 04
 		JMP CODE_0783FA				;C - - - - - 0x00E3ED 03:83DD: 4C FA 83
-.endif
 CODE_0783E0:
 	LDA scratch3				;C - - - - - 0x00E3F0 03:83E0: A5 03
 	CMP scratch1				;C - - - - - 0x00E3F2 03:83E2: C5 01
@@ -615,13 +571,7 @@ CODE_0783E0:
 		CPY #$01					;C - - - - - 0x00E3F6 03:83E6: C0 01
 		BNE CODE_0783FA				;C - - - - - 0x00E3F8 03:83E8: D0 10
 
-.ifdef REGION_JP
-		LDA #snShoeCar_ID					;- - - - - - 0x00E408 03:83F8: A9
-		STA a:soundTrigger 					;- - - - - - 0x00E40A 03:83FA: 8D
-		JMP CODE_0783FA						;- - - - - - 0x00E40D 03:83FD: 4C
-.else
 		BEQ CODE_0783F0				;C - - - - - 0x00E3FA 03:83EA: F0 04
-.endif
 CODE_0783EC:
 	CPY #$01					;C - - - - - 0x00E3FC 03:83EC: C0 01
 	BEQ CODE_0783FA				;C - - - - - 0x00E3FE 03:83EE: F0 0A
@@ -629,10 +579,8 @@ CODE_0783F0:
 	LDA #snShoeCar_ID					;C - - - - - 0x00E400 03:83F0: A9 23
 	STA a:soundTrigger				;C - - - - - 0x00E402 03:83F2: 8D E1 00
 
-.ifndef REGION_JP
 	LDA #$1E					;C - - - - - 0x00E405 03:83F5: A9 1E
 	STA ram_04CA				;C - - - - - 0x00E407 03:83F7: 8D CA 04
-.endif
 CODE_0783FA:
 	JSR CODE_07860F				;C - - - - - 0x00E40A 03:83FA: 20 0F 86
 	RTS							;C - - - - - 0x00E40D 03:83FD: 60
@@ -845,6 +793,9 @@ CODE_078548:
 	RTS							;C - - - - - 0x00E558 03:8548: 60
 
 CODE_078549:
+	BIT coopP2Active			;(co-op 9.3) both players in the round: either player triggers the tractor (CoopTractor)
+	BMI CODE_078549_coop
+CODE_078549_1p:
 	LDA #$00					;C - - - - - 0x00E559 03:8549: A9 00
 	SEC							;C - - - - - 0x00E55B 03:854B: 38
 	SBC wideHScroll				;C - - - - - 0x00E55C 03:854C: ED 61 07
@@ -859,6 +810,7 @@ CODE_078549:
 			LDA objX				;C - - - - - 0x00E56F 03:855F: AD B3 05
 			STA scratch1				;C - - - - - 0x00E572 03:8562: 85 01
 			LDA objY				;C - - - - - 0x00E574 03:8564: AD 8B 05
+CODE_078549_pos:						;(co-op 9.3) CoopTractor enters here with A = P2's objY, scratch1 = P2's objX
 			STA scratch0				;C - - - - - 0x00E577 03:8567: 85 00
 			CMP #$C4					;C - - - - - 0x00E579 03:8569: C9 C4
 			BNE CODE_07859A				;C - - - - - 0x00E57B 03:856B: D0 2D
@@ -903,6 +855,8 @@ CODE_07859A:
 			STA openingCycle				;C - - - - - 0x00E5C7 03:85B7: 8D CD 04
 CODE_0785BA:
 	RTS							;C - - - - - 0x00E5CA 03:85BA: 60
+CODE_078549_coop:
+	JMP CoopTractor				;(co-op 9.3) PRG-RAM (COOP_WRAM_CODE)
 
 CODE_0785BB:
 	LDA ram_04D1				;C - - - - - 0x00E5CB 03:85BB: AD D1 04
@@ -978,15 +932,9 @@ CODE_078613:
 	RTS							;C - - - - - 0x00E634 03:8624: 60
 
 DATA_078625:
-.ifdef REGION_JP
-	.byte $00					;- - - - - - 0x00E644 03:8634: 00
-	.byte $01					;- - - - - - 0x00E645 03:8635: 01
-	.byte $FF					;- - - - - - 0x00E646 03:8636: FF
-.else
 	.byte $00					;- D 0 - - - 0x00E635 03:8625: 00
 	.byte $FF					;- D 0 - - - 0x00E636 03:8626: FF
 	.byte $01					;- D 0 - - - 0x00E637 03:8627: 01
-.endif
 
 CODE_078628:
 	DEC ram_04D2				;C - - - - - 0x00E638 03:8628: CE D2 04
@@ -1069,21 +1017,13 @@ CODE_0786A5:
 CODE_0786B8:
 	LDA irqLatch				;C - - - - - 0x00E6C8 03:86B8: A5 1E
 	SEC							;C - - - - - 0x00E6CA 03:86BA: 38
-.ifdef REGION_JP
-	SBC #28					;- - - - - - 0x00E6DA 03:86CA: E9
-	STA scratch0					;- - - - - - 0x00E6DC 03:86CC: 85
-	LDA #216					;- - - - - - 0x00E6DE 03:86CE: A9
-	SEC					;- - - - - - 0x00E6E0 03:86D0: 38
-	SBC scratch0					;- - - - - - 0x00E6E1 03:86D1: E5
-.else
 	SBC #12					;C - - - - - 0x00E6CB 03:86BB: E9 0C
-.endif
 	CMP objY				;C - - - - - 0x00E6CD 03:86BD: CD 8B 05
 	BCS CODE_0786C6				;C - - - - - 0x00E6D0 03:86C0: B0 04
 		LDA #$F8					;C - - - - - 0x00E6D2 03:86C2: A9 F8
 		STA playerHazardTrigger				;C - - - - - 0x00E6D4 03:86C4: 85 7E
 CODE_0786C6:
-	RTS							;C - - - - - 0x00E6D6 03:86C6: 60
+	JMP CoopWaterP2				;(co-op) the same water-line test for P2 (1P: BIT/BPL, RTS)
 
 DATA_0786C7:
 	.byte $3F					;- D 0 - - - 0x00E6D7 03:86C7: 3F
@@ -1149,13 +1089,8 @@ CODE_078730:
 
 CODE_078731:
 	LDA #.BANK(DATA_04BD27)					;C - - - - - 0x00E741 03:8731: A9 04
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00E743 03:8733: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00E745 03:8735: 20 56 FF
-.endif
 
 	LDA ram_0775				;C - - - - - 0x00E748 03:8738: AD 75 07
 	SEC							;C - - - - - 0x00E74B 03:873B: 38
@@ -1206,11 +1141,6 @@ CODE_07879E:
 	STA livesCurrentPos				;C - - - - - 0x00E7B3 03:87A3: 8D 98 04
 	JSR CODE_07883C				;C - - - - - 0x00E7B6 03:87A6: 20 3C 88
 CODE_0787A9:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x00E7B9 03:87A9: 60
 
 CODE_0787AA:
@@ -1396,6 +1326,8 @@ DATA_0788AC:
 	.byte $09					;- D 0 - - - 0x00E8DB 03:88CB: 09
 
 CODE_0788CC:
+	BIT coopP2Active			;(co-op 8) both players in the round: either player pushes the camera, with the leash
+	BMI CODE_0788CC_coop
 	LDA #$00					;C - - - - - 0x00E8DC 03:88CC: A9 00
 	STA wideScrollDir				;C - - - - - 0x00E8DE 03:88CE: 85 31
 
@@ -1416,6 +1348,8 @@ CODE_0788CC:
 			JSR WideScrollRight				;C - - - - - 0x00E8FE 03:88EE: 20 04 89
 @end:
 	RTS							;C - - - - - 0x00E901 03:88F1: 60
+CODE_0788CC_coop:
+	JMP CoopCamera				;(co-op 8; 9.0) the co-op camera runs from PRG-RAM (COOP_WRAM_CODE)
 
 WideScrollLeft:
 	LDA wideHScroll				;C - - - - - 0x00E902 03:88F2: AD 61 07
@@ -1442,17 +1376,11 @@ WideScrollRight:
 	RTS							;C - - - - - 0x00E925 03:8915: 60
 
 CODE_078916:
-.ifdef REGION_JP
-	LDA #.BANK(DATA_04BE45)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x00E926 03:8916: A9 07
 	STA $8000				;C - - - - - 0x00E92A 03:891A: 8D 00 80
 	LDA #.BANK(DATA_04BE45)					;C - - - - - 0x00E92D 03:891D: A9 04
 	STA prgBankB				;C - - - - - 0x00E932 03:8922: 85 53
 	STA $8001				;C - - - - - 0x00E92F 03:891F: 8D 01 80
-.endif
 
 	LDA roundFlags				;C - - - - - 0x00E942 03:8932: AD 71 04
 	AND #$10					;C - - - - - 0x00E945 03:8935: 29 10
@@ -1497,10 +1425,8 @@ CODE_078982:
 	LDA roundBubbleVariant				;C - - - - - 0x00E992 03:8982: A5 82
 	CMP #BUBV_DRINK					;C - - - - - 0x00E994 03:8984: C9 80
 	BCC CODE_0789C0				;C - - - - - 0x00E996 03:8986: 90 38
-		LDA bubbleVariant				;C - - - - - 0x00E998 03:8988: AD 19 05
-		BNE CODE_0789C0				;C - - - - - 0x00E99B 03:898B: D0 33
-			LDA playerLives				;C - - - - - 0x00E99D 03:898D: AD 79 04
-			BEQ CODE_0789C0				;C - - - - - 0x00E9A0 03:8990: F0 2E
+		JSR CoopDrinkGate			;(co-op) was: bubbleVariant != 0 or playerLives = 0 -> no drink;
+		BEQ CODE_0789C0				;now Z = 1 only when no player may drink (1P: the same test)
 				LDA ram_054C				;C - - - - - 0x00E9A2 03:8992: AD 4C 05
 				BNE CODE_07899A				;C - - - - - 0x00E9A5 03:8995: D0 03
 					JSR CODE_078E8B				;C - - - - - 0x00E9A7 03:8997: 20 8B 8E
@@ -1510,7 +1436,7 @@ CODE_078982:
 				STA scratch3				;C - - - - - 0x00E9AE 03:899E: 85 03
 				LDA #$12					;C - - - - - 0x00E9B0 03:89A0: A9 12
 				STA scratch4				;C - - - - - 0x00E9B2 03:89A2: 85 04
-				JSR CODE_078BC5				;C - - - - - 0x00E9B4 03:89A4: 20 C5 8B
+				JSR CoopDrinkTouch			;(co-op) CODE_078BC5 limited to the players who may drink
 				LDA objState+OSLOT_ENEMY+9				;C - - - - - 0x00E9B7 03:89A7: AD 75 05
 				CMP #$80					;C - - - - - 0x00E9BA 03:89AA: C9 80
 				BCC CODE_0789C0				;C - - - - - 0x00E9BC 03:89AC: 90 12
@@ -1609,15 +1535,11 @@ CODE_078A5E:
 	BCC CODE_078A67				;C - - - - - 0x00EA72 03:8A62: 90 03
 		INC ram_0543				;C - - - - - 0x00EA74 03:8A64: EE 43 05
 CODE_078A67:
-	LDA ram_0550				;C - - - - - 0x00EA77 03:8A67: AD 50 05
+	JSR CoopItemEnd				;(co-op) every exit passes here: P1 resident again if P2 collected an item
+								;(before the palette flash below, which reads currentPlayer); A = ram_0550
 	BEQ CODE_078A6F				;C - - - - - 0x00EA7A 03:8A6A: F0 03
 		JSR CODE_078EBE				;C - - - - - 0x00EA7C 03:8A6C: 20 BE 8E
 CODE_078A6F:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x00EA7F 03:8A6F: 60
 
 CODE_078A70:
@@ -1656,10 +1578,8 @@ CollectHolyCup:
 @kill:
 	DEX							;C - - - - - 0x00EAB4 03:8AA4: CA
 
-.ifndef REGION_JP
 	LDA enemyType,X				;C - - - - - 0x00EAB5 03:8AA5: B5 98
 	BEQ @next				;C - - - - - 0x00EAB7 03:8AA7: F0 14
-.endif
 
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x00EAB9 03:8AA9: BD 6C 05
 	BEQ @next				;C - - - - - 0x00EABC 03:8AAC: F0 0F
@@ -1671,16 +1591,12 @@ CollectHolyCup:
 	BCS @next				;C - - - - - 0x00EAC3 03:8AB3: B0 08
 
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x00EAC5 03:8AB5: BD 6C 05
-	ORA #$E0					;C - - - - - 0x00EAC8 03:8AB8: 09 E0
-	STA objState+OSLOT_ENEMY,X				;C - - - - - 0x00EACA 03:8ABA: 9D 6C 05
+	JSR CoopHolyKill			;(co-op 7a) ORA #$E0 / STA objState+OSLOT_ENEMY,X, killer = the collector
 @next:
 	TXA							;C - - - - - 0x00EACD 03:8ABD: 8A
 	BNE @kill				;C - - - - - 0x00EACE 03:8ABE: D0 E4
 
 CODE_078AC0:
-.ifdef REGION_JP
-	LDX #$00					;- - - - - - 0x00EADB 03:8ACB: A2
-.endif
 
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x00EAD0 03:8AC0: BD 77 05
 	CMP #BUBBLE_ENEMY					;C - - - - - 0x00EAD3 03:8AC3: C9 03
@@ -1705,12 +1621,8 @@ CODE_078ACB:
 	TAX							;- - - - - - 0x00EAF2 03:8AE2: AA
 CODE_078AE3:
 	INX							;C - - - - - 0x00EAF3 03:8AE3: E8
-	CPX #20					;C - - - - - 0x00EAF4 03:8AE4: E0 14
-.ifdef REGION_JP
-	BCC CODE_078AC0+2			;- - - - - - 0x00EB03 03:8AF3: 90 Jump back to misaligned code? How even?
-.else
+	CPX bubbleSlotEnd			;(co-op) was CPX #20
 	BCC CODE_078AC0				;C - - - - - 0x00EAF6 03:8AE6: 90 D8
-.endif
 
 	LDA #$0F					;C - - - - - 0x00EAF8 03:8AE8: A9 0F
 	STA ram_0550				;C - - - - - 0x00EAFA 03:8AEA: 8D 50 05
@@ -1723,7 +1635,7 @@ CollectSecretDoor:
 	LDA #$00					;C - - - - - 0x00EB05 03:8AF5: A9 00
 	STA ram_007B				;C - - - - - 0x00EB07 03:8AF7: 85 7B
 	STA playerDmgType				;C - - - - - 0x00EB09 03:8AF9: 85 7C
-	RTS							;C - - - - - 0x00EB0B 03:8AFB: 60
+	JMP CoopDoorOther			;(co-op 7a) and the other player's pending damage
 
 CollectPencil:
 	LDA continues				;C - - - - - 0x00EB0C 03:8AFC: A5 DC
@@ -1915,8 +1827,9 @@ CODE_078C1B:
 	LDA objState,Y				;C - - - - - 0x00EC2B 03:8C1B: B9 63 05
 	ORA #$80					;C - - - - - 0x00EC2E 03:8C1E: 09 80
 	STA objState,Y				;C - - - - - 0x00EC30 03:8C20: 99 63 05
+	RTS							;the resident player touched the item
 CODE_078C23:
-	RTS							;C - - - - - 0x00EC33 03:8C23: 60
+	JMP CoopItemOther			;(co-op) missed: the same test for the other player (1P: BIT/BPL, RTS)
 
 CODE_078C24:
 	LDA ram_054D				;C - - - - - 0x00EC34 03:8C24: AD 4D 05
@@ -2507,13 +2420,8 @@ CODE_078F90:
 		STA vNametable				;C - - - - - 0x00EFB5 03:8FA5: 85 2D
 
 		LDA #.BANK(palBonusGameA)					;C - - - - - 0x00EFB7 03:8FA7: A9 06
-.ifdef REGION_JP
-		STA prgBankB
-		STA $8001
-.else
 		STA newPrgBank				;C - - - - - 0x00EFB9 03:8FA9: 85 3B
 		JSR SwapPrgBankB				;C - - - - - 0x00EFBB 03:8FAB: 20 56 FF
-.endif
 
 		LDA currentRound				;C - - - - - 0x00EFBE 03:8FAE: A5 D8
 		CMP #$52					;C - - - - - 0x00EFC0 03:8FB0: C9 52
@@ -2535,7 +2443,7 @@ CODE_078F90:
 		CPX #$20					;C - - - - - 0x00EFDC 03:8FCC: E0 20
 		BCC CODE_078FC5				;C - - - - - 0x00EFDE 03:8FCE: 90 F5
 	CODE_078FD0:
-		LDX currentPlayer				;C - - - - - 0x00EFE0 03:8FD0: AE 99 04
+		LDX #$00					;(co-op 7b-2) was LDX currentPlayer: bonus game, P2 keeps P1's colour (decision A)
 		LDA DATA_079001,X			;C - - - - - 0x00EFE3 03:8FD3: BD 01 90
 		STA colorBuffer+COL_SPR+3				;C - - - - - 0x00EFE6 03:8FD6: 8D 13 03
 		JSR CODE_079204				;C - - - - - 0x00EFE9 03:8FD9: 20 04 92
@@ -2566,13 +2474,8 @@ DATA_079001:
 
 CODE_079003:
 	LDA #.BANK(DATA_06BDEF)					;C - - - - - 0x00F013 03:9003: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00F015 03:9005: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00F017 03:9007: 20 56 FF
-.endif
 
 	LDX vNametable				;C - - - - - 0x00F01A 03:900A: A6 2D
 	LDA DATA_079048,X			;C - - - - - 0x00F01C 03:900C: BD 48 90
@@ -2670,13 +2573,8 @@ CODE_0790A5:
 	STA chrBankF				;C - - - - - 0x00F0CF 03:90BF: 85 50
 
 	LDA #.BANK(DATA_06BD75)					;C - - - - - 0x00F0D1 03:90C1: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00F0D3 03:90C3: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00F0D5 03:90C5: 20 56 FF
-.endif
 
 	JSR CODE_079B0F				;C - - - - - 0x00F0D8 03:90C8: 20 0F 9B
 	JSR CODE_0792D2				;C - - - - - 0x00F0DB 03:90CB: 20 D2 92
@@ -3029,13 +2927,8 @@ CODE_0792D8:
 		JSR CODE_0FF088				;C - - - - - 0x00F2EE 03:92DE: 20 88 F0
 
 		LDA #.BANK(DATA_06BD75)					;C - - - - - 0x00F2F1 03:92E1: A9 06
-.ifdef REGION_JP
-		STA prgBankB
-		STA $8001
-.else
 		STA newPrgBank				;C - - - - - 0x00F2F3 03:92E3: 85 3B
 		JSR SwapPrgBankB				;C - - - - - 0x00F2F5 03:92E5: 20 56 FF
-.endif
 CODE_0792E8:
 	CPX #$01					;C - - - - - 0x00F2F8 03:92E8: E0 01
 	BEQ CODE_07930A				;C - - - - - 0x00F2FA 03:92EA: F0 1E
@@ -3829,9 +3722,6 @@ CODE_07989F:
 		LDA #$01					;C - - - - - 0x00F8C9 03:98B9: A9 01
 		STA enemyReward+4				;C - - - - - 0x00F8CB 03:98BB: 85 92
 CODE_JP_0798CA:
-.ifdef REGION_JP
-		JMP CODE_0798BD					;- - - - - - 0x00F8DA 03:98CA: 4C
-.endif
 CODE_0798BD:
 	RTS							;C - - - - - 0x00F8CD 03:98BD: 60
 
@@ -3877,13 +3767,11 @@ DATA_0798F0:
 CODE_079900:
 	LDY #$00					;C - - - - - 0x00F910 03:9900: A0 00
 CODE_079902:
-.ifndef REGION_JP
 	LDA objY+OSLOT_BUBBLE+7				;C - - - - - 0x00F912 03:9902: AD A6 05
 	ORA objY+OSLOT_BUBBLE+8				;C - - - - - 0x00F915 03:9905: 0D A7 05
 	ORA objY+OSLOT_BUBBLE+9				;C - - - - - 0x00F918 03:9908: 0D A8 05
 	BNE CODE_079910				;C - - - - - 0x00F91B 03:990B: D0 03
 		JMP CODE_0799FA				;C - - - - - 0x00F91D 03:990D: 4C FA 99
-.endif
 CODE_079910:
 	LDA objState+OSLOT_PROJ,Y				;C - - - - - 0x00F920 03:9910: B9 64 05
 	BEQ CODE_079920				;C - - - - - 0x00F923 03:9913: F0 0B
@@ -4317,7 +4205,7 @@ CODE_079C05:
 CODE_079C10:
 	LDA #$01					;C - - - - - 0x00FC20 03:9C10: A9 01
 	STA scoreAdditionDigits+1				;C - - - - - 0x00FC22 03:9C12: 8D A2 04
-	JSR AddScore				;C - - - - - 0x00FC25 03:9C15: 20 C7 FE
+	JSR CoopAddScoreTeam		;(co-op 7b-3) team bonus: every player who is not out (was JSR AddScore)
 	LDX #BONUS_ANNOUNCE_100000					;C - - - - - 0x00FC28 03:9C18: A2 0A
 CODE_079C1A:
 	JSR DisplayBonusGameText				;C - - - - - 0x00FC2A 03:9C1A: 20 C4 9C
@@ -4431,13 +4319,8 @@ DisplayBonusGameText:
 
 @spawn:
 	LDA #.BANK(BonusAnnounceTable)					;C - - - - - 0x00FCE9 03:9CD9: A9 06
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x00FCEB 03:9CDB: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x00FCED 03:9CDD: 20 56 FF
-.endif
 
 	LDA BonusAnnounceTable,X			;C - - - - - 0x00FCF0 03:9CE0: BD F6 BD
 	STA scratch8				;C - - - - - 0x00FCF3 03:9CE3: 85 08

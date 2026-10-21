@@ -17,16 +17,13 @@ CODE_0FE001:
 	LDX #$00					;C - - - - - 0x01E01F 07:E00F: A2 00
 	DEX							;C - - - - - 0x01E021 07:E011: CA
 	TXS							;C - - - - - 0x01E022 07:E012: 9A
-	LDY #$00					;C - - - - - 0x01E023 07:E013: A0 00
-	LDX #$00					;C - - - - - 0x01E025 07:E015: A2 00
-CODE_0FE017:
-	NOP							;C - - - - - 0x01E027 07:E017: EA
-	NOP							;C - - - - - 0x01E028 07:E018: EA
-	DEX							;C - - - - - 0x01E029 07:E019: CA
-	BNE CODE_0FE017				;C - - - - - 0x01E02A 07:E01A: D0 FB
-
-	DEY							;C - - - - - 0x01E02C 07:E01C: 88
-	BNE CODE_0FE017				;C - - - - - 0x01E02D 07:E01D: D0 F8
+	;(Co-op 9.0) The power-on delay (originally LDY #0 / LDX #0 / 256 x 256 x NOP NOP DEX BNE here, 590851 cycles) now
+	;runs in CoopBoot (bank $10), which first copies the co-op WRAM code image to $7000-$7FFF and then waits out the
+	;rest: this sequence takes exactly as many cycles, so everything after it is cycle-identical. Ends with X = Y = 0.
+	LDA #.BANK(CoopBoot)
+	STA newPrgBank
+	JSR SwapPrgBankB			;Rule 9 order; NMI is off here
+	JSR CoopBoot
 
 	LDX #$02					;C - - - - - 0x01E02F 07:E01F: A2 02
 CODE_0FE021:
@@ -51,21 +48,12 @@ CODE_0FE026:
 	JSR MemInit					;C - - - - - 0x01E04B 07:E03B: 20 99 E0
 
 	LDA #.BANK(AdditionalTracks)					;C - - - - - 0x01E04E 07:E03E: A9 0D
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x01E050 07:E040: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x01E052 07:E042: 20 56 FF
-.endif
+	JSR CoopReset				;Co-op: enable PRG-RAM, clear COOP_BSS
 
 	JSR AudioInit				;C - - - - - 0x01E055 07:E045: 20 06 C0
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	LDA #snSilence_ID					;C - - - - - 0x01E058 07:E048: A9 00
 	STA a:soundTrigger			;C - - - - - 0x01E05A 07:E04A: 8D E1 00
@@ -87,13 +75,8 @@ CODE_0FE026:
 	STA irqSub+1				;C - - - - - 0x01E07A 07:E06A: 85 1C
 
 	LDA #$01					;C - - - - - 0x01E07C 07:E06C: A9 01
-.ifdef REGION_JP
-	STA $C003
-	STA $C003
-.else
 	STA $E000					;C - - - - - 0x01E07E 07:E06E: 8D 00 E0
 	STA $E000					;C - - - - - 0x01E081 07:E071: 8D 00 E0
-.endif
 
 	LDA bufPPUCTRL				;C - - - - - 0x01E084 07:E074: A5 32
 	ORA #PPU_NMI			;C - - - - - 0x01E086 07:E076: 09 80
@@ -229,11 +212,7 @@ IRQHandler:
 	PHA							;C - - - - - 0x01E146 07:E136: 48
 
 	LDA #$01					;C - - - - - 0x01E147 07:E137: A9 01
-.ifdef REGION_JP
-	STA $C003
-.else
 	STA $E000					;C - - - - - 0x01E149 07:E139: 8D 00 E0
-.endif
 	JMP (irqSub)				;C - - - - - 0x01E14C 07:E13C: 6C 1B 00
 IRQSubRet:
 	PLA							;C - - - - - 0x01E14F 07:E13F: 68
@@ -292,13 +271,8 @@ CODE_0FE171:
 		LDA irqLatch				;C - - - - - 0x01E19C 07:E18C: A5 1E
 		STA $C000				;C - - - - - 0x01E19E 07:E18E: 8D 00 C0
 		STA $C001				;C - - - - - 0x01E1A1 07:E191: 8D 01 C0
-.ifdef REGION_JP
-		STA $C003
-		STA $C002
-.else
 		STA $E000				;C - - - - - 0x01E1A4 07:E194: 8D 00 E0
 		STA $E001				;C - - - - - 0x01E1A7 07:E197: 8D 01 E0
-.endif
 @IRQEffectChecked:
 	JMP (nmiUnbankedSub)		;C - - - - - 0x01E1AA 07:E19A: 6C 35 00
 NMISubRet:
@@ -368,46 +342,34 @@ CODE_0FE1B6:
 	AND heldP2				;C - - - - - 0x01E222 07:E212: 25 0F
 	STA pressedP2				;C - - - - - 0x01E224 07:E214: 85 13
 
-.ifdef REGION_JP
-	JSR HaltDPadOpposites				;C - - - - - 0x01E22D 07:E21D: 20 FD E2
-.endif
 
 	INC globalTimer				;C - - - - - 0x01E226 07:E216: E6 14
 
-.ifdef REGION_JP
-	LDA chrBankA				;C - - - - - 0x01E232 07:E222: A5 4A
-	LSR							;C - - - - - 0x01E234 07:E224: 4A
-	STA $8002				;C - - - - - 0x01E235 07:E225: 8D 02 80
-	LDA chrBankB				;C - - - - - 0x01E238 07:E228: A5 4B
-	LSR							;C - - - - - 0x01E23A 07:E22A: 4A
-	STA $8003				;C - - - - - 0x01E23B 07:E22B: 8D 03 80
-
-	LDA chrBankC				;C - - - - - 0x01E23E 07:E22E: A5 4C
-	STA $A000				;C - - - - - 0x01E240 07:E230: 8D 00 A0
-	LDA chrBankD				;C - - - - - 0x01E243 07:E233: A5 4D
-	STA $A001				;C - - - - - 0x01E245 07:E235: 8D 01 A0
-	LDA chrBankE				;C - - - - - 0x01E248 07:E238: A5 4E
-	STA $A002				;C - - - - - 0x01E24A 07:E23A: 8D 02 A0
-	LDA chrBankF				;C - - - - - 0x01E24D 07:E23D: A5 4F
-	STA $A003				;C - - - - - 0x01E24F 07:E23F: 8D 03 A0
-
-	LDA nmiPrgBankA				;C - - - - - 0x01E252 07:E242: A5 50
-	STA prgBankA				;C - - - - - 0x01E254 07:E244: 85 54
-	STA $8000				;C - - - - - 0x01E256 07:E246: 8D 00 80
-
-	LDA nmiPrgBankB				;C - - - - - 0x01E259 07:E249: A5 51
-	STA prgBankB				;C - - - - - 0x01E25B 07:E24B: 85 53
-	STA $8001				;C - - - - - 0x01E25D 07:E24D: 8D 01 80
-.else
+	;(co-op 7b-1, D-7b-11) The bonus-game screen shows the HUD and the score panel (8x16 digits $6A-$7D) from the same
+	;HUD bank (Fans, chrFans_AA_ID) while the other half holds chrBonusRoom_A_ID. Only the hardware register gets the
+	;bonus copy (chrBonusHud_A_ID = chrFans_AA_ID | $80: original font KB, 8x8 HUD glyphs in $40-$4C); chrBankA/B
+	;keep the original values, so RAM is unchanged.
 	LDA #$00					;C - - - - - 0x01E228 07:E218: A9 00
 	STA $8000				;C - - - - - 0x01E22A 07:E21A: 8D 00 80
 	LDA chrBankA				;C - - - - - 0x01E22D 07:E21D: A5 4B
-	STA $8001				;C - - - - - 0x01E22F 07:E21F: 8D 01 80
+	CMP #chrFans_AA_ID
+	BNE :+
+	LDX chrBankB
+	CPX #chrBonusRoom_A_ID
+	BNE :+
+	ORA #$80					;= chrBonusHud_A_ID
+:	STA $8001				;C - - - - - 0x01E22F 07:E21F: 8D 01 80
 
 	LDA #$01					;C - - - - - 0x01E232 07:E222: A9 01
 	STA $8000				;C - - - - - 0x01E234 07:E224: 8D 00 80
 	LDA chrBankB				;C - - - - - 0x01E237 07:E227: A5 4C
-	STA $8001				;C - - - - - 0x01E239 07:E229: 8D 01 80
+	CMP #chrFans_AA_ID
+	BNE :+
+	LDX chrBankA
+	CPX #chrBonusRoom_A_ID
+	BNE :+
+	ORA #$80					;= chrBonusHud_A_ID
+:	STA $8001				;C - - - - - 0x01E239 07:E229: 8D 01 80
 
 	LDA #$02					;C - - - - - 0x01E23C 07:E22C: A9 02
 	STA $8000				;C - - - - - 0x01E23E 07:E22E: 8D 00 80
@@ -440,7 +402,6 @@ CODE_0FE1B6:
 	LDA nmiPrgBankB				;C - - - - - 0x01E275 07:E265: A5 52
 	STA $8001				;C - - - - - 0x01E277 07:E267: 8D 01 80
 	STA prgBankB				;C - - - - - 0x01E27A 07:E26A: 85 53
-.endif
 
 	LDA bufPPUCTRL				;C - - - - - 0x01E27C 07:E26C: A5 32
 	ORA #PPU_NMI			;C - - - - - 0x01E27E 07:E26E: 09 80
@@ -458,21 +419,11 @@ CODE_0FE1B6:
 	STA nmiProgress				;C - - - - - 0x01E291 07:E281: 85 15
 
 	LDA #.BANK(AdditionalTracks)					;C - - - - - 0x01E293 07:E283: A9 0D
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x01E295 07:E285: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x01E297 07:E287: 20 56 FF
-.endif
 
 	JSR AudioUpdate				;C - - - - - 0x01E29A 07:E28A: 20 39 C0
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	LDA #$00					;C - - - - - 0x01E29D 07:E28D: A9 00
 	STA nmiProgress				;C - - - - - 0x01E29F 07:E28F: 85 15
@@ -490,13 +441,8 @@ NMIShort:
 		LDA irqLatch				;C - - - - - 0x01E2AB 07:E29B: A5 1E
 		STA $C000				;C - - - - - 0x01E2AD 07:E29D: 8D 00 C0
 		STA $C001				;C - - - - - 0x01E2B0 07:E2A0: 8D 01 C0
-.ifdef REGION_JP
-		STA $C003
-		STA $C002
-.else
 		STA $E000				;C - - - - - 0x01E2B3 07:E2A3: 8D 00 E0
 		STA $E001				;C - - - - - 0x01E2B6 07:E2A6: 8D 01 E0
-.endif
 @IRQEffectChecked:
 	LDA bufPPUMASK				;C - - - - - 0x01E2B9 07:E2A9: A5 33
 	ORA #PPU_BG|PPU_OBJ	;C - - - - - 0x01E2BB 07:E2AB: 09 18
@@ -518,18 +464,14 @@ NMIShort:
 		INC nmiProgress				;C - - - - - 0x01E2DA 07:E2CA: E6 15
 		LDA irqEffect				;C - - - - - 0x01E2DC 07:E2CC: A5 1D
 		BNE CODE_0FE2E7				;C - - - - - 0x01E2DE 07:E2CE: D0 17
-.ifndef REGION_JP
 			LDA #$07					;C - - - - - 0x01E2E0 07:E2D0: A9 07
 			STA $8000				;C - - - - - 0x01E2E2 07:E2D2: 8D 00 80
-.endif
 			LDA #$0D					;C - - - - - 0x01E2E5 07:E2D5: A9 0D
 			STA $8001				;C - - - - - 0x01E2E7 07:E2D7: 8D 01 80
 			JSR AudioUpdate				;C - - - - - 0x01E2EA 07:E2DA: 20 39 C0
 
-.ifndef REGION_JP
 			LDA #$07					;C - - - - - 0x01E2ED 07:E2DD: A9 07
 			STA $8000				;C - - - - - 0x01E2EF 07:E2DF: 8D 00 80
-.endif
 			LDA prgBankB				;C - - - - - 0x01E2F2 07:E2E2: A5 53
 			STA $8001				;C - - - - - 0x01E2F4 07:E2E4: 8D 01 80
 CODE_0FE2E7:
@@ -574,42 +516,6 @@ CODE_0FE316:
 
 	RTS							;C - - - - - 0x01E32B 07:E31B: 60
 
-.ifdef REGION_JP
-HaltDPadOpposites:
-	LDA heldP1				;C - - - - - 0x01E30D 07:E2FD: A5 0A
-	LSR							;C - - - - - 0x01E30F 07:E2FF: 4A
-	AND heldP1				;C - - - - - 0x01E310 07:E300: 25 0A
-	AND #KEY_UP|KEY_DOWN|KEY_LEFT|KEY_RIGHT			;C - - - - - 0x01E312 07:E302: 29 F0
-	;Check if both UP and DOWN held (bits were next to each other, now combined if both were set)
-	CMP #KEY_UP					;C - - - - - 0x01E314 07:E304: C9 10
-	BEQ @p1bad				;C - - - - - 0x01E316 07:E306: F0 08
-	;Check if both LEFT and RIGHT held (bits were next to each other, now combined if both were set)
-	CMP #KEY_LEFT					;C - - - - - 0x01E318 07:E308: C9 40
-	BEQ @p1bad			;- - - - - - 0x01E31A 07:E30A: F0
-	CMP #KEY_UP|KEY_LEFT					;- - - - - - 0x01E31C 07:E30C: C9
-	BNE @p1checked			;- - - - - - 0x01E31E 07:E30E: D0
-@p1bad:
-	LDA #$00
-	STA heldP1				;C - - - - - 0x01E322 07:E312: 85 0A
-	STA pressedP1				;C - - - - - 0x01E324 07:E314: 85 0E
-@p1checked:
-	LDA heldP2				;C - - - - - 0x01E326 07:E316: A5 0F
-	LSR							;C - - - - - 0x01E328 07:E318: 4A
-	AND heldP2				;C - - - - - 0x01E329 07:E319: 25 0F
-	AND #KEY_UP|KEY_DOWN|KEY_LEFT|KEY_RIGHT			;C - - - - - 0x01E32B 07:E31B: 29 F0
-	CMP #KEY_UP					;C - - - - - 0x01E32D 07:E31D: C9 10
-	BEQ @p2bad				;C - - - - - 0x01E32F 07:E31F: F0 08
-	CMP #KEY_LEFT					;C - - - - - 0x01E331 07:E321: C9 40
-	BEQ @p2bad			;- - - - - - 0x01E333 07:E323: F0
-	CMP #KEY_UP|KEY_LEFT					;- - - - - - 0x01E335 07:E325: C9
-	BNE @p2checked			;- - - - - - 0x01E337 07:E327: D0
-@p2bad:
-	LDA #$00
-	STA heldP2				;C - - - - - 0x01E33B 07:E32B: 85 0F
-	STA pressedP2				;C - - - - - 0x01E33D 07:E32D: 85 13
-@p2checked:
-	RTS							;C - - - - - 0x01E33F 07:E32F: 60
-.endif
 
 CODE_0FE31C:
 	;A: To PPUADDR
@@ -686,6 +592,7 @@ DATA_0FE34B:
 	.byte $30					;- - - - - - 0x01E37A 07:E36A: 30
 
 CODE_0FE36B:
+	JSR CoopDespawnAll			;(co-op) every despawn of all objects takes P2 out of the round (7a: and resets the score owners)
 	LDX #$00					;C - - - - - 0x01E37B 07:E36B: A2 00
 	LDA #240					;C - - - - - 0x01E37D 07:E36D: A9 F0
 CODE_0FE36F:
@@ -885,29 +792,6 @@ CODE_0FE47F:
 CODE_0FE4C8:
 	RTS							;- - - - - - 0x01E4D8 07:E4C8: 60
 
-.ifdef REGION_JP
-CODE_JP_0FE4DD:
-	LDY #00					;- - - - - - 0x01E4ED 07:E4DD: A0
-	STY ram_055D					;- - - - - - 0x01E4EF 07:E4DF: 8C
-CODE_JP_0FE4E2:
-	LDA (scratch0),Y			;- - - - - - 0x01E4F2 07:E4E2: B1
-	CLC					;- - - - - - 0x01E4F4 07:E4E4: 18
-	ADC ram_055D					;- - - - - - 0x01E4F5 07:E4E5: 6D
-	STA ram_055D					;- - - - - - 0x01E4F8 07:E4E8: 8D
-	INC scratch0					;- - - - - - 0x01E4FB 07:E4EB: E6
-	BNE	CODE_JP_0FE4F1				;- - - - - - 0x01E4FD 07:E4ED: D0
-		INC scratch1					;- - - - - - 0x01E4FF 07:E4EF: E6
-CODE_JP_0FE4F1:
-	LDA scratch0					;- - - - - - 0x01E501 07:E4F1: A5
-	CMP scratch2					;- - - - - - 0x01E503 07:E4F3: C5
-	BNE	CODE_JP_0FE4E2				;- - - - - - 0x01E505 07:E4F5: D0
-
-	LDA scratch1				;C - - - - - 0x01E507 07:E4F7: A5 01
-	CMP scratch3				;C - - - - - 0x01E509 07:E4F9: C5 03
-	BNE CODE_JP_0FE4E2				;C - - - - - 0x01E50B 07:E4FB: D0 E5
-
-	RTS							;C - - - - - 0x01E50D 07:E4FD: 60
-.endif
 
 GetMapParams:
 	;00: map ID
@@ -916,13 +800,8 @@ GetMapParams:
 	PHA							;C - - - - - 0x01E4DA 07:E4CA: 48
 	LDA #.BANK(MapTable)					;C - - - - - 0x01E4DB 07:E4CB: A9 00
 
-.ifdef REGION_JP
-	STA prgBankB
-	STA $8001
-.else
 	STA newPrgBank				;C - - - - - 0x01E4DD 07:E4CD: 85 3B
 	JSR SwapPrgBankB				;C - - - - - 0x01E4DF 07:E4CF: 20 56 FF
-.endif
 
 	LDA #$00					;C - - - - - 0x01E4E2 07:E4D2: A9 00
 	STA scratch1				;C - - - - - 0x01E4E4 07:E4D4: 85 01
@@ -972,11 +851,6 @@ GetMapParams:
 	LDA (scratch2),Y			;C - - - - - 0x01E52B 07:E51B: B1 02
 	STA ram_0366				;C - - - - - 0x01E52D 07:E51D: 8D 66 03
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	PLA							;C - - - - - 0x01E530 07:E520: 68
 	TAY							;C - - - - - 0x01E531 07:E521: A8
@@ -1129,11 +1003,7 @@ CODE_0FE5F0:
 	STA updateSub+1				;C - - - - - 0x01E623 07:E613: 85 1A
 
 	LDA #$00					;C - - - - - 0x01E625 07:E615: A9 00
-.ifdef REGION_JP
-	STA $E000					;- - - - - - 0x01E663 07:E653: 8D
-.else
 	STA $A000				;C - - - - - 0x01E627 07:E617: 8D 00 A0
-.endif
 	LDA #$01					;C - - - - - 0x01E62A 07:E61A: A9 01
 	STA wideRound				;C - - - - - 0x01E62C 07:E61C: 8D B0 03
 	JSR LoadMap				;C - - - - - 0x01E62F 07:E61F: 20 23 E5
@@ -1156,13 +1026,8 @@ CODE_0FE626:
 	LDA #$00					;C - - - - - 0x01E646 07:E636: A9 00
 	STA wideRound				;C - - - - - 0x01E648 07:E638: 8D B0 03
 
-.ifdef REGION_JP
-	LDA #$40
-	STA $E000
-.else
 	LDA #$01					;C - - - - - 0x01E64B 07:E63B: A9 01
 	STA $A000				;C - - - - - 0x01E64D 07:E63D: 8D 00 A0
-.endif
 	LDA #.BANK(CODE_059D30)					;C - - - - - 0x01E650 07:E640: A9 05
 	STA nmiPrgBankA				;C - - - - - 0x01E652 07:E642: 85 51
 
@@ -1393,13 +1258,8 @@ DATA_0FE760:
 RunBankedSub:
 	LDA bankedSubBank				;C - - - - - 0x01E782 07:E772: A5 57
 
-.ifdef REGION_JP
-	STA prgBankA
-	STA $8000
-.else
 	STA newPrgBank				;C - - - - - 0x01E784 07:E774: 85 3B
 	JSR SwapPrgBankA				;C - - - - - 0x01E786 07:E776: 20 3D FF
-.endif
 
 	LDA bankedSubRetBank				;C - - - - - 0x01E789 07:E779: A5 58
 	PHA							;C - - - - - 0x01E78B 07:E77B: 48
@@ -1415,13 +1275,8 @@ RunBankedSub:
 	STA bankedSubRetBank				;C - - - - - 0x01E797 07:E787: 85 58
 	LDA bankedSubRetBank				;C - - - - - 0x01E799 07:E789: A5 58
 
-.ifdef REGION_JP
-	STA prgBankA
-	STA $8000
-.else
 	STA newPrgBank				;C - - - - - 0x01E79B 07:E78B: 85 3B
 	JSR SwapPrgBankA				;C - - - - - 0x01E79D 07:E78D: 20 3D FF
-.endif
 	RTS							;C - - - - - 0x01E7A0 07:E790: 60
 
 CODE_0FE791:
@@ -1746,6 +1601,10 @@ BrightenColors:
 	RTS							;C - - - - - 0x01E94A 07:E93A: 60
 
 CODE_0FE93B:
+	LDA hudJob					;(co-op 7b-1) a new HUD row is queued: CoopHudUpload uploads it instead
+	BEQ HudUploadOrig
+	JMP CoopHudUpload
+HudUploadOrig:
 	LDA PPUSTATUS				;C - - - - - 0x01E94B 07:E93B: AD 02 20
 	LDA mapTargetAdr+1				;C - - - - - 0x01E94E 07:E93E: A5 4A
 	STA PPUADDR				;C - - - - - 0x01E950 07:E940: 8D 06 20
@@ -1849,21 +1708,14 @@ DATA_0FE9F4:
 	.byte $30					;- - - - - - 0x01EA07 07:E9F7: 30
 
 SetRoundIRQ:
-.ifndef REGION_JP
 	LDA #$07					;C - - - - - 0x01EA08 07:E9F8: A9 07
 	STA $8000				;C - - - - - 0x01EA0A 07:E9FA: 8D 00 80
-.endif
 	LDA #.BANK(IRQRoundsLatch)					;C - - - - - 0x01EA0D 07:E9FD: A9 0A
-.ifdef REGION_JP
-	STA prgBankB					;- - - - - - 0x01EA46 07:EA36: 85
-	STA $8001					;- - - - - - 0x01EA48 07:EA38: 8D
-.else
 	;(Perf) Original order was STA $8001 / STA prgBankB: a lag NMI between the two stores
 	;restored the old prgBankB into $A000 and left prgBankB != mapped bank. This order is
 	;race-free (an NMIShort in between maps the new bank itself).
 	STA prgBankB				;C - - - - - 0x01EA12 07:EA02: 85 53
 	STA $8001				;C - - - - - 0x01EA0F 07:E9FF: 8D 01 80
-.endif
 
 	LDX #$00					;C - - - - - 0x01EA14 07:EA04: A2 00
 CODE_0FEA06:
@@ -1948,11 +1800,6 @@ CODE_0FEA84:
 		ADC #$00					;C - - - - - 0x01EAA1 07:EA91: 69 00
 		STA ram_0028				;C - - - - - 0x01EAA3 07:EA93: 85 28
 CODE_0FEA95:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01EAA5 07:EA95: 60
 
 DATA_0FEA96:
@@ -2145,11 +1992,7 @@ CODE_0FEB6C:
 	STY ram_0020				;C - - - - - 0x01EB7C 07:EB6C: 84 20
 	LDA ram_0769,X				;C - - - - - 0x01EB7E 07:EB6E: BD 69 07
 	STA $C001					;C - - - - - 0x01EB81 07:EB71: 8D 01 C0
-.ifdef REGION_JP
-	STA $C002					;- - - - - - 0x01EBC2 07:EBB2: 8D
-.else
 	STA $E001					;C - - - - - 0x01EB84 07:EB74: 8D 01 E0
-.endif
 CODE_0FEB77:
 	JMP IRQSubRet				;C - - - - - 0x01EB87 07:EB77: 4C 3F E1
 
@@ -2159,7 +2002,6 @@ CODE_0FEB7A:
 	TAX							;C - - - - - 0x01EB8D 07:EB7D: AA
 	LDA ram_0769,X				;C - - - - - 0x01EB8E 07:EB7E: BD 69 07
 	STA $C000				;C - - - - - 0x01EB91 07:EB81: 8D 00 C0
-.ifndef REGION_JP
 	NOP							;C - - - - - 0x01EB94 07:EB84: EA
 	NOP							;C - - - - - 0x01EB95 07:EB85: EA
 	NOP							;C - - - - - 0x01EB96 07:EB86: EA
@@ -2167,7 +2009,6 @@ CODE_0FEB7A:
 	NOP							;C - - - - - 0x01EB98 07:EB88: EA
 	NOP							;C - - - - - 0x01EB99 07:EB89: EA
 	NOP							;C - - - - - 0x01EB9A 07:EB8A: EA
-.endif
 	LDY ram_0020				;C - - - - - 0x01EB9B 07:EB8B: A4 20
 	LDA ram_0760,Y				;C - - - - - 0x01EB9D 07:EB8D: B9 60 07
 	ASL							;C - - - - - 0x01EBA0 07:EB90: 0A
@@ -2197,11 +2038,7 @@ CODE_0FEB7A:
 CODE_0FEBC0:
 	STY ram_0020				;C - - - - - 0x01EBD0 07:EBC0: 84 20
 	STA $C001					;C - - - - - 0x01EBD2 07:EBC2: 8D 01 C0
-.ifdef REGION_JP
-	STA $C002
-.else
 	STA $E001					;C - - - - - 0x01EBD5 07:EBC5: 8D 01 E0
-.endif
 CODE_0FEBC8:
 	JMP IRQSubRet				;C - - - - - 0x01EBD8 07:EBC8: 4C 3F E1
 
@@ -2360,41 +2197,18 @@ CODE_0FECBB:
 ;Height, horizontal speed (positive for left, negative for right)
 
 IRQTable_Round08:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED0C 07:ECFC: F2
-	.byte $F2,$FF
-	.byte $C2,$00
-	.byte $F0,$FF
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECD5 07:ECC5: 0E
 	.byte $0E,$FF
 	.byte $3E,$00
 	.byte $0E,$FF
 	.byte $00,$00
-.endif
 
 IRQTable_Round13:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED14 07:ED04: C2
-	.byte $C2,$01
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECDD 07:ECCD: 3E
 	.byte $3E,$01
 	.byte $00,$00
-.endif
 
 IRQTable_Round17:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED18 07:ED08: E9
-	.byte $E9,$01
-	.byte $F2,$00
-	.byte $E9,$FF
-	.byte $F2,$00
-	.byte $E9,$01
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECE1 07:ECD1: 16
 	.byte $16,$00
 	.byte $0E,$00
@@ -2402,49 +2216,22 @@ IRQTable_Round17:
 	.byte $0E,$00
 	.byte $16,$01
 	.byte $00,$00
-.endif
 
 IRQTable_Round20:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED24 07:ED14: 00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECED 07:ECDD: 00
 	.byte $00,$00
-.endif
 
 IRQTable_Round28:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED26 07:ED16: C0
-	.byte $C0,$00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECEF 07:ECDF: 40
 	.byte $40,$00
 	.byte $00,$00
-.endif
 
 IRQTable_Round33:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED2A 07:ED1A: DC
-	.byte $DC,$FF
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECF3 07:ECE3: 23
 	.byte $23,$FF
 	.byte $00,$00
-.endif
 
 IRQTable_Round38:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED2E 07:ED1E: E0
-	.byte $E0,$FF
-	.byte $E2,$00
-	.byte $E0,$01
-	.byte $E2,$00
-	.byte $E0,$FF
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ECF7 07:ECE7: 1F
 	.byte $1F,$FF
 	.byte $1E,$00
@@ -2452,38 +2239,17 @@ IRQTable_Round38:
 	.byte $1E,$00
 	.byte $1E,$FF
 	.byte $00,$00
-.endif
 
 IRQTable_Round40:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED3A 07:ED2A: 54
-	.byte $54,$00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED03 07:ECF3: AE
 	.byte $AE,$00
 	.byte $00,$00
-.endif
 
 IRQTable_Round43:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED3E 07:ED2E: 00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED07 07:ECF7: 00
 	.byte $00,$00
-.endif
 
 IRQTable_Round48:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED40 07:ED30: EC
-	.byte $EC,$00
-	.byte $F0,$00
-	.byte $EC,$00
-	.byte $F0,$00
-	.byte $EC,$00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED09 07:ECF9: 14
 	.byte $14,$00
 	.byte $10,$00
@@ -2491,57 +2257,29 @@ IRQTable_Round48:
 	.byte $10,$00
 	.byte $10,$00
 	.byte $00,$00
-.endif
 
 IRQTable_Round50:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED4C 07:ED3C: BD
-	.byte $BD,$00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED15 07:ED05: 42
 	.byte $42,$00
 	.byte $00,$00
-.endif
 
 IRQTable_Round57:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED50 07:ED40: B4
-	.byte $B4,$00
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED19 07:ED09: 4A
 	.byte $4A,$00
 	.byte $00,$00
-.endif
 
 IRQTable_Round60:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED54 07:ED44: 50
-	.byte $50,$FD
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED1D 07:ED0D: AF
 	.byte $AF,$FD
 	.byte $00,$00
-.endif
 
 IRQTable_Round72:
-.ifdef REGION_JP
-	;- - - - - - 0x01ED58 07:ED48: E2
-	.byte $E2,$01
-	.byte $E2,$FF
-	.byte $E2,$01
-	.byte $E2,$FF
-	.byte $00,$00
-.else
 	;- D 0 - - - 0x01ED21 07:ED11: 1E
 	.byte $1E,$01
 	.byte $1E,$FF
 	.byte $1E,$01
 	.byte $1E,$FF
 	.byte $00,$00
-.endif
 
 CODE_0FED1B:
 	;Unreached
@@ -2550,19 +2288,15 @@ CODE_0FED1B:
 	RTS							;- - - - - - 0x01ED2D 07:ED1D: 60
 
 AnimateObjects:
-.ifdef REGION_JP
-	LDA #.BANK(AnimTable)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x01ED2E 07:ED1E: A9 07
 	STA $8000				;C - - - - - 0x01ED32 07:ED22: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01ED35 07:ED25: A9 0C
 	STA prgBankB				;C - - - - - 0x01ED3A 07:ED2A: 85 53
 	STA $8001				;C - - - - - 0x01ED37 07:ED27: 8D 01 80
-.endif
 
 	LDX #20					;C - - - - - 0x01ED4A 07:ED3A: A2 14
+AnimateObjectsFromX:
+	;(Co-op) entry for one slot: CoopAnimateP2 maps AnimTable at $A000 itself and enters with X = 39
 @checkobj:
 	LDA objState,X				;C - - - - - 0x01ED4C 07:ED3C: BD 63 05
 	BEQ @nextobj				;C - - - - - 0x01ED4F 07:ED3F: F0 5C
@@ -2570,21 +2304,6 @@ AnimateObjects:
 	LDA objAnimTimer,X				;C - - - - - 0x01ED51 07:ED41: BD A3 06
 	BNE @waiting				;C - - - - - 0x01ED54 07:ED44: D0 54
 
-.ifdef REGION_JP
-	LDA objAnim,X				;C - - - - - 0x01ED56 07:ED46: BD 7B 06
-	STA scratch0				;C - - - - - 0x01ED59 07:ED49: 85 00
-	LDA objAnimHI,X				;C - - - - - 0x01ED5B 07:ED4B: BD 1B 07
-	STA scratch1				;C - - - - - 0x01ED5E 07:ED4E: 85 01
-	ASL scratch0				;C - - - - - 0x01ED60 07:ED50: 06 00
-	ROL scratch1				;C - - - - - 0x01ED62 07:ED52: 26 01
-	LDA scratch0				;C - - - - - 0x01ED64 07:ED54: A5 00
-	CLC							;C - - - - - 0x01ED66 07:ED56: 18
-	ADC #.LOBYTE(AnimTable)	;C - - - - - 0x01ED67 07:ED57: 69 00
-	STA scratch6				;C - - - - - 0x01ED69 07:ED59: 85 06
-	LDA scratch1				;C - - - - - 0x01ED6B 07:ED5B: A5 01
-	ADC #.HIBYTE(AnimTable)					;C - - - - - 0x01ED6D 07:ED5D: 69 A0
-	STA scratch7				;C - - - - - 0x01ED6F 07:ED5F: 85 07
-.else
 	;(Perf) scratch0/1 = objAnim*2 and scratch6/7 = AnimTable + objAnim*2, as the original
 	;`LDA/STA/LDA/STA / ASL scratch0 / ROL scratch1 / LDA scratch0 / CLC / ADC #<AnimTable /
 	;STA scratch6 / LDA scratch1 / ADC #>AnimTable / STA scratch7` (42 -> 28 cycles).
@@ -2601,7 +2320,6 @@ AnimateObjects:
 	CLC
 	ADC #.HIBYTE(AnimTable)
 	STA scratch7
-.endif
 	LDY #$00					;C - - - - - 0x01ED71 07:ED61: A0 00
 	LDA (scratch6),Y			;C - - - - - 0x01ED73 07:ED63: B1 06
 	STA scratch8				;C - - - - - 0x01ED75 07:ED65: 85 08
@@ -2645,11 +2363,6 @@ AnimateObjects:
 	CPX #40					;C - - - - - 0x01EDAE 07:ED9E: E0 28
 	BNE @checkobj				;C - - - - - 0x01EDB0 07:EDA0: D0 9A
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01EDB2 07:EDA2: 60
 
 CODE_0FEDA3:
@@ -2661,17 +2374,11 @@ CODE_0FEDA3:
 	PHA							;- - - - - - 0x01EDB6 07:EDA6: 48
 	
 	;ImageTable1 and ImageTable2 both at $A000 in their respective banks
-.ifdef REGION_JP
-	LDA #.BANK(ImageTable1)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;- - - - - - 0x01EDB7 07:EDA7: A9
 	STA $8000					;- - - - - - 0x01EDBB 07:EDAB: 8D
 	LDA #.BANK(ImageTable1)					;- - - - - - 0x01EDBE 07:EDAE: A9
 	STA prgBankB				;- - - - - - 0x01EDC3 07:EDB3: 85
 	STA $8001					;- - - - - - 0x01EDC0 07:EDB0: 8D
-.endif
 
 	LDA scratch0				;- - - - - - 0x01EDD3 07:EDC3: A5
 	CLC							;- - - - - - 0x01EDD5 07:EDC5: 18
@@ -2736,11 +2443,6 @@ CODE_0FEDF6:
 
 	STX oamBufferPos				;- - - - - - 0x01EE2F 07:EE1F: 8E
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	PLA							;- - - - - - 0x01EE32 07:EE22: 68
 	TAY							;- - - - - - 0x01EE33 07:EE23: A8
 	PLA							;- - - - - - 0x01EE34 07:EE24: 68
@@ -2778,17 +2480,11 @@ SpawnBubble:
 
 AnimateNonBubbles:
 	;Animate objects before bubble slots
-.ifdef REGION_JP
-	LDA #.BANK(AnimTable)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x01EE6C 07:EE5C: A9 07
 	STA $8000				;C - - - - - 0x01EE70 07:EE60: 8D 00 80
 	LDA #.BANK(AnimTable)					;C - - - - - 0x01EE73 07:EE63: A9 0C
 	STA prgBankB				;C - - - - - 0x01EE78 07:EE68: 85 53
 	STA $8001				;C - - - - - 0x01EE75 07:EE65: 8D 01 80
-.endif
 
 	LDX #$00					;C - - - - - 0x01EE88 07:EE78: A2 00
 @checkobj:
@@ -2798,22 +2494,6 @@ AnimateNonBubbles:
 	LDA objAnimTimer,X				;C - - - - - 0x01EE8F 07:EE7F: BD A3 06
 	BNE @waiting				;C - - - - - 0x01EE92 07:EE82: D0 55
 
-.ifdef REGION_JP
-	LDA objAnim,X				;C - - - - - 0x01EE94 07:EE84: BD 7B 06
-	STA scratch0				;C - - - - - 0x01EE97 07:EE87: 85 00
-	LDA objAnimHI,X				;C - - - - - 0x01EE99 07:EE89: BD 1B 07
-	STA scratch1				;C - - - - - 0x01EE9C 07:EE8C: 85 01
-	CLC							;C - - - - - 0x01EE9E 07:EE8E: 18
-	ASL scratch0				;C - - - - - 0x01EE9F 07:EE8F: 06 00
-	ROL scratch1				;C - - - - - 0x01EEA1 07:EE91: 26 01
-	LDA scratch0				;C - - - - - 0x01EEA3 07:EE93: A5 00
-	CLC							;C - - - - - 0x01EEA5 07:EE95: 18
-	ADC #$00					;C - - - - - 0x01EEA6 07:EE96: 69 00
-	STA scratch6				;C - - - - - 0x01EEA8 07:EE98: 85 06
-	LDA scratch1				;C - - - - - 0x01EEAA 07:EE9A: A5 01
-	ADC #$A0					;C - - - - - 0x01EEAC 07:EE9C: 69 A0
-	STA scratch7				;C - - - - - 0x01EEAE 07:EE9E: 85 07
-.else
 	;(Perf) Same as in AnimateObjects (the `ADC #$00` was a no-op with C = 0 and the CLC
 	;before ASL was dead: ASL sets C). 44 -> 28 cycles, same memory, A and flags.
 	LDA objAnim,X
@@ -2826,7 +2506,6 @@ AnimateNonBubbles:
 	CLC
 	ADC #$A0
 	STA scratch7
-.endif
 	LDY #$00					;C - - - - - 0x01EEB0 07:EEA0: A0 00
 	LDA (scratch6),Y			;C - - - - - 0x01EEB2 07:EEA2: B1 06
 	STA scratch8				;C - - - - - 0x01EEB4 07:EEA4: 85 08
@@ -2864,263 +2543,11 @@ AnimateNonBubbles:
 	CPX #20						;C - - - - - 0x01EEED 07:EEDD: E0 14
 	BNE @checkobj				;C - - - - - 0x01EEEF 07:EEDF: D0 99
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01EEF1 07:EEE1: 60
 
 DrawObjects:
-.ifdef REGION_JP
-	LDA sprPrgBank
-	STA prgBankB
-	STA $8001
-
-	LDA globalTimer				;C - - - - - 0x01EF10 07:EF00: A5 14
-	AND #$01					;C - - - - - 0x01EF12 07:EF02: 29 01
-	BEQ CODE_0FEF09				;C - - - - - 0x01EF14 07:EF04: F0 03
-		JMP CODE_0FEFBB				;C - - - - - 0x01EF16 07:EF06: 4C BB EF
-CODE_0FEF09:
-	;Even frame, draw all objects
-	LDA #$00					;C - - - - - 0x01EF19 07:EF09: A9 00
-	STA oamBufferPos				;C - - - - - 0x01EF1B 07:EF0B: 8D 5E 05
-	LDA #$00					;C - - - - - 0x01EF1E 07:EF0E: A9 00
-	STA scratch4				;C - - - - - 0x01EF20 07:EF10: 85 04
-CODE_0FEF12:
-	LDY scratch4				;C - - - - - 0x01EF22 07:EF12: A4 04
-	LDA ram_0475				;C - - - - - 0x01EF24 07:EF14: AD 75 04
-	BEQ CODE_0FEF21				;C - - - - - 0x01EF27 07:EF17: F0 08
-		CPY ram_0475				;C - - - - - 0x01EF29 07:EF19: CC 75 04
-		BCC CODE_0FEF21				;C - - - - - 0x01EF2C 07:EF1C: 90 03
-			JMP CODE_0FEFAA				;C - - - - - 0x01EF2E 07:EF1E: 4C AA EF
-CODE_0FEF21:
-	LDA objState,Y				;C - - - - - 0x01EF31 07:EF21: B9 63 05
-	BNE CODE_0FEF29				;C - - - - - 0x01EF34 07:EF24: D0 03
-		JMP CODE_0FEFAA				;C - - - - - 0x01EF36 07:EF26: 4C AA EF
-CODE_0FEF29:
-	LDA objAttr,Y				;C - - - - - 0x01EF39 07:EF29: B9 F3 06
-	STA sprAttr				;C - - - - - 0x01EF3C 07:EF2C: 8D 60 05
-	LDA objY,Y				;C - - - - - 0x01EF3F 07:EF2F: B9 8B 05
-	STA scratch2				;C - - - - - 0x01EF42 07:EF32: 85 02
-	LDA objX,Y				;C - - - - - 0x01EF44 07:EF34: B9 B3 05
-	STA scratch3				;C - - - - - 0x01EF47 07:EF37: 85 03
-
-	LDX objChrSlot,Y				;C - - - - - 0x01EF49 07:EF39: BE 2B 06
-	LDA objChrBank,Y				;C - - - - - 0x01EF4C 07:EF3C: B9 53 06
-	BEQ CODE_0FEF43				;C - - - - - 0x01EF4F 07:EF3F: F0 02
-		STA chrBankC,X				;C - - - - - 0x01EF51 07:EF41: 95 4D
-CODE_0FEF43:
-	LDA objImgOfs,Y				;C - - - - - 0x01EF53 07:EF43: B9 DB 05
-	CLC							;C - - - - - 0x01EF56 07:EF46: 18
-	ADC #$00					;C - - - - - 0x01EF57 07:EF47: 69 00
-	STA scratch0				;C - - - - - 0x01EF59 07:EF49: 85 00
-
-	LDA objImgOfsHI,Y				;C - - - - - 0x01EF5B 07:EF4B: B9 03 06
-	ADC #$A0					;C - - - - - 0x01EF5E 07:EF4E: 69 A0
-	STA scratch1				;C - - - - - 0x01EF60 07:EF50: 85 01
-
-	LDY #$00					;C - - - - - 0x01EF62 07:EF52: A0 00
-	LDA (scratch0),Y			;C - - - - - 0x01EF64 07:EF54: B1 00
-	STA scratch8				;C - - - - - 0x01EF66 07:EF56: 85 08
-
-	INY							;C - - - - - 0x01EF68 07:EF58: C8
-	LDA (scratch0),Y			;C - - - - - 0x01EF69 07:EF59: B1 00
-	STA scratch9				;C - - - - - 0x01EF6B 07:EF5B: 85 09
-
-	;Get size of sprite struct
-	LDY #$00					;C - - - - - 0x01EF6D 07:EF5D: A0 00
-	LDA (scratch8),Y			;C - - - - - 0x01EF6F 07:EF5F: B1 08
-	CLC							;C - - - - - 0x01EF71 07:EF61: 18
-	ADC #$01					;C - - - - - 0x01EF72 07:EF62: 69 01
-	STA scratch1				;C - - - - - 0x01EF74 07:EF64: 85 01
-
-	LDA SprBaseTiles,X			;C - - - - - 0x01EF76 07:EF66: BD 27 EE
-	STA scratch5				;C - - - - - 0x01EF79 07:EF69: 85 05
-	LDX oamBufferPos				;C - - - - - 0x01EF7B 07:EF6B: AE 5E 05
-	LDY #$01					;C - - - - - 0x01EF7E 07:EF6E: A0 01
-CODE_0FEF70:
-	;02: Base Y
-	;03: Base X
-	;05: Base tile number
-	;sprAttr: Attributes
-
-	;Get Y
-	LDA (scratch8),Y			;C - - - - - 0x01EF80 07:EF70: B1 08
-	CLC							;C - - - - - 0x01EF82 07:EF72: 18
-	ADC scratch2				;C - - - - - 0x01EF83 07:EF73: 65 02
-	STA OAMBuffer,X				;C - - - - - 0x01EF85 07:EF75: 9D 00 02
-	INX							;C - - - - - 0x01EF88 07:EF78: E8
-	INY							;C - - - - - 0x01EF89 07:EF79: C8
-
-	;Get tile number
-	LDA (scratch8),Y			;C - - - - - 0x01EF8A 07:EF7A: B1 08
-	CLC							;C - - - - - 0x01EF8C 07:EF7C: 18
-	ADC scratch5				;C - - - - - 0x01EF8D 07:EF7D: 65 05
-	STA OAMBuffer,X				;C - - - - - 0x01EF8F 07:EF7F: 9D 00 02
-	INX							;C - - - - - 0x01EF92 07:EF82: E8
-	INY							;C - - - - - 0x01EF93 07:EF83: C8
-
-	;Get attributes
-	LDA (scratch8),Y			;C - - - - - 0x01EF94 07:EF84: B1 08
-	ORA sprAttr				;C - - - - - 0x01EF96 07:EF86: 0D 60 05
-	STA OAMBuffer,X				;C - - - - - 0x01EF99 07:EF89: 9D 00 02
-	INX							;C - - - - - 0x01EF9C 07:EF8C: E8
-	INY							;C - - - - - 0x01EF9D 07:EF8D: C8
-
-	;Get X
-	LDA (scratch8),Y			;C - - - - - 0x01EF9E 07:EF8E: B1 08
-	CLC							;C - - - - - 0x01EFA0 07:EF90: 18
-	ADC scratch3				;C - - - - - 0x01EFA1 07:EF91: 65 03
-	STA OAMBuffer,X				;C - - - - - 0x01EFA3 07:EF93: 9D 00 02
-	INX							;C - - - - - 0x01EFA6 07:EF96: E8
-	CPX #$00					;C - - - - - 0x01EFA7 07:EF97: E0 00
-	BNE CODE_0FEF9E				;C - - - - - 0x01EFA9 07:EF99: D0 03
-		JMP CODE_0FF079				;C - - - - - 0x01EFAB 07:EF9B: 4C 79 F0
-CODE_0FEF9E:
-	INY							;C - - - - - 0x01EFAE 07:EF9E: C8
-	CPY scratch1				;C - - - - - 0x01EFAF 07:EF9F: C4 01
-	BNE CODE_0FEF70				;C - - - - - 0x01EFB1 07:EFA1: D0 CD
-
-	STX oamBufferPos				;C - - - - - 0x01EFB3 07:EFA3: 8E 5E 05
-	CPX #$00					;C - - - - - 0x01EFB6 07:EFA6: E0 00
-	BEQ CODE_0FEFB8				;C - - - - - 0x01EFB8 07:EFA8: F0 0E
-CODE_0FEFAA:
-	INC scratch4				;C - - - - - 0x01EFBA 07:EFAA: E6 04
-	LDA scratch4				;C - - - - - 0x01EFBC 07:EFAC: A5 04
-	CMP #40					;C - - - - - 0x01EFBE 07:EFAE: C9 28
-	BEQ CODE_0FEFB5				;C - - - - - 0x01EFC0 07:EFB0: F0 03
-		JMP CODE_0FEF12				;C - - - - - 0x01EFC2 07:EFB2: 4C 12 EF
-CODE_0FEFB5:
-	JMP CODE_0FF064				;C - - - - - 0x01EFC5 07:EFB5: 4C 64 F0
-
-CODE_0FEFB8:
-	;Unreached
-	;OAM buffer completely full
-	JMP CODE_0FF064				;- - - - - - 0x01EFC8 07:EFB8: 4C
-
-CODE_0FEFBB:
-	;Uneven frame,
-	LDA #$00					;C - - - - - 0x01EFCB 07:EFBB: A9 00
-	STA oamBufferPos				;C - - - - - 0x01EFCD 07:EFBD: 8D 5E 05
-	LDA #$27					;C - - - - - 0x01EFD0 07:EFC0: A9 27
-	STA scratch4				;C - - - - - 0x01EFD2 07:EFC2: 85 04
-CODE_0FEFC4:
-	LDY scratch4				;C - - - - - 0x01EFD4 07:EFC4: A4 04
-	LDA ram_0475				;C - - - - - 0x01EFD6 07:EFC6: AD 75 04
-	BEQ CODE_0FEFD3				;C - - - - - 0x01EFD9 07:EFC9: F0 08
-		CPY ram_0475				;C - - - - - 0x01EFDB 07:EFCB: CC 75 04
-		BCC CODE_0FEFD3				;C - - - - - 0x01EFDE 07:EFCE: 90 03
-			JMP CODE_0FF059				;C - - - - - 0x01EFE0 07:EFD0: 4C 59 F0
-CODE_0FEFD3:
-	LDA objState,Y				;C - - - - - 0x01EFE3 07:EFD3: B9 63 05
-	BNE CODE_0FEFDB				;C - - - - - 0x01EFE6 07:EFD6: D0 03
-		JMP CODE_0FF059				;C - - - - - 0x01EFE8 07:EFD8: 4C 59 F0
-CODE_0FEFDB:
-	LDA objAttr,Y				;C - - - - - 0x01EFEB 07:EFDB: B9 F3 06
-	STA sprAttr				;C - - - - - 0x01EFEE 07:EFDE: 8D 60 05
-	LDA objY,Y				;C - - - - - 0x01EFF1 07:EFE1: B9 8B 05
-	STA scratch2				;C - - - - - 0x01EFF4 07:EFE4: 85 02
-	LDA objX,Y				;C - - - - - 0x01EFF6 07:EFE6: B9 B3 05
-	STA scratch3				;C - - - - - 0x01EFF9 07:EFE9: 85 03
-	LDX objChrSlot,Y				;C - - - - - 0x01EFFB 07:EFEB: BE 2B 06
-	LDA objChrBank,Y				;C - - - - - 0x01EFFE 07:EFEE: B9 53 06
-	BEQ CODE_0FEFF5				;C - - - - - 0x01F001 07:EFF1: F0 02
-		STA chrBankC,X				;C - - - - - 0x01F003 07:EFF3: 95 4D
-CODE_0FEFF5:
-	LDA objImgOfs,Y				;C - - - - - 0x01F005 07:EFF5: B9 DB 05
-	CLC							;C - - - - - 0x01F008 07:EFF8: 18
-	ADC #$00					;C - - - - - 0x01F009 07:EFF9: 69 00
-	STA scratch0				;C - - - - - 0x01F00B 07:EFFB: 85 00
-
-	LDA objImgOfsHI,Y				;C - - - - - 0x01F00D 07:EFFD: B9 03 06
-	ADC #$A0					;C - - - - - 0x01F010 07:F000: 69 A0
-	STA scratch1				;C - - - - - 0x01F012 07:F002: 85 01
-
-	LDY #$00					;C - - - - - 0x01F014 07:F004: A0 00
-	LDA (scratch0),Y			;C - - - - - 0x01F016 07:F006: B1 00
-	STA scratch8				;C - - - - - 0x01F018 07:F008: 85 08
-
-	INY							;C - - - - - 0x01F01A 07:F00A: C8
-	LDA (scratch0),Y			;C - - - - - 0x01F01B 07:F00B: B1 00
-	STA scratch9				;C - - - - - 0x01F01D 07:F00D: 85 09
-
-	LDY #$00					;C - - - - - 0x01F01F 07:F00F: A0 00
-	LDA (scratch8),Y			;C - - - - - 0x01F021 07:F011: B1 08
-	CLC							;C - - - - - 0x01F023 07:F013: 18
-	ADC #$01					;C - - - - - 0x01F024 07:F014: 69 01
-	STA scratch1				;C - - - - - 0x01F026 07:F016: 85 01
-
-	LDA SprBaseTiles,X			;C - - - - - 0x01F028 07:F018: BD 27 EE
-	STA scratch5				;C - - - - - 0x01F02B 07:F01B: 85 05
-	LDX oamBufferPos				;C - - - - - 0x01F02D 07:F01D: AE 5E 05
-	LDY #$01					;C - - - - - 0x01F030 07:F020: A0 01
-CODE_0FF022:
-	;Get Y
-	LDA (scratch8),Y			;C - - - - - 0x01F032 07:F022: B1 08
-	CLC							;C - - - - - 0x01F034 07:F024: 18
-	ADC scratch2				;C - - - - - 0x01F035 07:F025: 65 02
-	STA OAMBuffer,X				;C - - - - - 0x01F037 07:F027: 9D 00 02
-	INX							;C - - - - - 0x01F03A 07:F02A: E8
-	INY							;C - - - - - 0x01F03B 07:F02B: C8
-
-	;Get tile number
-	LDA (scratch8),Y			;C - - - - - 0x01F03C 07:F02C: B1 08
-	CLC							;C - - - - - 0x01F03E 07:F02E: 18
-	ADC scratch5				;C - - - - - 0x01F03F 07:F02F: 65 05
-	STA OAMBuffer,X				;C - - - - - 0x01F041 07:F031: 9D 00 02
-	INX							;C - - - - - 0x01F044 07:F034: E8
-	INY							;C - - - - - 0x01F045 07:F035: C8
-
-	;Get attr
-	LDA (scratch8),Y			;C - - - - - 0x01F046 07:F036: B1 08
-	ORA sprAttr				;C - - - - - 0x01F048 07:F038: 0D 60 05
-	STA OAMBuffer,X				;C - - - - - 0x01F04B 07:F03B: 9D 00 02
-	INX							;C - - - - - 0x01F04E 07:F03E: E8
-	INY							;C - - - - - 0x01F04F 07:F03F: C8
-
-	;Get X
-	LDA (scratch8),Y			;C - - - - - 0x01F050 07:F040: B1 08
-	CLC							;C - - - - - 0x01F052 07:F042: 18
-	ADC scratch3				;C - - - - - 0x01F053 07:F043: 65 03
-	STA OAMBuffer,X				;C - - - - - 0x01F055 07:F045: 9D 00 02
-
-	INX							;C - - - - - 0x01F058 07:F048: E8
-	CPX #$00					;C - - - - - 0x01F059 07:F049: E0 00
-	BEQ CODE_0FF079				;C - - - - - 0x01F05B 07:F04B: F0 2C
-
-	INY							;C - - - - - 0x01F05D 07:F04D: C8
-	CPY scratch1				;C - - - - - 0x01F05E 07:F04E: C4 01
-	BNE CODE_0FF022				;C - - - - - 0x01F060 07:F050: D0 D0
-
-	STX oamBufferPos				;C - - - - - 0x01F062 07:F052: 8E 5E 05
-	CPX #$00					;C - - - - - 0x01F065 07:F055: E0 00
-	BEQ CODE_0FF079				;C - - - - - 0x01F067 07:F057: F0 20
-CODE_0FF059:
-	DEC scratch4				;C - - - - - 0x01F069 07:F059: C6 04
-	LDA scratch4				;C - - - - - 0x01F06B 07:F05B: A5 04
-	CMP #$FF					;C - - - - - 0x01F06D 07:F05D: C9 FF
-	BEQ CODE_0FF064				;C - - - - - 0x01F06F 07:F05F: F0 03
-		JMP CODE_0FEFC4				;C - - - - - 0x01F071 07:F061: 4C C4 EF
-CODE_0FF064:
-	LDX oamBufferPos				;C - - - - - 0x01F074 07:F064: AE 5E 05
-CODE_0FF067:
-	LDA #$F0					;C - - - - - 0x01F077 07:F067: A9 F0
-	STA OAMBuffer,X				;C - - - - - 0x01F079 07:F069: 9D 00 02
-	LDA #$01					;C - - - - - 0x01F07C 07:F06C: A9 01
-	STA OAMBuffer+1,X				;C - - - - - 0x01F07E 07:F06E: 9D 01 02
-	INX							;C - - - - - 0x01F081 07:F071: E8
-	INX							;C - - - - - 0x01F082 07:F072: E8
-	INX							;C - - - - - 0x01F083 07:F073: E8
-	INX							;C - - - - - 0x01F084 07:F074: E8
-	CPX #$00					;C - - - - - 0x01F085 07:F075: E0 00
-	BNE CODE_0FF067				;C - - - - - 0x01F087 07:F077: D0 EE
-CODE_0FF079:
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-	RTS							;C - - - - - 0x01F089 07:F079: 60
-.else
+	JMP CoopDrawObjects			;(co-op 7b-1) hides the HUD icon (slot OSLOT_ICON) in place
+DrawObjectsBody:
 	;(Perf) US: optimized copy, see docs/perf_notes.md "Phase 5". JP keeps the original.
 	LDA #$07					;C - - - - - 0x01EEF2 07:EEE2: A9 07
 	STA $8000				;C - - - - - 0x01EEF6 07:EEE6: 8D 00 80
@@ -3440,7 +2867,6 @@ DrawObjects_FillDone:
 	CPX #$00
 CODE_0FF079:
 	RTS							;C - - - - - 0x01F089 07:F079: 60
-.endif
 
 CODE_0FF07A:
 	LDA ram_0081				;C - - - - - 0x01F08A 07:F07A: A5 81
@@ -4152,70 +3578,34 @@ GetTile:
 	;01: X
 
 	LDA irqEffect				;C - - - - - 0x01F4DB 07:F4CB: A5 1D
-.ifdef REGION_JP
-	BEQ CODE_0FF563					;- - - - - - 0x01F4DB 07:F4CB: F0
-.else
-	BNE CODE_0FF4D2				;C - - - - - 0x01F4DD 07:F4CD: D0 03
-		JMP CODE_0FF563				;C - - - - - 0x01F4DF 07:F4CF: 4C 63 F5
-.endif
+	;(Perf 9.4) was BNE CODE_0FF4D2 / JMP CODE_0FF563: the irqEffect 0 path (60 % of the calls) branches directly
+	;(the unreached irqEffect 2 block moved after the RTS to bring CODE_0FF563 into branch range); same A / flags:
+	;CODE_0FF563 starts with LDA scratch0, the other paths with CMP.
+	BEQ CODE_0FF563
 CODE_0FF4D2:
 	CMP #$02					;C - - - - - 0x01F4E2 07:F4D2: C9 02
-	BEQ CODE_0FF50A				;C - - - - - 0x01F4E4 07:F4D4: F0 34
+	BEQ CODE_0FF50Aj			;(Perf 9.4) was BEQ CODE_0FF50A (now out of range)
 
 	CMP #$05					;C - - - - - 0x01F4E6 07:F4D6: C9 05
 	BEQ CODE_0FF549				;C - - - - - 0x01F4E8 07:F4D8: F0 6F
 
-.ifdef REGION_JP
-	LDA #.BANK(RoundsFlowTable)
-	STA prgBankB
-	STA $8001
-.else
 	LDA #$07					;C - - - - - 0x01F4EA 07:F4DA: A9 07
 	STA $8000				;C - - - - - 0x01F4EE 07:F4DE: 8D 00 80
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F4F1 07:F4E1: A9 06
 	STA prgBankB				;C - - - - - 0x01F4F6 07:F4E6: 85 53
 	STA $8001				;C - - - - - 0x01F4F3 07:F4E3: 8D 01 80
-.endif
 
 	LDA scratch0				;C - - - - - 0x01F506 07:F4F6: A5 00
 	AND #$F8					;C - - - - - 0x01F508 07:F4F8: 29 F8
 	TAY							;C - - - - - 0x01F50A 07:F4FA: A8
 	LDA (ram_0027),Y			;C - - - - - 0x01F50B 07:F4FB: B1 27
 	STA ram_0080				;C - - - - - 0x01F50D 07:F4FD: 85 80
-.ifdef REGION_JP
-	BEQ CODE_0FF563				;C - - - - - 0x01F50F 07:F4FF: F0 62
-.else
 	BEQ CODE_0FF563f
-.endif
 
 	TAY							;C - - - - - 0x01F511 07:F501: A8
 	LDA ram_0760,Y				;C - - - - - 0x01F512 07:F502: B9 60 07
 	STA ram_00D2				;C - - - - - 0x01F515 07:F505: 85 D2
 	JMP CODE_0FF535				;C - - - - - 0x01F517 07:F507: 4C 35 F5
-CODE_0FF50A:
-	;Unreached
-
-.ifdef REGION_JP
-	LDA #.BANK(RoundsFlowTable)
-	STA prgBankB
-	STA $8001
-.else
-	LDA #$07					;- - - - - - 0x01F51A 07:F50A: A9
-	STA $8000					;- - - - - - 0x01F51E 07:F50E: 8D
-	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F521 07:F511: A9
-	STA prgBankB				;- - - - - - 0x01F526 07:F516: 85
-	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
-.endif
-
-	LDA scratch0				;- - - - - - 0x01F536 07:F526: A5
-	AND #$F8					;- - - - - - 0x01F538 07:F528: 29
-	BEQ CODE_0FF563				;- - - - - - 0x01F53A 07:F52A: F0
-
-	TAY							;- - - - - - 0x01F53C 07:F52C: A8
-	LDA (ram_0027),Y			;- - - - - - 0x01F53D 07:F52D: B1
-	TAY							;- - - - - - 0x01F53F 07:F52F: A8
-	LDA flowAdr+1,Y				;- - - - - - 0x01F540 07:F530: B9
-	STA ram_00D3				;- - - - - - 0x01F543 07:F533: 85
 CODE_0FF535:
 	LDA scratch0				;C - - - - - 0x01F545 07:F535: A5 00
 	CLC							;C - - - - - 0x01F547 07:F537: 18
@@ -4227,15 +3617,14 @@ CODE_0FF535:
 	ADC ram_00D2				;C - - - - - 0x01F551 07:F541: 65 D2
 	STA ram_001F				;C - - - - - 0x01F553 07:F543: 85 1F
 	CLC							;C - - - - - 0x01F555 07:F545: 18
-.ifdef REGION_JP
-	JMP CODE_0FF56D				;C - - - - - 0x01F556 07:F546: 4C 6D F5
-.else
 	;(Perf) Flow path (irqEffect 1/3/4): bank 6 (RoundsFlowTable) was just mapped, so the
 	;terrainBank switch below is never redundant here (measured 0%), and the selector is
 	;still 7 (no other $8000 write since; NMIShort also leaves 7), so the switch needs no
 	;STA $8000. The other paths take the guarded switch at CODE_0FF56E. Same code as
 	;CODE_0FF563/CODE_0FF56D up to the switch.
 	JMP CODE_0FF56Df
+CODE_0FF50Aj:
+	JMP CODE_0FF50A				;(Perf 9.4) the irqEffect 2 block (unreached) is after GetTile's RTS
 CODE_0FF563f:
 	LDA scratch0
 	AND #$F0
@@ -4247,15 +3636,13 @@ CODE_0FF56Df:
 	LSR
 	LSR
 	LSR
-	CLC
-	ADC scratch2
+	ORA scratch2					;(Perf 9.4) was CLC / ADC: A <= $0F, low nibble of scratch2 = 0 (see CODE_0FF56E)
 	STA ram_0046
 	TAY
 	LDA terrainBank
 	STA prgBankB
 	STA $8001
 	JMP CODE_0FF595
-.endif
 CODE_0FF549:
 	LDA scratch0				;C - - - - - 0x01F559 07:F549: A5 00
 	AND #$F0					;C - - - - - 0x01F55B 07:F54B: 29 F0
@@ -4284,16 +3671,14 @@ CODE_0FF56E:
 	LSR							;C - - - - - 0x01F57E 07:F56E: 4A
 	LSR							;C - - - - - 0x01F57F 07:F56F: 4A
 	LSR							;C - - - - - 0x01F580 07:F570: 4A
-	CLC							;C - - - - - 0x01F581 07:F571: 18
-	ADC scratch2				;C - - - - - 0x01F582 07:F572: 65 02
+	;(Perf 9.4) was CLC / ADC scratch2: the bits never overlap (irqEffect 0: A <= $0F, scratch2 = Y & $F0;
+	;irqEffect 5: A <= $1F after the ROR, scratch2 = (Y & $F0) << 1), so ORA gives the same A / N / Z and the ADC
+	;could not carry or overflow. C (bit shifted out by the LSR) and V (unchanged) differ but are dead: the CMP
+	;prgBankB below redefines C, and the tile * 5 ADC redefines V before the RTS (no BVC/BVS on the way).
+	ORA scratch2
 	STA ram_0046				;C - - - - - 0x01F584 07:F574: 85 46
 	TAY							;C - - - - - 0x01F586 07:F576: A8
 
-.ifdef REGION_JP
-	LDA terrainBank
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F58E 07:F57E: AD 5B 07
@@ -4304,34 +3689,29 @@ CODE_0FF56E:
 	STA $8000				;C - - - - - 0x01F58B 07:F57B: 8D 00 80
 	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F591 07:F581: 8D 01 80
-.endif
 CODE_0FF595:
 	;Get 16x16 tile number
 	LDA (terrainAdr),Y			;C - - - - - 0x01F5A5 07:F595: B1 42
 	STA scratch3				;C - - - - - 0x01F5A7 07:F597: 85 03
-	STA scratch6				;C - - - - - 0x01F5A9 07:F599: 85 06
-	LDA #$00					;C - - - - - 0x01F5AB 07:F59B: A9 00
-	STA scratch7				;C - - - - - 0x01F5AD 07:F59D: 85 07
-	ASL scratch6				;C - - - - - 0x01F5AF 07:F59F: 06 06
-	ROL scratch7				;C - - - - - 0x01F5B1 07:F5A1: 26 07
-	ASL scratch6				;C - - - - - 0x01F5B3 07:F5A3: 06 06
-	ROL scratch7				;C - - - - - 0x01F5B5 07:F5A5: 26 07
-	;Now times 4 (16-bit)
-	LDA scratch6				;C - - - - - 0x01F5B7 07:F5A7: A5 06
-	CLC							;C - - - - - 0x01F5B9 07:F5A9: 18
-	ADC scratch3				;C - - - - - 0x01F5BA 07:F5AA: 65 03
-	STA scratch6				;C - - - - - 0x01F5BC 07:F5AC: 85 06
-	LDA scratch7				;C - - - - - 0x01F5BE 07:F5AE: A5 07
-	ADC #$00					;C - - - - - 0x01F5C0 07:F5B0: 69 00
-	STA scratch7				;C - - - - - 0x01F5C2 07:F5B2: 85 07
-	;Now times 5 (16-bit)
-	LDA terrainTypeDefs				;C - - - - - 0x01F5C4 07:F5B4: A5 40
-	CLC							;C - - - - - 0x01F5C6 07:F5B6: 18
-	ADC scratch6				;C - - - - - 0x01F5C7 07:F5B7: 65 06
-	STA terrainTileDef				;C - - - - - 0x01F5C9 07:F5B9: 85 60
-	LDA terrainTypeDefs+1				;C - - - - - 0x01F5CB 07:F5BB: A5 41
-	ADC scratch7				;C - - - - - 0x01F5CD 07:F5BD: 65 07
-	STA terrainTileDef+1				;C - - - - - 0x01F5CF 07:F5BF: 85 61
+	;(Perf 9.4) tile * 5 with the low byte in A (was ASL/ROL on scratch6 and two separate 16-bit adds):
+	;the same scratch6/7 (= tile * 5), terrainTileDef (= terrainTypeDefs + tile * 5), and the same C/V/N/Z
+	;from the last ADC (same operands, same carry in). Y is reloaded below (LDY #$01).
+	LDY #$00
+	STY scratch7
+	ASL
+	ROL scratch7
+	ASL
+	ROL scratch7					;C = 0 (scratch7 was 0 or 1)
+	ADC scratch3					;tile * 4 + tile, low byte
+	STA scratch6
+	BCC :+
+	INC scratch7
+:	CLC
+	ADC terrainTypeDefs
+	STA terrainTileDef
+	LDA scratch7
+	ADC terrainTypeDefs+1
+	STA terrainTileDef+1
 
 	LDY #$01					;C - - - - - 0x01F5D1 07:F5C1: A0 01
 	LDA scratch0				;C - - - - - 0x01F5D3 07:F5C3: A5 00
@@ -4354,12 +3734,29 @@ CODE_0FF5DA:
 	STA scratch4				;C - - - - - 0x01F5F0 07:F5E0: 85 04
 	STY ram_075C				;C - - - - - 0x01F5F2 07:F5E2: 8C 5C 07
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F5F5 07:F5E5: 60
+
+CODE_0FF50A:
+	;Unreached
+
+	LDA #$07					;- - - - - - 0x01F51A 07:F50A: A9
+	STA $8000					;- - - - - - 0x01F51E 07:F50E: 8D
+	LDA #.BANK(RoundsFlowTable)					;- - - - - - 0x01F521 07:F511: A9
+	STA prgBankB				;- - - - - - 0x01F526 07:F516: 85
+	STA $8001					;- - - - - - 0x01F523 07:F513: 8D
+
+	LDA scratch0				;- - - - - - 0x01F536 07:F526: A5
+	AND #$F8					;- - - - - - 0x01F538 07:F528: 29
+	BNE :+						;(Perf 9.4) was BEQ CODE_0FF563 (out of range after the move)
+	JMP CODE_0FF563
+:
+
+	TAY							;- - - - - - 0x01F53C 07:F52C: A8
+	LDA (ram_0027),Y			;- - - - - - 0x01F53D 07:F52D: B1
+	TAY							;- - - - - - 0x01F53F 07:F52F: A8
+	LDA flowAdr+1,Y				;- - - - - - 0x01F540 07:F530: B9
+	STA ram_00D3				;- - - - - - 0x01F543 07:F533: 85
+	JMP CODE_0FF535				;(Perf 9.4) was the fall-through into CODE_0FF535 before the move
 
 CODE_0FF5E6:
 	LDA irqEffect				;C - - - - - 0x01F5F6 07:F5E6: A5 1D
@@ -4368,11 +3765,6 @@ CODE_0FF5E6:
 	CMP #$01					;C - - - - - 0x01F5FA 07:F5EA: C9 01
 	BNE CODE_0FF629				;C - - - - - 0x01F5FC 07:F5EC: D0 3B
 
-.ifdef REGION_JP
-	LDA #.BANK(RoundsFlowTable)
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when the bank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F605 07:F5F5: A9 06
@@ -4384,7 +3776,6 @@ CODE_0FF5E6:
 	LDA #.BANK(RoundsFlowTable)
 	STA $8001				;C - - - - - 0x01F607 07:F5F7: 8D 01 80
 @mapped:
-.endif
 
 	LDA scratch0				;C - - - - - 0x01F61A 07:F60A: A5 00
 	AND #$F8					;C - - - - - 0x01F61C 07:F60C: 29 F8
@@ -4394,11 +3785,6 @@ CODE_0FF5E6:
 	LDA ram_0760,Y				;C - - - - - 0x01F622 07:F612: B9 60 07
 	STA ram_00D2				;C - - - - - 0x01F625 07:F615: 85 D2
 
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 
 	LDA scratch0				;C - - - - - 0x01F627 07:F617: A5 00
 	CLC							;C - - - - - 0x01F629 07:F619: 18
@@ -4408,21 +3794,23 @@ CODE_0FF5E6:
 	LDA scratch1				;C - - - - - 0x01F630 07:F620: A5 01
 	CLC							;C - - - - - 0x01F632 07:F622: 18
 	ADC ram_00D2				;C - - - - - 0x01F633 07:F623: 65 D2
-	CLC							;C - - - - - 0x01F635 07:F625: 18
+	;(Perf 9.4) a CLC was here: dead (the LSRs at CODE_0FF632 shift a 0 in and C out)
 	JMP CODE_0FF632				;C - - - - - 0x01F636 07:F626: 4C 32 F6
 CODE_0FF629:
 	LDA scratch0				;C - - - - - 0x01F639 07:F629: A5 00
 	AND #$F0					;C - - - - - 0x01F63B 07:F62B: 29 F0
 	STA scratch2				;C - - - - - 0x01F63D 07:F62D: 85 02
 	LDA scratch1				;C - - - - - 0x01F63F 07:F62F: A5 01
-	CLC							;C - - - - - 0x01F641 07:F631: 18
+	;(Perf 9.4) a CLC was here: dead, the LSRs below shift a 0 in and C out
 CODE_0FF632:
 	LSR							;C - - - - - 0x01F642 07:F632: 4A
 	LSR							;C - - - - - 0x01F643 07:F633: 4A
 	LSR							;C - - - - - 0x01F644 07:F634: 4A
 	LSR							;C - - - - - 0x01F645 07:F635: 4A
-	CLC							;C - - - - - 0x01F646 07:F636: 18
-	ADC scratch2				;C - - - - - 0x01F647 07:F637: 65 02
+	;(Perf 9.4) was CLC / ADC scratch2: A <= $0F and scratch2 has a zero low nibble on both paths ((Y & $F0), or
+	;(Y + ram_00D3) & $F0), so ORA gives the same A / N / Z; the ADC could not carry. C is redefined by CODE_0FF986's
+	;CMP prgBankB; V (ADC: 0, now unchanged) is read by no code outside the audio bank (no BVC/BVS).
+	ORA scratch2
 	STA ram_0046				;C - - - - - 0x01F649 07:F639: 85 46
 	JSR CODE_0FF986				;C - - - - - 0x01F64B 07:F63B: 20 86 F9
 	LDA scratch5				;C - - - - - 0x01F64E 07:F63E: A5 05
@@ -4718,11 +4106,6 @@ CheckWall:
 	;03: ??
 	;04: ??
 
-.ifdef REGION_JP
-	LDA terrainBank
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F7F9 07:F7E9: AD 5B 07
@@ -4734,7 +4117,6 @@ CheckWall:
 	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F7FC 07:F7EC: 8D 01 80
 @mapped:
-.endif
 
 	LDA scratch4				;C - - - - - 0x01F810 07:F800: A5 04
 	CMP solidTerrainStart0				;C - - - - - 0x01F812 07:F802: CD 4B 07
@@ -4749,19 +4131,9 @@ CODE_0FF815:
 	LDA #$00					;C - - - - - 0x01F825 07:F815: A9 00
 	STA scratch4				;C - - - - - 0x01F827 07:F817: 85 04
 CODE_0FF819:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F829 07:F819: 60
 
 CheckFloor:
-.ifdef REGION_JP
-	LDA terrainBank
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F831 07:F821: AD 5B 07
@@ -4773,7 +4145,6 @@ CheckFloor:
 	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F834 07:F824: 8D 01 80
 @mapped:
-.endif
 
 	LDA scratch4				;C - - - - - 0x01F848 07:F838: A5 04
 	CMP solidTerrainStart0				;C - - - - - 0x01F84A 07:F83A: CD 4B 07
@@ -4788,19 +4159,9 @@ CODE_0FF84D:
 	LDA #$00					;C - - - - - 0x01F85D 07:F84D: A9 00
 	STA scratch4				;C - - - - - 0x01F85F 07:F84F: 85 04
 CODE_0FF851:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F861 07:F851: 60
 
 CODE_0FF852:
-.ifdef REGION_JP
-	LDA terrainBank
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F869 07:F859: AD 5B 07
@@ -4812,7 +4173,6 @@ CODE_0FF852:
 	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F86C 07:F85C: 8D 01 80
 @mapped:
-.endif
 
 	LDA scratch4				;C - - - - - 0x01F880 07:F870: A5 04
 	CMP solidTerrainStart0				;C - - - - - 0x01F882 07:F872: CD 4B 07
@@ -4846,27 +4206,23 @@ CODE_0FF88C:
 CODE_0FF8A7:
 	LDA (terrainAdr),Y			;C - - - - - 0x01F8B7 07:F8A7: B1 42
 	STA scratch5				;C - - - - - 0x01F8B9 07:F8A9: 85 05
-	STA scratch6				;C - - - - - 0x01F8BB 07:F8AB: 85 06
-	LDA #$00					;C - - - - - 0x01F8BD 07:F8AD: A9 00
-	STA scratch7				;C - - - - - 0x01F8BF 07:F8AF: 85 07
-	ASL scratch6				;C - - - - - 0x01F8C1 07:F8B1: 06 06
-	ROL scratch7				;C - - - - - 0x01F8C3 07:F8B3: 26 07
-	ASL scratch6				;C - - - - - 0x01F8C5 07:F8B5: 06 06
-	ROL scratch7				;C - - - - - 0x01F8C7 07:F8B7: 26 07
-	LDA scratch6				;C - - - - - 0x01F8C9 07:F8B9: A5 06
-	CLC							;C - - - - - 0x01F8CB 07:F8BB: 18
-	ADC scratch5				;C - - - - - 0x01F8CC 07:F8BC: 65 05
-	STA scratch6				;C - - - - - 0x01F8CE 07:F8BE: 85 06
-	LDA scratch7				;C - - - - - 0x01F8D0 07:F8C0: A5 07
-	ADC #$00					;C - - - - - 0x01F8D2 07:F8C2: 69 00
-	STA scratch7				;C - - - - - 0x01F8D4 07:F8C4: 85 07
-	LDA terrainTypeDefs				;C - - - - - 0x01F8D6 07:F8C6: A5 40
-	CLC							;C - - - - - 0x01F8D8 07:F8C8: 18
-	ADC scratch6				;C - - - - - 0x01F8D9 07:F8C9: 65 06
-	STA scratch6				;C - - - - - 0x01F8DB 07:F8CB: 85 06
-	LDA terrainTypeDefs+1				;C - - - - - 0x01F8DD 07:F8CD: A5 41
-	ADC scratch7				;C - - - - - 0x01F8DF 07:F8CF: 65 07
-	STA scratch7				;C - - - - - 0x01F8E1 07:F8D1: 85 07
+	;(Perf 9.4) tile * 5 with the low byte in A (as in GetTile): the same scratch5, scratch6/7 (= terrainTypeDefs
+	;+ tile * 5) and the same C/V from the last ADC (same operands, same carry in). Y is reloaded below.
+	LDY #$00
+	STY scratch7
+	ASL
+	ROL scratch7
+	ASL
+	ROL scratch7					;C = 0 (scratch7 was 0 or 1)
+	ADC scratch5					;tile * 4 + tile, low byte
+	BCC :+
+	INC scratch7
+:	CLC
+	ADC terrainTypeDefs
+	STA scratch6
+	LDA scratch7
+	ADC terrainTypeDefs+1
+	STA scratch7
 	LDY ram_075C				;C - - - - - 0x01F8E3 07:F8D3: AC 5C 07
 	INY							;C - - - - - 0x01F8E6 07:F8D6: C8
 	INY							;C - - - - - 0x01F8E7 07:F8D7: C8
@@ -4885,19 +4241,9 @@ CODE_0FF8E4:
 			LDA #$00					;C - - - - - 0x01F8FE 07:F8EE: A9 00
 			STA scratch4				;C - - - - - 0x01F900 07:F8F0: 85 04
 CODE_0FF8F2:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F902 07:F8F2: 60
 
 CODE_0FF8F3:
-.ifdef REGION_JP
-	LDA terrainBank
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when terrainBank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA terrainBank				;C - - - - - 0x01F90A 07:F8FA: AD 5B 07
@@ -4909,7 +4255,6 @@ CODE_0FF8F3:
 	LDA prgBankB
 	STA $8001				;C - - - - - 0x01F90D 07:F8FD: 8D 01 80
 @mapped:
-.endif
 
 	LDA scratch4				;C - - - - - 0x01F921 07:F911: A5 04
 	CMP solidTerrainStart0				;C - - - - - 0x01F923 07:F913: CD 4B 07
@@ -4974,19 +4319,9 @@ CODE_0FF977:
 			LDA #$00					;C - - - - - 0x01F991 07:F981: A9 00
 			STA scratch4				;C - - - - - 0x01F993 07:F983: 85 04
 CODE_0FF985:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
 	RTS							;C - - - - - 0x01F995 07:F985: 60
 
 CODE_0FF986:
-.ifdef REGION_JP
-	LDA #.BANK(RoundsFlowTable)
-	STA prgBankB
-	STA $8001
-.else
 	;(Perf) Guard: skip the switch when the bank is already mapped (prgBankB mirrors the
 	;$A000 slot, see docs/perf_notes.md "Phase 2+3"). Race-free order: prgBankB first.
 	LDA #.BANK(RoundsFlowTable)					;C - - - - - 0x01F99D 07:F98D: A9 06
@@ -4998,7 +4333,6 @@ CODE_0FF986:
 	LDA #.BANK(RoundsFlowTable)
 	STA $8001				;C - - - - - 0x01F99F 07:F98F: 8D 01 80
 @mapped:
-.endif
 
 	LDA ram_0046				;C - - - - - 0x01F9B2 07:F9A2: A5 46
 	LSR							;C - - - - - 0x01F9B4 07:F9A4: 4A
@@ -5015,20 +4349,18 @@ CODE_0FF986:
 	TAY							;C - - - - - 0x01F9C9 07:F9B9: A8
 	LDA DATA_0FF9CE,Y			;C - - - - - 0x01F9CA 07:F9BA: B9 CE F9
 	AND scratch5				;C - - - - - 0x01F9CD 07:F9BD: 25 05
-	STA scratch5				;C - - - - - 0x01F9CF 07:F9BF: 85 05
+	;(Perf 9.4) the shift is made in A and stored once (was STA scratch5 / LSR scratch5 x 2 per step / JMP): the same
+	;scratch5, Y = 3 and Z = C = 1, N = 0 from CPY #3; A is the shifted value (was the unshifted one): the only caller,
+	;CODE_0FF5E6, reloads A (LDA scratch5) right after.
 CODE_0FF9C1:
 	CPY #$03					;C - - - - - 0x01F9D1 07:F9C1: C0 03
 	BEQ CODE_0FF9CD				;C - - - - - 0x01F9D3 07:F9C3: F0 08
-		LSR scratch5				;C - - - - - 0x01F9D5 07:F9C5: 46 05
-		LSR scratch5				;C - - - - - 0x01F9D7 07:F9C7: 46 05
+		LSR
+		LSR
 		INY							;C - - - - - 0x01F9D9 07:F9C9: C8
-		JMP CODE_0FF9C1				;C - - - - - 0x01F9DA 07:F9CA: 4C C1 F9
+		BNE CODE_0FF9C1				;(always: Y <= 3 here)
 CODE_0FF9CD:
-.ifdef REGION_JP
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-.endif
+	STA scratch5
 	RTS							;C - - - - - 0x01F9DD 07:F9CD: 60
 
 DATA_0FF9CE:
@@ -5059,12 +4391,10 @@ CODE_0FF9E8:
 	LDA shooting				;C - - - - - 0x01F9FC 07:F9EC: AD 17 05
 	BEQ CODE_0FFA55				;C - - - - - 0x01F9FF 07:F9EF: F0 64
 
-.ifndef REGION_JP
 	LDY shootInitialSlot				;C - - - - - 0x01FA01 07:F9F1: AC 18 05
 	LDA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x01FA04 07:F9F4: B9 77 05
 	CMP #$80					;C - - - - - 0x01FA07 07:F9F7: C9 80
 	BNE CODE_0FFA55				;C - - - - - 0x01FA09 07:F9F9: D0 5A
-.endif
 
 	LDY shootQueuedBubbles				;C - - - - - 0x01FA0B 07:F9FB: AC 16 05
 	LDA DATA_0FFA56,Y			;C - - - - - 0x01FA0E 07:F9FE: B9 56 FA
@@ -5113,6 +4443,10 @@ CODE_0FFA49:
 		ORA #$80					;C - - - - - 0x01FA61 07:FA51: 09 80
 		STA ram_00CA				;C - - - - - 0x01FA63 07:FA53: 85 CA
 CODE_0FFA55:
+	BIT coopP2Active				;co-op: the other player's emerging bubble gets the same test
+	BPL :+							;(it returns at once if this one already flagged the enemy)
+		JMP CoopCaptureOther
+:
 	RTS							;C - - - - - 0x01FA65 07:FA55: 60
 
 DATA_0FFA56:
@@ -5199,51 +4533,22 @@ DATA_0FFA7E:
 	.byte $09					;- D 0 - - - 0x01FAB2 07:FAA2: 09
 
 CODE_0FFAA3:
-.ifdef REGION_JP
-	LDA objChrSlot+OSLOT_ENEMY,X					;- - - - - - 0x01FA13 07:FA03: BD
-	STA scratch8					;- - - - - - 0x01FA16 07:FA06: 85
-.endif
 
 	LDY shootInitialSlot				;C - - - - - 0x01FAB3 07:FAA3: AC 18 05
 	TXA							;C - - - - - 0x01FAB6 07:FAA6: 8A
 	STA bubbleTrappedSlot,Y				;C - - - - - 0x01FAB7 07:FAA7: 99 FF 04
-.ifdef REGION_JP
-	LDA #$03					;- - - - - - 0x01FA1F 07:FA0F: A9
-.else
 	LDA #$88					;C - - - - - 0x01FABA 07:FAAA: A9 88
-.endif
 	STA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x01FABC 07:FAAC: 99 77 05
 
-.ifdef REGION_JP
-	LDA scratch8				;- - - - - - 0x01FA24 07:FA14: A5
-	STA objChrSlot+OSLOT_BUBBLE,Y					;- - - - - - 0x01FA26 07:FA16: 99
-	LDA objChrBank+OSLOT_ENEMY,X					;- - - - - - 0x01FA29 07:FA19: BD
-	STA objChrBank+OSLOT_BUBBLE,Y					;- - - - - - 0x01FA2C 07:FA1C: 99
-	LDA enemyType,X					;- - - - - - 0x01FA2F 07:FA1F: B5
-	CLC							;- - - - - - 0x01FA31 07:FA21: 18
-	ADC #anSpringitBlast_ID					;- - - - - - 0x01FA32 07:FA22: 69
-	STA objAnim+OSLOT_BUBBLE,Y					;- - - - - - 0x01FA34 07:FA24: 99
-	LDA objY+OSLOT_ENEMY,X					;- - - - - - 0x01FA37 07:FA27: BD
-	STA objY+OSLOT_BUBBLE,Y					;- - - - - - 0x01FA3A 07:FA2A: 99
-	LDA objX+OSLOT_ENEMY,X					;- - - - - - 0x01FA3D 07:FA2D: BD
-	STA objX+OSLOT_BUBBLE,Y					;- - - - - - 0x01FA40 07:FA30: 99
-.endif
 
 	LDA #$00					;C - - - - - 0x01FABF 07:FAAF: A9 00
 	STA ram_00CA				;C - - - - - 0x01FAC1 07:FAB1: 85 CA
 
-.ifdef REGION_JP
-	STA objAnimProgress+OSLOT_BUBBLE,Y					;- - - - - - 0x01FA47 07:FA37: 99
-	STA objAnimTimer+OSLOT_BUBBLE,Y						;- - - - - - 0x01FA4A 07:FA3A: 99
-	STA shooting					;- - - - - - 0x01FA4D 07:FA3D: 8D
-	STA shootQueuedBubbles					;- - - - - - 0x01FA50 07:FA40: 8D
-.endif
 
 	STA ram_00AC,X				;C - - - - - 0x01FAC3 07:FAB3: 95 AC
 	STA enemyHits,X				;C - - - - - 0x01FAC5 07:FAB5: 9D BE 04
 	RTS							;C - - - - - 0x01FAC8 07:FAB8: 60
 
-.ifndef REGION_JP
 CODE_0FFAB9:
 	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x01FAC9 07:FAB9: BD 77 05
 	CMP #$88					;C - - - - - 0x01FACC 07:FABC: C9 88
@@ -5281,31 +4586,24 @@ CODE_0FFAFA:
 	STA shootQueuedBubbles				;C - - - - - 0x01FB18 07:FB08: 8D 16 05
 CODE_0FFB0B:
 	RTS							;C - - - - - 0x01FB1B 07:FB0B: 60
-.endif
 
 CODE_0FFB0C:
 	LDA shooting				;C - - - - - 0x01FB1C 07:FB0C: AD 17 05
 	BEQ CODE_0FFB19				;C - - - - - 0x01FB1F 07:FB0F: F0 08
 		LDY shootInitialSlot				;C - - - - - 0x01FB21 07:FB11: AC 18 05
-.ifdef REGION_JP
-		LDA #$19					;- - - - - - 0x01FA62 07:FA52: 19
-.else
 		LDA #$89					;C - - - - - 0x01FB24 07:FB14: A9 89
-.endif
 		STA objState+OSLOT_BUBBLE,Y				;C - - - - - 0x01FB26 07:FB16: 99 77 05
 
-.ifdef REGION_JP
-		LDA #$00					;- - - - - - 0x01FA66 07:FA56: A9
-		STA bubbleProgress,Y					;- - - - - - 0x01FA68 07:FA58: 99
-		STA shooting					;- - - - - - 0x01FA6B 07:FA5B: 8D
-		STA shootQueuedBubbles					;- - - - - - 0x01FA6E 07:FA5E: 8D
-.endif
 CODE_0FFB19:
 	RTS							;C - - - - - 0x01FB29 07:FB19: 60
 
 PlayerCheckEnemyCollision:
-	LDA #$00					;C - - - - - 0x01FB2A 07:FB1A: A9 00
-	STA scratch1				;C - - - - - 0x01FB2C 07:FB1C: 85 01
+	;(Perf 9.4) the slot is kept in X (was scratch1 = 0 here, LDX scratch1 at @checkslot, and INC scratch1 /
+	;LDX scratch1 / CPX #9 / BEQ @end / JMP @checkslot at the old @next). scratch1 is written where the original
+	;leaves it at the two exits: the slot at "Collision confirmed", 9 at the loop end. The loop step sits in front
+	;of @checkslot (falls into it: no taken branch per slot, and the tests branch back to it on the same page).
+	;Every other instruction is unchanged, so A / X / Y / N / Z / C / V at both exits are the same.
+	LDX #$00
 	LDA objX				;C - - - - - 0x01FB2E 07:FB1E: AD B3 05
 	STA scratch2				;C - - - - - 0x01FB31 07:FB21: 85 02
 	LDA objY				;C - - - - - 0x01FB33 07:FB23: AD 8B 05
@@ -5313,8 +4611,16 @@ PlayerCheckEnemyCollision:
 	;01: Enemy slot
 	;02: X
 	;03: Y
+	JMP @checkslot
+@done:
+	STX scratch1					;= 9, as the original loop end leaves it (Z = C = 1, N = 0 from CPX #9 as before)
+	RTS
+@notvalid:
+@next:
+	INX
+	CPX #9
+	BEQ @done
 @checkslot:
-	LDX scratch1				;C - - - - - 0x01FB38 07:FB28: A6 01
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x01FB3A 07:FB2A: BD 6C 05
 	BEQ @notvalid				;C - - - - - 0x01FB3D 07:FB2D: F0 38
 
@@ -5350,8 +4656,6 @@ PlayerCheckEnemyCollision:
 	STA scratch4				;C - - - - - 0x01FB70 07:FB60: 85 04
 	INC scratch4				;C - - - - - 0x01FB72 07:FB62: E6 04
 	JMP @havehdist				;C - - - - - 0x01FB74 07:FB64: 4C 6C FB
-@notvalid:
-	JMP @next				;C - - - - - 0x01FB77 07:FB67: 4C E3 FB
 @poshdist:
 	STA scratch4				;C - - - - - 0x01FB7A 07:FB6A: 85 04
 @havehdist:
@@ -5377,6 +4681,7 @@ PlayerCheckEnemyCollision:
 	BCC @next				;C - - - - - 0x01FB99 07:FB89: 90 58
 
 	;Collision confirmed
+	STX scratch1					;(Perf 9.4) the slot, as LDX scratch1 left it in the original
 	LDA objState+OSLOT_ENEMY,X				;C - - - - - 0x01FB9B 07:FB8B: BD 6C 05
 	CMP #ENEMY_COLLECTABLE					;C - - - - - 0x01FB9E 07:FB8E: C9 0D
 	BNE @notreward				;C - - - - - 0x01FBA0 07:FB90: D0 33
@@ -5424,12 +4729,6 @@ PlayerCheckEnemyCollision:
 	ORA #DMG_ENEMY					;C - - - - - 0x01FBEC 07:FBDC: 09 80
 	STA playerDmgType				;C - - - - - 0x01FBEE 07:FBDE: 85 7C
 	JMP @end				;C - - - - - 0x01FBF0 07:FBE0: 4C EE FB
-@next:
-	INC scratch1				;C - - - - - 0x01FBF3 07:FBE3: E6 01
-	LDX scratch1				;C - - - - - 0x01FBF5 07:FBE5: A6 01
-	CPX #9					;C - - - - - 0x01FBF7 07:FBE7: E0 09
-	BEQ @end				;C - - - - - 0x01FBF9 07:FBE9: F0 03
-		JMP @checkslot				;C - - - - - 0x01FBFB 07:FBEB: 4C 28 FB
 @end:
 	RTS							;C - - - - - 0x01FBFE 07:FBEE: 60
 
@@ -5589,7 +4888,7 @@ PopBubble:
 	STA objAnimProgress+OSLOT_ENEMY,X				;C - - - - - 0x01FCCA 07:FCBA: 9D D4 06
 	STA objAnimTimer+OSLOT_ENEMY,X				;C - - - - - 0x01FCCD 07:FCBD: 9D AC 06
 	STA ram_00AC,X				;C - - - - - 0x01FCD0 07:FCC0: 95 AC
-	INC ram_051A				;C - - - - - 0x01FCD2 07:FCC2: EE 1A 05
+	JSR CoopCountKill			;(co-op 7a) INC ram_051A; the bubble's owner killed the enemy
 @pop:
 	LDX scratch1				;C - - - - - 0x01FCD5 07:FCC5: A6 01
 	LDA #BUBBLE_POPPING					;C - - - - - 0x01FCD7 07:FCC7: A9 22
@@ -5775,6 +5074,13 @@ CODE_0FFDA1:
 	STA scratch0				;C - - - - - 0x01FDB3 07:FDA3: 85 00
 	LDA objState,X				;C - - - - - 0x01FDB5 07:FDA5: BD 63 05
 	BEQ CODE_0FFDEE				;C - - - - - 0x01FDB8 07:FDA8: F0 44
+	;(co-op 8) P2's object is neither shifted nor despawned here: CoopCamera moves it with the world (2 px per
+	;scrolled tick) and its leash keeps it on screen
+	CPX #OSLOT_P2
+	BNE :+
+	BIT coopP2Active
+	BMI CODE_0FFDEE				;(X = 39: on to the next slot)
+:
 
 	LDA wideScrollDir				;C - - - - - 0x01FDBA 07:FDAA: A5 31
 	CMP #$01					;C - - - - - 0x01FDBC 07:FDAC: C9 01
@@ -5920,13 +5226,8 @@ SpawnProj:
 	PHA							;C - - - - - 0x01FE94 07:FE84: 48
 	LDA #.BANK(SpawnProj_Local)					;C - - - - - 0x01FE95 07:FE85: A9 05
 
-.ifdef REGION_JP
-	STA prgBankA
-	STA $8000
-.else
 	STA newPrgBank				;C - - - - - 0x01FE97 07:FE87: 85 3B
 	JSR SwapPrgBankA				;C - - - - - 0x01FE99 07:FE89: 20 3D FF
-.endif
 
 	JSR SpawnProj_Local				;C - - - - - 0x01FE9C 07:FE8C: 20 6D 9C
 
@@ -5934,226 +5235,11 @@ SpawnProj:
 	STA prgBankA				;C - - - - - 0x01FEA0 07:FE90: 85 54
 	LDA prgBankA				;C - - - - - 0x01FEA2 07:FE92: A5 54
 
-.ifdef REGION_JP
-	STA prgBankA
-	STA $8000
-.else
 	STA newPrgBank				;C - - - - - 0x01FEA4 07:FE94: 85 3B
 	JSR SwapPrgBankA				;C - - - - - 0x01FEA6 07:FE96: 20 3D FF
-.endif
 	RTS							;C - - - - - 0x01FEA9 07:FE99: 60
 
-.ifdef REGION_JP
-;For US, this is located in bank 09 instead
-BubblesTravelUpdate:
-	LDA #8					;C - - - - - 0x013DAA 04:9D9A: A9 08
-	STA collW				;C - - - - - 0x013DAC 04:9D9C: 85 D0
-	STA collH				;C - - - - - 0x013DAE 04:9D9E: 85 D1
 
-	LDX #$00					;C - - - - - 0x013DB0 04:9DA0: A2 00
-	STX ram_051B				;C - - - - - 0x013DB2 04:9DA2: 8E 1B 05
-	TXA							;C - - - - - 0x013DB5 04:9DA5: 8A
-@clear:
-	STA bubbleDir,X				;C - - - - - 0x013DB6 04:9DA6: 9D EB 04
-	INX							;C - - - - - 0x013DB9 04:9DA9: E8
-	CPX #20					;C - - - - - 0x013DBA 04:9DAA: E0 14
-	BNE @clear				;C - - - - - 0x013DBC 04:9DAC: D0 F8
-
-	LDA globalTimer				;C - - - - - 0x013DBE 04:9DAE: A5 14
-	AND #$06					;C - - - - - 0x013DC0 04:9DB0: 29 06
-	STA scratch6				;C - - - - - 0x013DC2 04:9DB2: 85 06
-	LDX #$00					;C - - - - - 0x013DC4 04:9DB4: A2 00
-	STX scratch0				;C - - - - - 0x013DC6 04:9DB6: 86 00
-	LDA #$01					;C - - - - - 0x013DC8 04:9DB8: A9 01
-	STA scratch1				;C - - - - - 0x013DCA 04:9DBA: 85 01
-CODE_099DBC:
-	LDX scratch0				;C - - - - - 0x013DCC 04:9DBC: A6 00
-	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013DCE 04:9DBE: BD 77 05
-	BEQ CODE_099DDF				;C - - - - - 0x013DD1 04:9DC1: F0 1C
-	CMP #BUBBLE_EMERGING					;C - - - - - 0x013DD3 04:9DC3: C9 80
-.ifdef REGION_JP
-	BEQ CODE_099DDF					;- - - - - - 0x01FE1D 07:FE0D: F0
-.else
-	BCS CODE_099DDF				;C - - - - - 0x013DD5 04:9DC5: B0 18
-.endif
-
-	CMP #BUBBLE_POWER_POPPED					;C - - - - - 0x013DD7 04:9DC7: C9 06
-	BEQ CODE_099DDF				;C - - - - - 0x013DD9 04:9DC9: F0 14
-		CMP #BUBBLE_POPPED					;C - - - - - 0x013DDB 04:9DCB: C9 23
-		BEQ CODE_099DE2				;C - - - - - 0x013DDD 04:9DCD: F0 13
-			LDA bubbleDir,X				;C - - - - - 0x013DDF 04:9DCF: BD EB 04
-			BNE CODE_099DDF				;C - - - - - 0x013DE2 04:9DD2: D0 0B
-				LDA scratch0				;C - - - - - 0x013DE4 04:9DD4: A5 00
-				AND scratch6				;C - - - - - 0x013DE6 04:9DD6: 25 06
-				CMP scratch6				;C - - - - - 0x013DE8 04:9DD8: C5 06
-				BNE CODE_099DDF				;C - - - - - 0x013DEA 04:9DDA: D0 03
-					JMP CODE_099DE2				;C - - - - - 0x013DEC 04:9DDC: 4C E2 9D
-CODE_099DDF:
-	JMP CODE_099E88				;C - - - - - 0x013DEF 04:9DDF: 4C 88 9E
-CODE_099DE2:
-	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013DF2 04:9DE2: BD 77 05
-	STA scratch7				;C - - - - - 0x013DF5 04:9DE5: 85 07
-	LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x013DF7 04:9DE7: BD C7 05
-	STA scratch2				;C - - - - - 0x013DFA 04:9DEA: 85 02
-	LDA objY+OSLOT_BUBBLE,X				;C - - - - - 0x013DFC 04:9DEC: BD 9F 05
-	STA scratch3				;C - - - - - 0x013DFF 04:9DEF: 85 03
-CODE_099DF1:
-	;01: Other bubble slot
-	;02: X
-	;03: Y
-	;07: State
-
-	LDA #$00					;C - - - - - 0x013E01 04:9DF1: A9 00
-	STA scratch8				;C - - - - - 0x013E03 04:9DF3: 85 08
-	STA scratch9				;C - - - - - 0x013E05 04:9DF5: 85 09
-
-	LDX scratch1				;C - - - - - 0x013E07 04:9DF7: A6 01
-	LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013E09 04:9DF9: BD 77 05
-	BEQ CODE_099E6E				;C - - - - - 0x013E0C 04:9DFC: F0 70
-
-	CMP #BUBBLE_EMERGING					;C - - - - - 0x013E0E 04:9DFE: C9 80
-.ifdef REGION_JP
-	BEQ CODE_099E6E				;- - - - - - 0x01FE58 07:FE48: F0
-.else
-	BCS CODE_099E6E				;C - - - - - 0x013E10 04:9E00: B0 6C
-.endif
-
-	CMP #BUBBLE_POWER_POPPED					;C - - - - - 0x013E12 04:9E02: C9 06
-	BEQ CODE_099E6E				;C - - - - - 0x013E14 04:9E04: F0 68
-
-	LDA objX+OSLOT_BUBBLE,X				;C - - - - - 0x013E16 04:9E06: BD C7 05
-	SEC							;C - - - - - 0x013E19 04:9E09: 38
-	SBC scratch2				;C - - - - - 0x013E1A 04:9E0A: E5 02
-	BCS CODE_099E15				;C - - - - - 0x013E1C 04:9E0C: B0 07
-		EOR #$FF					;C - - - - - 0x013E1E 04:9E0E: 49 FF
-		CLC							;C - - - - - 0x013E20 04:9E10: 18
-		ADC #$01					;C - - - - - 0x013E21 04:9E11: 69 01
-		INC scratch8				;C - - - - - 0x013E23 04:9E13: E6 08
-CODE_099E15:
-	;Got horizontal distance to other bubble
-	;08: 1 if to the right of other bubble
-
-	CMP collW				;C - - - - - 0x013E25 04:9E15: C5 D0
-	BCS CODE_099E6E				;C - - - - - 0x013E27 04:9E17: B0 55
-
-	STA scratch4				;C - - - - - 0x013E29 04:9E19: 85 04
-	LDA objY+OSLOT_BUBBLE,X				;C - - - - - 0x013E2B 04:9E1B: BD 9F 05
-	SEC							;C - - - - - 0x013E2E 04:9E1E: 38
-	SBC scratch3				;C - - - - - 0x013E2F 04:9E1F: E5 03
-	BCS CODE_099E2A				;C - - - - - 0x013E31 04:9E21: B0 07
-		EOR #$FF					;C - - - - - 0x013E33 04:9E23: 49 FF
-		CLC							;C - - - - - 0x013E35 04:9E25: 18
-		ADC #$01					;C - - - - - 0x013E36 04:9E26: 69 01
-		INC scratch9				;C - - - - - 0x013E38 04:9E28: E6 09
-CODE_099E2A:
-	;Got vertical distance to other bubble
-	;09: 1 if below other bubble
-
-	CMP collH				;C - - - - - 0x013E3A 04:9E2A: C5 D1
-	BCS CODE_099E6E				;C - - - - - 0x013E3C 04:9E2C: B0 40
-
-	STA scratch5				;C - - - - - 0x013E3E 04:9E2E: 85 05
-	LDA scratch7				;C - - - - - 0x013E40 04:9E30: A5 07
-	CMP #BUBBLE_POPPED					;C - - - - - 0x013E42 04:9E32: C9 23
-	BNE CODE_099E58				;C - - - - - 0x013E44 04:9E34: D0 22
-		LDA #24					;C - - - - - 0x013E46 04:9E36: A9 18
-		STA collW				;C - - - - - 0x013E48 04:9E38: 85 D0
-		STA collH				;C - - - - - 0x013E4A 04:9E3A: 85 D1
-		INC ram_051B				;C - - - - - 0x013E4C 04:9E3C: EE 1B 05
-
-		LDA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013E4F 04:9E3F: BD 77 05
-		CMP #BUBBLE_ENEMY					;C - - - - - 0x013E52 04:9E42: C9 03
-		BEQ CODE_099E52				;C - - - - - 0x013E54 04:9E44: F0 0C
-		CMP #BUBBLE_ENEMY_EXPIRING					;C - - - - - 0x013E56 04:9E46: C9 04
-		BEQ CODE_099E52				;C - - - - - 0x013E58 04:9E48: F0 08
-			;Pop other bubble
-			LDA #BUBBLE_POPPING					;C - - - - - 0x013E5A 04:9E4A: A9 22
-			STA objState+OSLOT_BUBBLE,X				;C - - - - - 0x013E5C 04:9E4C: 9D 77 05
-			JMP CODE_099E6E				;C - - - - - 0x013E5F 04:9E4F: 4C 6E 9E
-	CODE_099E52:
-		;Pop self
-		JSR PopBubble				;C - - - - - 0x013E62 04:9E52: 20 7B FC
-		JMP CODE_099E6E				;C - - - - - 0x013E65 04:9E55: 4C 6E 9E
-CODE_099E58:
-	;04: HDistance
-	;05: VDistance
-	LDA scratch4				;C - - - - - 0x013E68 04:9E58: A5 04
-	CMP scratch5				;C - - - - - 0x013E6A 04:9E5A: C5 05
-	BCC CODE_099E66				;C - - - - - 0x013E6C 04:9E5C: 90 08
-		LDA #$02					;C - - - - - 0x013E6E 04:9E5E: A9 02
-		SEC							;C - - - - - 0x013E70 04:9E60: 38
-		SBC scratch8				;C - - - - - 0x013E71 04:9E61: E5 08
-		JMP CODE_099E6B				;C - - - - - 0x013E73 04:9E63: 4C 6B 9E
-CODE_099E66:
-	LDA #$04					;C - - - - - 0x013E76 04:9E66: A9 04
-	SEC							;C - - - - - 0x013E78 04:9E68: 38
-	SBC scratch9				;C - - - - - 0x013E79 04:9E69: E5 09
-CODE_099E6B:
-	STA bubbleDir,X				;C - - - - - 0x013E7B 04:9E6B: 9D EB 04
-CODE_099E6E:
-	INC scratch1				;C - - - - - 0x013E7E 04:9E6E: E6 01
-	LDX scratch1				;C - - - - - 0x013E80 04:9E70: A6 01
-	CPX scratch0				;C - - - - - 0x013E82 04:9E72: E4 00
-	BEQ CODE_099E88				;C - - - - - 0x013E84 04:9E74: F0 12
-		CPX #20					;C - - - - - 0x013E86 04:9E76: E0 14
-		BEQ CODE_099E7D				;C - - - - - 0x013E88 04:9E78: F0 03
-			JMP CODE_099DF1				;C - - - - - 0x013E8A 04:9E7A: 4C F1 9D
-	CODE_099E7D:
-		LDA #$00					;C - - - - - 0x013E8D 04:9E7D: A9 00
-		CMP scratch0				;C - - - - - 0x013E8F 04:9E7F: C5 00
-		BEQ CODE_099E88				;C - - - - - 0x013E91 04:9E81: F0 05
-			STA scratch1				;C - - - - - 0x013E93 04:9E83: 85 01
-			JMP CODE_099DF1				;C - - - - - 0x013E95 04:9E85: 4C F1 9D
-CODE_099E88:
-	INC scratch0				;C - - - - - 0x013E98 04:9E88: E6 00
-	LDX scratch0				;C - - - - - 0x013E9A 04:9E8A: A6 00
-	STX scratch1				;C - - - - - 0x013E9C 04:9E8C: 86 01
-	INC scratch1				;C - - - - - 0x013E9E 04:9E8E: E6 01
-	CPX #19					;C - - - - - 0x013EA0 04:9E90: E0 13
-	BEQ CODE_099E97				;C - - - - - 0x013EA2 04:9E92: F0 03
-		JMP CODE_099DBC				;C - - - - - 0x013EA4 04:9E94: 4C BC 9D
-CODE_099E97:
-	LDA ram_051B				;C - - - - - 0x013EA7 04:9E97: AD 1B 05
-	BEQ CODE_099EA5				;C - - - - - 0x013EAA 04:9E9A: F0 09
-		LDA ram_051A				;C - - - - - 0x013EAC 04:9E9C: AD 1A 05
-		STA ram_0549				;C - - - - - 0x013EAF 04:9E9F: 8D 49 05
-		JMP CODE_099EF8				;C - - - - - 0x013EB2 04:9EA2: 4C F8 9E
-CODE_099EA5:
-	LDA #.BANK(DATA_04BF6D)					;C - - - - - 0x013EBC 04:9EAC: A9 04
-	STA prgBankB
-	STA $8001
-
-	LDY ram_051A				;C - - - - - 0x013ED1 04:9EC1: AC 1A 05
-	BEQ CODE_099EF0				;C - - - - - 0x013ED4 04:9EC4: F0 2A
-		CPY #$03					;C - - - - - 0x013ED6 04:9EC6: C0 03
-		BCC CODE_099EDB				;C - - - - - 0x013ED8 04:9EC8: 90 11
-			LDA #$01					;C - - - - - 0x013EDA 04:9ECA: A9 01
-			STA bonusRewardEarned				;C - - - - - 0x013EDC 04:9ECC: 8D 51 05
-
-			LDA roundFlags				;C - - - - - 0x013EE3 04:9ED3: AD 71 04
-			ORA #RFLAG_MULTI_REWARD					;C - - - - - 0x013EE6 04:9ED6: 09 40
-			STA roundFlags				;C - - - - - 0x013EE8 04:9ED8: 8D 71 04
-	CODE_099EDB:
-		LDX DATA_04BF6D,Y			;C - - - - - 0x013EEB 04:9EDB: BE 6D BF
-		LDA DATA_04BF64,Y			;C - - - - - 0x013EEE 04:9EDE: B9 64 BF
-		STA scoreAdditionDigits,X				;C - - - - - 0x013EF1 04:9EE1: 9D A1 04
-		LDX DATA_04BF7F,Y			;C - - - - - 0x013EF4 04:9EE4: BE 7F BF
-		LDA DATA_04BF76,Y			;C - - - - - 0x013EF7 04:9EE7: B9 76 BF
-		STA scoreAdditionDigits,X				;C - - - - - 0x013EFA 04:9EEA: 9D A1 04
-		JSR AddScore				;C - - - - - 0x013EFD 04:9EED: 20 C7 FE
-CODE_099EF0:
-	LDA nmiPrgBankB
-	STA prgBankB
-	STA $8001
-
-	LDA #$00					;C - - - - - 0x013F00 04:9EF0: A9 00
-	STA ram_051A				;C - - - - - 0x013F02 04:9EF2: 8D 1A 05
-	STA ram_0549				;C - - - - - 0x013F05 04:9EF5: 8D 49 05
-CODE_099EF8:
-	RTS							;C - - - - - 0x013F08 04:9EF8: 60
-.endif
-
-.ifndef REGION_JP
 ;For JP, this is located further down
 CODE_0FFE9A:
 	LDX scratch0				;C - - - - - 0x01FEAA 07:FE9A: A6 00
@@ -6164,9 +5250,7 @@ CODE_0FFE9A:
 	LDA DATA_0FFEAC+2,X			;C - - - - - 0x01FEB6 07:FEA6: BD AE FE
 	STA updateSub+1				;C - - - - - 0x01FEB9 07:FEA9: 85 1A
 	RTS							;C - - - - - 0x01FEBB 07:FEAB: 60
-.endif
 
-.ifndef REGION_JP
 ;For JP, this is located further down
 DATA_0FFEAC:
 	.byte .BANK(CODE_088000)					;- D 0 - - - 0x01FEBC 07:FEAC: 08
@@ -6187,7 +5271,6 @@ DATA_0FFEAC:
 	.word StartBonusRound			;- D 0 - - - 0x01FED2 07:FEC2: 2D
 	.byte .BANK(CODE_088632)					;- D 0 - - - 0x01FED4 07:FEC4: 08
 	.word CODE_088632			;- D 0 - - - 0x01FED5 07:FEC5: 32
-.endif
 
 AddScore:
 	LDY currentPlayer				;C - - - - - 0x01FED7 07:FEC7: AC 99 04
@@ -6264,7 +5347,6 @@ ScoreAdditionStartOfs:
 	.byte SCORE_TOTAL_DIGITS					;- D 0 - - - 0x01FF4B 07:FF3B: 07
 	.byte HUD_TOTAL_DIGITS+SCORE_TOTAL_DIGITS					;- D 0 - - - 0x01FF4C 07:FF3C: 10
 
-.ifndef REGION_JP
 SwapPrgBankA:
 	LDA #$06					;C - - - - - 0x01FF4D 07:FF3D: A9 06
 	STA $8000				;C - - - - - 0x01FF4F 07:FF3F: 8D 00 80
@@ -6295,9 +5377,7 @@ SwapPrgBankA:
 	STA $8001
 	LDA newPrgBank
 	RTS							;C - - - - - 0x01FF65 07:FF55: 60
-.endif
 
-.ifndef REGION_JP
 SwapPrgBankB:
 	LDA #$07					;C - - - - - 0x01FF66 07:FF56: A9 07
 	STA $8000				;C - - - - - 0x01FF68 07:FF58: 8D 00 80
@@ -6305,49 +5385,61 @@ SwapPrgBankB:
 	STA prgBankB				;C - - - - - 0x01FF70 07:FF60: 85 53
 	STA $8001				;C - - - - - 0x01FF6D 07:FF5D: 8D 01 80
 	RTS							;C - - - - - 0x01FF7E 07:FF6E: 60
-.endif
 
-.ifdef REGION_JP
-;For US, this is located earlier in this bank
-CODE_0FFE9A:
-	LDX scratch0				;C - - - - - 0x01FEAA 07:FE9A: A6 00
-	LDA DATA_0FFEAC,X			;C - - - - - 0x01FEAC 07:FE9C: BD AC FE
-	STA updateSubBankA			;C - - - - - 0x01FEAF 07:FE9F: 85 18
-	LDA DATA_0FFEAC+1,X			;C - - - - - 0x01FEB1 07:FEA1: BD AD FE
-	STA updateSub				;C - - - - - 0x01FEB4 07:FEA4: 85 19
-	LDA DATA_0FFEAC+2,X			;C - - - - - 0x01FEB6 07:FEA6: BD AE FE
-	STA updateSub+1				;C - - - - - 0x01FEB9 07:FEA9: 85 1A
-	RTS							;C - - - - - 0x01FEBB 07:FEAB: 60
-.endif
 
-.ifdef REGION_JP
-;For US, this is located earlier in this bank
-DATA_0FFEAC:
-	.byte .BANK(CODE_088000)					;- D 0 - - - 0x01FEBC 07:FEAC: 08
-	.word CODE_088000			;- D 0 - - - 0x01FEBD 07:FEAD: 00
-	.byte .BANK(CODE_088646)					;- D 0 - - - 0x01FEBF 07:FEAF: 08
-	.word CODE_088646			;- D 0 - - - 0x01FEC0 07:FEB0: 46
-	.byte .BANK(CODE_088652)					;- D 0 - - - 0x01FEC2 07:FEB2: 08
-	.word CODE_088652			;- D 0 - - - 0x01FEC3 07:FEB3: 52
-	.byte .BANK(CODE_089CDD)					;- D 0 - - - 0x01FEC5 07:FEB5: 08
-	.word CODE_089CDD			;- D 0 - - - 0x01FEC6 07:FEB6: DD
-	.byte .BANK(CODE_089CDD)					;- D 0 - - - 0x01FEC8 07:FEB8: 08
-	.word CODE_089CDD			;- D 0 - - - 0x01FEC9 07:FEB9: DD
-	.byte .BANK(CODE_088000)					;- - - - - - 0x01FECB 07:FEBB: 08
-	.word CODE_088000			;- - - - - - 0x01FECC 07:FEBC: 00
-	.byte .BANK(CODE_088000)					;- - - - - - 0x01FECE 07:FEBE: 08
-	.word CODE_088000			;- - - - - - 0x01FECF 07:FEBF: 00
-	.byte .BANK(StartBonusRound)					;- D 0 - - - 0x01FED1 07:FEC1: 08
-	.word StartBonusRound			;- D 0 - - - 0x01FED2 07:FEC2: 2D
-	.byte .BANK(CODE_088632)					;- D 0 - - - 0x01FED4 07:FEC4: 08
-	.word CODE_088632			;- D 0 - - - 0x01FED5 07:FEC5: 32
-.endif
+; ---------------------------------------------------------------------------------------------
+; CoopRoundRoles (co-op 9.6): CODE_088000 (bank 8, the round setup) calls this instead of CODE_0FE36B.
+; CODE_0FE36B despawns every object (CoopDespawnAll: P2 out of the round, shot bytes and lent sprite slot put
+; back). Then, if the physical players are exchanged (coopRoles = 1: physical P2 resident since P1 went out, and
+; P1 has since borrowed a life) and the non-resident (physical P1) has lives, the roles are put back exactly as the
+; game-over path of CoopResidentOut does: CoopSwapCtx (contexts and powerUps bits; the objects are all despawned and
+; slot 0 is set up again by CODE_0880C8 right after), coopResident / coopRoles / currentPlayer = 0. So physical P1
+; walks in on the left as the resident and CoopRoundStartP2 spawns physical P2 on the right. coopRoles is always 0
+; outside co-op (CoopReset, CoopNewGame), so 1P only pays the test. Clobbers A/X (CODE_088000 reloads both).
+; ---------------------------------------------------------------------------------------------
+CoopRoundRoles:
+	JSR CODE_0FE36B
+	LDA coopRoles
+	BEQ @rts
+	LDA ctxOther_playerLives		;physical P1 out (0 lives): the roles stay exchanged (he is not spawned)
+	BEQ @rts
+	JSR CoopSwapCtx					;physical P1's context native (coopResident 1, currentPlayer 1 ^ 1 = 0)
+	LDA #$00
+	STA coopResident
+	STA coopRoles
+	STA currentPlayer
+@rts:
+	RTS
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x01FFE2 07:FFD2: FB
-	.incbin "filler/fill0F_JP.bin"
-.endif
+; ---------------------------------------------------------------------------------------------
+; CoopDrawPause (co-op 9.7): CoopDrawBodyC's original-order exit (only reached with P2 in the round: coopP2Active
+; bit 7). The pause press draws once (StorePauseObj: AnimateNonBubbles + DrawObjects with ram_0475 = 2, so slots 0-1
+; only: the resident and the PAUSE text) and the OAM stays as it is until the unpause, so slot 39 (P2, or physical P1
+; after a role exchange) vanished. While roundPaused is set and slot 39 is drawn in play (objState != 0), it is drawn
+; after the body as one step of the body's loop (CoopDrawSlot: its frame at the press, not animated), then its chrBank
+; write as the even-tick co-op order makes it (last; CoopDrawPair's pair bank, if any, is written after this).
+; Announcements (ram_0475 set, roundPaused 0) and the blink case keep the plain body. Exit as DrawObjectsBody's
+; (X = 0, Z = 1, N = 0, C = 1). 1P never gets here (CoopDrawObjects -> CoopDrawObjects1P).
+; ---------------------------------------------------------------------------------------------
+CoopDrawPause:
+	LDA roundPaused
+	BEQ @body
+	LDA objState+OSLOT_P2
+	BEQ @body
+	JSR DrawObjectsBody
+	LDY #OSLOT_P2
+	JSR CoopDrawSlot
+	LDX objChrSlot+OSLOT_P2
+	LDA objChrBank+OSLOT_P2
+	BEQ :+
+	STA chrBankC,X
+:	LDX #$00
+	RTS
+@body:
+	JMP DrawObjectsBody
+
+
+
 
 ;Vectors
 .segment "VECTORS"

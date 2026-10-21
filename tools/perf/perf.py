@@ -13,6 +13,18 @@ Commands (run from the repo root):
                                       estimated exclusive cycles per routine from exec counters
   perf.py cover  NAME LABEL...        per-instruction exec counts (needs runs made with --profile)
 
+Scenario tuples are (ticks, seed, start_round, inf_lives, start_taps[, style][, opts]) where opts is an
+optional dict as the LAST element (the first five fields and an optional style string are unchanged):
+  pad2   bool   drive pad 2 with a second generator (CFG.pad2, seed2 = seed + 7919 unless "seed2" given)
+  seed2  int    explicit pad-2 seed
+  coop   bool   co-op scenario: select co-op on the title menu with pad-1 SELECT (CFG.coop_select with the
+                symbols coopMode and TitleScreenMenu from the build's labels.txt; the run fails if the game
+                starts without coopMode = 1; if coopMode is missing prints a NOTE and runs anyway, co-op
+                inert) and top up the symbol coopP2Lives too (if defined) via CFG.lives_addrs.
+                (Before R2 this was a poke of 1 into coopMode at tick 1; R2's @advance clears coopMode.)
+  pokes  list   extra {tick=N, addr=A, val=V} CPU-bus writes at the start of tick N (CFG.pokes)
+The co-op scenarios (c01 c05 c17 c20 c22 c50 c64) are NOT part of DEFAULT_SCENS; name them with --scen.
+
 The regression check compares, for every logic tick, the 2 KB of CPU RAM (snapshot when the
 banked game logic finishes) plus nametable RAM and palette (snapshot at the start of the tick).
 Excluded: the hardware stack ($010A-$01FF), the IRQ-handler-private bytes $20/$24/$25, and
@@ -20,6 +32,39 @@ lag-frame dependent state (nmiProgress on ticks whose lag differs; audio-engine 
 pattern has diverged - audio triggers $E0-$E2 stay compared with bit 7 masked). RAM words that hold code pointers are compared after
 translating them through the symbol tables of both builds (label + offset), so relinking does
 not cause false mismatches.
+Phase 7b-1 (co-op HUD, owner-approved option (a), the only two HUD rules):
+  HUD nametable rule: a nametable byte (either 1 KB nametable, offset o & $3FF) is ignored iff it is in row 2 or 3,
+    column 2..29 (offsets $042-$05D, $062-$07D of each nametable), both values have the same bit 7 and both
+    (value & $7F) are HUD tiles HUD_NT_TILES ($5C/$5D = old 8x16 'X', $66-$7F = old heart / digits / blanks, new
+    8x8 glyphs, blank $7F). Any other tile there (or any other row, the attributes, the palette) is still compared.
+  HUD icon OAM rule: an OAMBuffer entry ($0200 + 4e .. +3) is ignored iff in BOTH runs it was last written by
+    DrawObjects while drawing object slot ICON_SLOT (harness icon_trace -> <scen>.icon), its tile / attribute /
+    X bytes are equal and the test run's Y byte is off screen (>= $EF): the icon is hidden in place.
+  Bonus-game screen (D-7b-11): there the HUD bank (chrFans_AA_ID) is mapped as a copy whose 8x8 glyphs are at
+    $40-$4C (the NMI remaps only the hardware register; RAM is unchanged), so in the HUD cells a test value whose
+    (value & $7F) is in HUD_BONUS_GLYPHS is accepted too, but only if in the test run's RAM of that tick or the tick
+    before the register of the cell's pattern-table half (chrBankA for bit 7 = 0, chrBankB for 1) holds
+    chrFans_AA_ID and the other one chrBonusRoom_A_ID (the same test as the NMI remap).
+  Both counts are printed per scenario. Everything else (all other RAM incl. object 19's arrays) is compared.
+
+Phase 9.0 (PRG ROM 256 KB, co-op code in PRG-RAM; owner-approved tool change):
+  - The ROM may have any PRG size (header byte 4); file offsets come from the build's dbg file (ooffs), so the
+    256 KB layout (original banks E/F at file banks $1E/$1F) needs nothing else. A segment that runs in PRG-RAM
+    ($6000-$7FFF, e.g. COOP_WRAM_CODE: load image in ROM, run address $7xxx) is listed in Symbols.prg with its run
+    address and the file offset of its load image.
+  - profile / cover: the harness also writes the PRG-RAM exec counters (<scen>.wprof, offsets from $6000); they are
+    added to the PRG counters at the load-image offset of the segment that runs there, so routines in PRG-RAM are
+    attributed by name (bank = the image bank).
+  - WRAM-code guard: for a build with a COOP_WRAM_CODE segment every run gets CFG.wram_guard (the code area
+    $7000-$7FFF and the image's PRG offset). The boot copy must write the area exactly once in order before the first
+    logic tick, the area must then equal the image, and after that ANY CPU write into the area, or an MMC3 $A001 write
+    other than $80 (PRG-RAM enabled, writable), stops the run with exit code 4 and a csv line WRAM_CODE_WRITE /
+    WRAM_CODE_COPY / PRG_RAM_A001. run / regress fail on it (Mesen exit code), and so do the co-op checkers.
+
+Speed (2026-10-15, with tools/perf/verify.py; nothing that is checked changed): scen_extra adds CFG.prg_link (ROM
+segment offsets and link addresses) for the harness's speed layer (getState memo, merged exec callbacks; see
+harness.lua); run_scen passes --timeout=1800 to Mesen; compare_runs finds the differing bytes chunk-wise
+(diff_offsets, same list); PERF_JOBS overrides the thread-pool size. The whole verification: tools/perf/verify.py.
 """
 import argparse
 import bisect
@@ -36,8 +81,12 @@ MESEN_DIR = os.path.join(TMP, "mesen")
 BUILDS = os.path.join(TMP, "builds")
 RUNS = os.path.join(TMP, "runs")
 HARNESS = os.path.join(ROOT, "tools", "perf", "harness.lua")
+WRAM_LO, WRAM_HI = 0x6000, 0x8000               # PRG-RAM window
+WRAM_CODE_SEG = "COOP_WRAM_CODE"                # Phase 9.0: code copied to PRG-RAM at power-on
+WRAM_CODE_AREA = (0x7000, 0x1000)               # the code area of PRG-RAM (config_us WRAMCODE), guarded
 
-JOBS = max(1, min(8, (os.cpu_count() or 2) - 2))
+# PERF_JOBS: thread-pool size override (tools/perf/verify.py sets it; there the runner limits the Mesen processes)
+JOBS = int(os.environ.get("PERF_JOBS") or max(1, min(8, (os.cpu_count() or 2) - 2)))
 RAM_SIZE = 0x800
 REC_SIZE = RAM_SIZE + 0x800 + 0x20
 
@@ -58,7 +107,22 @@ SCENARIOS = {
     "r70": (3000, 30, 70, True, False),         # special round (low load)
     "camp03": (6000, 31, 3, True, False, "camper"),  # bubbles/trapped enemies expire, enemies get mad
 }
-DEFAULT_SCENS = list(SCENARIOS)
+DEFAULT_SCENS = list(SCENARIOS)   # frozen before the co-op scenarios are added below
+
+# Co-op scenarios (2 players, pad 2 driven by an independent generator). Not in DEFAULT_SCENS.
+# Needler (ENEMY_NEEDLER) and Snagger (ENEMY_SNAGGER) rounds were found in src/bank_0C.asm
+# (RoundsEnemyTable is indexed by round number): round 5 has 6 Needlers, round 22 has 2 Snaggers.
+_COOP = {"pad2": True, "coop": True}
+COOP_SCENS = {
+    "c01": (3000, 41, 1, True, False, _COOP),     # enemy-dense, lags often
+    "c05": (3000, 42, 5, True, False, _COOP),     # Needler round (6 Needlers)
+    "c17": (3000, 43, 17, True, False, _COOP),    # heaviest lag in sweep
+    "c20": (3000, 44, 20, True, False, _COOP),    # wide round, irqEffect 5
+    "c22": (3000, 45, 22, True, False, _COOP),    # Snagger round
+    "c50": (3000, 46, 50, True, False, _COOP),    # heavy
+    "c64": (3000, 47, 64, True, False, _COOP),    # heaviest non-IRQ round
+}
+SCENARIOS.update(COOP_SCENS)
 
 # RAM words (lo address) that may hold code/data pointers into PRG ROM: every ($indirect) /
 # ($indirect),Y / ($indirect,X) base listed in src/ram.inc (except scratch), plus updateSub.
@@ -81,6 +145,21 @@ IRQ_VOLATILE = {0x20, 0x24, 0x25}
 NMI_PROGRESS = 0x15
 AUDIO_TRIGGERS = {0xE0, 0xE1, 0xE2}
 AUDIO_PRIVATE = set(range(0xE3, 0xF2)) | set(range(0x790, 0x7F6))
+# Phase 7b-1 HUD rules (see the module docstring)
+HUD_NT_TILES = {0x5C, 0x5D} | set(range(0x66, 0x80))
+HUD_BONUS_GLYPHS = set(range(0x40, 0x4D))  # the 8x8 glyphs in the bonus-game screen's HUD bank copy (D-7b-11)
+CHR_BANK_A, CHR_BANK_B = 0x4B, 0x4C        # chrBankA / chrBankB
+CHR_FANS_AA, CHR_BONUS_ROOM_A = 0x18, 0x3A
+HUD_NT_ROWS = (2, 3)
+HUD_NT_COLS = range(2, 30)
+OAM_BUF = 0x200
+ICON_SLOT = 19                      # OSLOT_ICON
+ICON_HIDDEN_Y = 0xEF                # an OAM Y >= $EF is below the visible screen
+# DrawObjects labels for the icon trace (present in the original and in the optimized DrawObjects): per-object
+# draw path with scratch4 = slot (starts), and the entry / fill / exits (stops; only those the build has)
+ICON_TRACE_STARTS = ["CODE_0FEF43", "CODE_0FEFF5"]
+ICON_TRACE_STOPS = ["DrawObjects", "DrawObjectsBody", "CODE_0FF064", "CODE_0FF079", "DrawObjects_EvenFull",
+                    "DrawObjects_OddFull"]
 
 
 def sh(cmd, **kw):
@@ -101,6 +180,8 @@ def cmd_setup(a):
     s = open(p, encoding="utf-8").read()
     s = s.replace('"AllowIoOsAccess": false', '"AllowIoOsAccess": true')
     s = re.sub(r'"ScriptTimeout": \d+', '"ScriptTimeout": 100', s)
+    # no video filter: ~12 % less CPU per run (screenshots are 256x240 instead of LcdGrid's scaled frame)
+    s = re.sub(r'"VideoFilter": "[^"]*"', '"VideoFilter": "None"', s, count=1)
     s = s.replace('"RamPowerOnState": "Random"', '"RamPowerOnState": "AllZeros"')
     open(p, "w", encoding="utf-8").write(s)
     print("Mesen copied to", MESEN_DIR)
@@ -111,7 +192,7 @@ def cmd_build(a):
     d = os.path.join(BUILDS, a.name)
     os.makedirs(d, exist_ok=True)
     obj = os.path.join(d, "main.o")
-    defs = ["-D", "REGION_US"] + sum([["-D", x] for x in (a.define or [])], [])
+    defs = sum([["-D", x] for x in (a.define or [])], [])
     sh(["ca65", "-g"] + defs + ["src/main.asm", "-o", obj], cwd=ROOT)
     sh(["ld65", "-C", "config_us", "-Ln", os.path.join(d, "labels.txt"), "-m", os.path.join(d, "rom.map"),
         "--dbgfile", os.path.join(d, "rom.dbg"), "-o", os.path.join(d, "rom.nes"), obj], cwd=ROOT)
@@ -120,6 +201,10 @@ def cmd_build(a):
     for seg, (start, size, bank) in sorted(syms.segs.items(), key=lambda x: x[1][2] if x[1][2] is not None else 99):
         if seg.startswith("PRG_BANK"):
             print(f"  {seg:18s} size=${size:04X} free={0x2000 - size if seg != 'PRG_BANK_E' else 0x1300 - size}")
+    for seg, (start, size, bank) in sorted(syms.segs.items()):
+        if seg.startswith("COOP"):
+            extra = f" free={WRAM_CODE_AREA[1] - size}" if seg == WRAM_CODE_SEG else ""
+            print(f"  {seg:18s} size=${size:04X}{extra}")
 
 
 # ---------------------------------------------------------------------------------------- symbols
@@ -188,23 +273,108 @@ class Symbols:
 
 
 # ---------------------------------------------------------------------------------------- run
+def build_symbol(build, name):
+    """CPU address of symbol NAME from tmp/builds/BUILD/labels.txt (ld65 -Ln lines: 'al 006000 .name'), or None"""
+    p = os.path.join(BUILDS, build, "labels.txt")
+    if not os.path.exists(p):
+        return None
+    for line in open(p):
+        f = line.split()
+        if len(f) == 3 and f[0] == "al" and f[2] == "." + name:
+            return int(f[1], 16)
+    return None
+
+
+def scen_extra(build, opts, seed):
+    """the CFG fields (Lua, each starting with ', ') for a scenario's opts dict (see the module docstring)"""
+    extra = ""
+    pokes = list(opts.get("pokes", []))
+    lives = []
+    if opts.get("coop"):
+        a = build_symbol(build, "coopMode")
+        m = build_symbol(build, "TitleScreenMenu")
+        if a is None or m is None:
+            print(f"NOTE: {build} has no coopMode symbol - co-op inert")
+        else:
+            extra += f", coop_select = {{mode = {a}, menu = {m}}}"
+        a = build_symbol(build, "coopP2Lives")
+        if a is not None:
+            lives = [0x0479, a]
+    if opts.get("pad2"):
+        extra += f', pad2 = true, seed2 = {opts.get("seed2", seed + 7919)}'
+    if pokes:
+        extra += ", pokes = {" + ",".join(f"{{tick={p['tick']},addr={p['addr']},val={p['val']}}}" for p in pokes) + "}"
+    if lives:
+        extra += ", lives_addrs = {" + ",".join(map(str, lives)) + "}"
+    extra += wram_guard_cfg(build)
+    extra += prg_link_cfg(build)
+    return extra
+
+
+_PRG_LINK = {}
+
+
+def prg_link_cfg(build):
+    """CFG field prg_link (speed only, see harness.lua: lets it register exec hooks on PRG-ROM offsets at their link CPU
+    address): PRG-ROM offset range [lo, hi) and CPU address of every ROM segment ($8000-$FFFF) of the build"""
+    dbg = os.path.join(BUILDS, build, "rom.dbg")
+    if not os.path.exists(dbg):
+        return ""
+    key = (build, os.path.getmtime(dbg))
+    if key not in _PRG_LINK:
+        segs = [(lo, hi, start) for lo, hi, start, bank, name in Symbols(build).prg if start >= 0x8000 and hi > lo]
+        _PRG_LINK[key] = ", prg_link = {" + ",".join(f"{{{lo},{hi},{start}}}" for lo, hi, start in segs) + "}"
+    return _PRG_LINK[key]
+
+
+def wram_guard_cfg(build):
+    """CFG field of the harness's WRAM-code guard (Phase 9.0) for a build with a COOP_WRAM_CODE segment, else ''"""
+    if not os.path.exists(os.path.join(BUILDS, build, "rom.dbg")):
+        return ""
+    for lo, hi, start, bank, name in Symbols(build).prg:
+        if name == WRAM_CODE_SEG:
+            a, n = WRAM_CODE_AREA
+            assert start == a and hi - lo <= n, "COOP_WRAM_CODE is not inside the WRAM code area"
+            return f", wram_guard = {{lo = {a}, len = {n}, img = {lo}}}"
+    return ""
+
+
+def icon_trace_cfg(build):
+    """CFG field for the harness's HUD-icon OAM trace (Phase 7b-1), or '' if the build lacks the labels"""
+    starts = [build_symbol(build, n) for n in ICON_TRACE_STARTS]
+    stops = [a for a in (build_symbol(build, n) for n in ICON_TRACE_STOPS) if a is not None]
+    if None in starts or not stops:
+        print(f"NOTE: {build} lacks the DrawObjects labels for the icon trace")
+        return ""
+    return (f", icon_trace = {{starts = {{{','.join(map(str, starts))}}}, stops = {{{','.join(map(str, stops))}}}, "
+            f"slot = {ICON_SLOT}}}")
+
+
 def run_scen(build, scen, dump=False, profile=False, shots=None):
-    ticks, seed, rnd, inf, taps = SCENARIOS[scen][:5]
-    style = SCENARIOS[scen][5] if len(SCENARIOS[scen]) > 5 else None
+    sc = SCENARIOS[scen]
+    opts = sc[-1] if isinstance(sc[-1], dict) else {}
+    ticks, seed, rnd, inf, taps = sc[:5]
+    style = sc[5] if len(sc) > 5 and isinstance(sc[5], str) else None
     rom = os.path.join(BUILDS, build, "rom.nes")
     od = os.path.join(RUNS, build)
     os.makedirs(od, exist_ok=True)
     out = os.path.join(od, scen)
     lua = lambda v: "true" if v else "false"
+    extra = scen_extra(build, opts, seed)
+    if dump:
+        extra += icon_trace_cfg(build)
     cfg = (f'CFG = {{ out = [[{out}]], ticks = {ticks}, seed = {seed}, '
            f'start_round = {rnd if rnd else "nil"}, inf_lives = {lua(inf)}, start_taps = {lua(taps)}, '
-           f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}} }}\n')
+           f'style = {chr(34) + style + chr(34) if style else "nil"}, dump = {lua(dump)}, profile = {lua(profile)}, shots = {{{",".join(map(str, shots or []))}}}{extra} }}\n')
     script = out + "_harness.lua"
     open(script, "w").write(cfg + open(HARNESS).read())
-    r = subprocess.run([os.path.join(MESEN_DIR, "Mesen.exe"), "--testrunner", rom, script],
+    # --timeout: Mesen's test runner otherwise stops a script after ~100 s wall time (no TIMEOUT line, run cut short),
+    # which a long scenario can reach when 4 runs share the CPUs
+    r = subprocess.run([os.path.join(MESEN_DIR, "Mesen.exe"), "--testrunner", rom, script, "--timeout=1800"],
                        cwd=MESEN_DIR, capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
-        raise SystemExit(f"{build}/{scen}: Mesen exit code {r.returncode} {r.stdout} {r.stderr}")
+        tail = open(out + ".csv").read().splitlines()[-1:] if os.path.exists(out + ".csv") else []
+        raise SystemExit(f"{build}/{scen}: Mesen exit code {r.returncode} {tail} {r.stdout} {r.stderr}")
     return out
 
 
@@ -241,9 +411,51 @@ def ramname(addr):
     return n if v == addr else f"{n}+{addr - v}"
 
 
+def load_icon(build, scen):
+    """tick -> set of OAM entries drawn by the HUD icon (harness <scen>.icon), or None if the file is missing"""
+    p = os.path.join(RUNS, build, scen + ".icon")
+    if not os.path.exists(p):
+        return None
+    out = {}
+    for line in open(p):
+        f = list(map(int, line.split()))
+        out[f[0]] = set(f[1:])
+    return out
+
+
+def bonus_screen(ram, half):
+    """the NMI's bonus-screen CHR remap is active for pattern-table half `half` (0/1) in this RAM record"""
+    return ram[CHR_BANK_A + half] == CHR_FANS_AA and ram[CHR_BANK_A + (half ^ 1)] == CHR_BONUS_ROOM_A
+
+
+def hud_nt_ignored(o, va, vb, rb=None, rb_prev=None):
+    """Phase 7b-1 HUD nametable rule: o = offset in the 2 KB nametable dump; rb / rb_prev = test records of this
+    tick and the previous one (bonus-screen glyph class)"""
+    o &= 0x3FF
+    if not ((o >> 5) in HUD_NT_ROWS and (o & 31) in HUD_NT_COLS and (va & 0x80) == (vb & 0x80)
+            and (va & 0x7F) in HUD_NT_TILES):
+        return False
+    if (vb & 0x7F) in HUD_NT_TILES:
+        return True
+    half = vb >> 7
+    return ((vb & 0x7F) in HUD_BONUS_GLYPHS and
+            any(r is not None and bonus_screen(r, half) for r in (rb, rb_prev)))
+
+
+def diff_offsets(ra, rb, chunk=64):
+    """[i for i in range(len(ra)) if ra[i] != rb[i]] (same list, same order), scanning only the chunks that differ"""
+    out = []
+    for j in range(0, len(ra), chunk):
+        if ra[j:j + chunk] != rb[j:j + chunk]:
+            out.extend(i for i in range(j, min(j + chunk, len(ra))) if ra[i] != rb[i])
+    return out
+
+
 def compare_runs(base, test, scen, verbose=True):
     pa = os.path.join(RUNS, base, scen + ".dump")
     pb = os.path.join(RUNS, test, scen + ".dump")
+    icon_a, icon_b = load_icon(base, scen), load_icon(test, scen)
+    hud_nt = icon_oam = 0          # ignored HUD nametable bytes / hidden icon OAM entries (summed over ticks)
     sa, sb = Symbols(base), Symbols(test)
     fa, fb = open(pa, "rb"), open(pb, "rb")
     ptr_bytes = {}
@@ -256,19 +468,33 @@ def compare_runs(base, test, scen, verbose=True):
     warnings = 0
     ptr_cache = {}
     audio_desync = None   # first tick where the lag pattern differed
+    rb_cur = rb_prev = None
     while True:
         ra, rb = fa.read(REC_SIZE), fb.read(REC_SIZE)
         if not ra and not rb:
             break
         if len(ra) != len(rb):
             return False, f"tick {tick}: run length differs (base {'ended' if not ra else 'longer'})"
+        rb_prev, rb_cur = rb_cur, rb
         lag_differs = tick < len(lag_a) and tick < len(lag_b) and lag_a[tick] != lag_b[tick]
         if lag_differs and audio_desync is None:
             audio_desync = tick
         if ra != rb:
-            diffs = [i for i in range(REC_SIZE) if ra[i] != rb[i]]
+            diffs = diff_offsets(ra, rb)
             hard = []
+            icon_ok = set()
+            if icon_a is not None and icon_b is not None:
+                for e in icon_a.get(tick, set()) & icon_b.get(tick, set()):
+                    j = OAM_BUF + 4 * e
+                    if ra[j] != rb[j] and rb[j] >= ICON_HIDDEN_Y and ra[j + 1:j + 4] == rb[j + 1:j + 4]:
+                        icon_ok.add(e)
+                icon_oam += len(icon_ok)
             for i in diffs:
+                if OAM_BUF <= i < OAM_BUF + 0x100 and (i - OAM_BUF) >> 2 in icon_ok:
+                    continue
+                if RAM_SIZE <= i < RAM_SIZE + 0x800 and hud_nt_ignored(i - RAM_SIZE, ra[i], rb[i], rb, rb_prev):
+                    hud_nt += 1
+                    continue
                 if i < RAM_SIZE:
                     if i in STACK or i in IRQ_VOLATILE:
                         continue
@@ -303,6 +529,10 @@ def compare_runs(base, test, scen, verbose=True):
                 return False, msg
         tick += 1
     msg = f"{tick} ticks identical"
+    if hud_nt or icon_oam:
+        msg += f" (HUD rules: {hud_nt} HUD nametable bytes, {icon_oam} hidden icon OAM entries ignored)"
+    if icon_a is None or icon_b is None:
+        msg += " (no icon trace: icon OAM rule off)"
     if audio_desync is not None:
         msg += f" (lag pattern differs from tick {audio_desync}: audio-engine RAM excluded after it)"
     if warnings:
@@ -315,7 +545,8 @@ def cmd_regress(a):
     scens = a.scen or DEFAULT_SCENS
     jobs = [(run_scen, a.test, s, True) for s in scens]
     jobs += [(run_scen, a.base, s, True) for s in scens
-             if not a.reuse_base or not os.path.exists(os.path.join(RUNS, a.base, s + ".dump"))]
+             if not a.reuse_base or not os.path.exists(os.path.join(RUNS, a.base, s + ".dump"))
+             or not os.path.exists(os.path.join(RUNS, a.base, s + ".icon"))]
     parallel(jobs)
     for s in scens:
         ok, msg = compare_runs(a.base, a.test, s)
@@ -395,7 +626,10 @@ def oplen(op):
 
 
 def load_prof(build, scens):
+    """PRG offset -> exec count, summed over scens. PRG-RAM exec counters (<scen>.wprof, Phase 9.0) are added at the
+    load-image offset of the segment that runs at that address."""
     cnt = {}
+    wram = [(start, lo, hi) for lo, hi, start, bank, name in Symbols(build).prg if WRAM_LO <= start < WRAM_HI]
     for s in scens:
         p = os.path.join(RUNS, build, s + ".prof")
         if not os.path.exists(p):
@@ -403,7 +637,26 @@ def load_prof(build, scens):
         for line in open(p):
             o, c = line.split()
             cnt[int(o, 16)] = cnt.get(int(o, 16), 0) + int(c)
+        p = os.path.join(RUNS, build, s + ".wprof")
+        if not os.path.exists(p):
+            continue
+        for line in open(p):
+            w, c = line.split()
+            cpu = WRAM_LO + int(w, 16)
+            for start, lo, hi in wram:
+                if start <= cpu < start + hi - lo:
+                    o = lo + cpu - start
+                    cnt[o] = cnt.get(o, 0) + int(c)
+                    break
+            else:
+                print(f"NOTE: {build}/{s}: code executed at ${cpu:04X} (PRG-RAM) outside any segment")
     return cnt
+
+
+def prg_rom(build):
+    """the PRG ROM of a build (any size, from the iNES header)"""
+    rom = open(os.path.join(BUILDS, build, "rom.nes"), "rb").read()
+    return rom[16:16 + rom[4] * 0x4000]
 
 
 def instructions(cnt, rom):
@@ -424,7 +677,7 @@ def profile_table(build, scens):
     """estimated exclusive cycles per routine. Routine entries = named labels that are JSR targets
     (taken from executed JSR instructions) plus all non-CODE_/DATA_/@ labels."""
     syms = Symbols(build)
-    rom = open(os.path.join(BUILDS, build, "rom.nes"), "rb").read()[16:16 + 0x20000]
+    rom = prg_rom(build)
     cnt = load_prof(build, scens)
     insts = list(instructions(cnt, rom))
     # bank -> prg offset range
@@ -477,15 +730,8 @@ def cmd_profile(a):
 def cmd_cover(a):
     """exec counts (summed over all profiled scenarios) for every instruction of the given routines"""
     syms = Symbols(a.name)
-    rom = open(os.path.join(BUILDS, a.name, "rom.nes"), "rb").read()[16:16 + 0x20000]
-    cnt = {}
-    for s in a.scen or DEFAULT_SCENS:
-        p = os.path.join(RUNS, a.name, s + ".prof")
-        if not os.path.exists(p):
-            continue
-        for line in open(p):
-            o, c = line.split()
-            cnt[int(o, 16)] = cnt.get(int(o, 16), 0) + int(c)
+    rom = prg_rom(a.name)
+    cnt = load_prof(a.name, a.scen or DEFAULT_SCENS)
     for lab in a.labels:
         found = False
         for lo, hi, start, bank, segname in syms.prg:

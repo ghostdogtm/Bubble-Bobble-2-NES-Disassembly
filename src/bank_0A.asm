@@ -24,22 +24,6 @@ IRQRounds:
 	.byte 72					;- D 0 - - - 0x015A89 05:BA79: 48
 
 IRQRoundsLatch:
-.ifdef REGION_JP
-	.byte 170					;- - - - - - 0x015A8A 05:BA7A: AA Round 08
-	.byte 146					;- - - - - - 0x015A8B 05:BA7B: 92 Round 13
-	.byte 177					;- - - - - - 0x015A8C 05:BA7C: B1 Round 17
-	.byte 224					;- - - - - - 0x015A8D 05:BA7D: E0 Round 20
-	.byte 180					;- - - - - - 0x015A8E 05:BA7E: B4 Round 28
-	.byte 85					;- - - - - - 0x015A8F 05:BA7F: 55 Round 33
-	.byte 209					;- - - - - - 0x015A90 05:BA80: D1 Round 38
-	.byte 224					;- - - - - - 0x015A91 05:BA81: E0 Round 40
-	.byte 36					;- - - - - - 0x015A92 05:BA82: 24 Round 43
-	.byte 170					;- - - - - - 0x015A93 05:BA83: AA Round 48
-	.byte 116					;- - - - - - 0x015A94 05:BA84: 74 Round 50
-	.byte 160					;- - - - - - 0x015A95 05:BA85: A0 Round 57
-	.byte 225					;- - - - - - 0x015A96 05:BA86: E1 Round 60
-	.byte 177					;- - - - - - 0x015A97 05:BA87: B1 Round 72
-.else
 	.byte 86					;- D 0 - - - 0x015A8A 05:BA7A: 56 Round 08
 	.byte 110					;- D 0 - - - 0x015A8B 05:BA7B: 6E Round 13
 	.byte 78					;- D 0 - - - 0x015A8C 05:BA7C: 4E Round 17
@@ -54,7 +38,6 @@ IRQRoundsLatch:
 	.byte 97					;- D 0 - - - 0x015A95 05:BA85: 61 Round 57
 	.byte 31					;- D 0 - - - 0x015A96 05:BA86: 1F Round 60
 	.byte 79					;- D 0 - - - 0x015A97 05:BA87: 4F Round 72
-.endif
 
 ProjScriptTable:
 	;- - - - - - 0x015A98 05:BA88: EC
@@ -477,9 +460,7 @@ psRoboZenHand:
 	.word @end
 
 	.byte PO_NEXT_TYPE
-.ifndef REGION_JP
 	.byte PO_PARENT_STATE,$0E
-.endif
 
 	.byte PO_SOUND,snUNK19_ID
 	.byte PO_VSPEED,-6
@@ -505,16 +486,10 @@ psRoboZenHand:
 
 psRoboZenHandWinding:
 	;- D 0 - - - 0x015CD6 05:BCC6: 13
-.ifdef REGION_JP
-	;- - - - - - 0x015CD4 05:BCC4: 12
-	.byte PO_PARENT_STATE,$0E
-.endif
 
-.ifndef REGION_JP
 	.byte PO_GET_PARENT_STATE
 	.byte PO_JUMP_EQUAL,scratch5,0
 	.word psNeedParentAndScreen_Despawn
-.endif
 
 	.byte PO_SPEED,0,0
 	.byte PO_GET_PARENT
@@ -531,11 +506,9 @@ psRoboZenHandWinding:
 
 psNeedParentAndScreen:
 	;- D 0 - - - 0x015CF1 05:BCE1: 13
-.ifndef REGION_JP
 	.byte PO_GET_PARENT_STATE
 	.byte PO_JUMP_EQUAL,scratch5,0
 	.word psNeedParentAndScreen_Despawn
-.endif
 
 	.byte PO_GET_OFFSCREEN
 	.byte PO_JUMP_EQUAL,scratch5,0
@@ -1220,8 +1193,3 @@ DATA_0ABF9B:
 	.word $21D6
 	.word $224E
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x015FC1 05:BFB1: 89
-	.incbin "filler/fill0A_JP.bin"
-.endif

@@ -108,20 +108,10 @@ AnimTable:
 	.word anSpringitDieL		;66
 	.word anDOHProj				;67
 	.word anDOHProjSpin			;68
-.ifdef REGION_JP
-	;Swapping places in US
-	.word anDOHTrapped			;69
-.else
 	.word anZenChanTurnL		;69
-.endif
 	.word anDrunkTrapped		;6A
 	.word anFlutterflyTrapped	;6B
-.ifdef REGION_JP
-	;Swapping places in US
-	.word anZenChanTurnL		;6C
-.else
 	.word anDOHTrapped			;6C
-.endif
 	.word anZenChanTurnR		;6D
 	.word anGhostMonstaL		;6E
 	.word anGhostMonstaR		;6F

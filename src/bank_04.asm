@@ -60,11 +60,7 @@ RoundsEnemyPalettes:
 	.byte $80,$80		;Round 47
 	.byte $04,$04		;Round 48
 	.byte $1C,$04		;Round 49
-.ifdef REGION_JP
-	.byte $00,$14		;Round 50
-.else
 	.byte $00,$00		;Round 50
-.endif
 	.byte $14,$14		;Round 51
 	.byte $10,$18		;Round 52
 	.byte $24,$18		;Round 53
@@ -529,28 +525,6 @@ palOpeningTree:
 	.byte $3E					;- D 0 - - - 0x009BD9 02:BBC9: 3E
 
 palTitleScreen:
-.ifdef REGION_JP
-	.byte $30					;- D 0 - - - 0x009BDA 02:BBCA: 30
-	.byte $2A					;- D 0 - - - 0x009BDB 02:BBCB: 2A
-	.byte $26					;- D 0 - - - 0x009BDC 02:BBCC: 26
-	.byte $0F					;- D 0 - - - 0x009BDD 02:BBCD: 0F
-	.byte $30					;- D 0 - - - 0x009BDE 02:BBCE: 30
-	.byte $2A					;- D 0 - - - 0x009BDF 02:BBCF: 2A
-	.byte $26					;- D 0 - - - 0x009BE0 02:BBD0: 26
-	.byte $0F					;- D 0 - - - 0x009BE1 02:BBD1: 0F
-	.byte $30					;- D 0 - - - 0x009BE2 02:BBD2: 30
-	.byte $21					;- D 0 - - - 0x009BE3 02:BBD3: 21
-	.byte $26					;- D 0 - - - 0x009BE4 02:BBD4: 26
-	.byte $0F					;- D 0 - - - 0x009BE5 02:BBD5: 0F
-	.byte $30					;- D 0 - - - 0x009BE6 02:BBD6: 30
-	.byte $24					;- - - - - - 0x009BE7 02:BBD7: 24
-	.byte $22					;- - - - - - 0x009BE8 02:BBD8: 22
-	.byte $0F					;- - - - - - 0x009BE9 02:BBD9: 0F
-	.byte $30					;- - - - - - 0x009BEA 02:BBDA: 30
-	.byte $0F					;- - - - - - 0x009BEB 02:BBDB: 0F
-	.byte $30					;- - - - - - 0x009BEC 02:BBDC: 30
-	.byte $2A					;- - - - - - 0x009BED 02:BBDD: 2A
-.else
 	.byte $30					;- D 0 - - - 0x009BDA 02:BBCA: 30
 	.byte $2A					;- D 0 - - - 0x009BDB 02:BBCB: 2A
 	.byte $26					;- D 0 - - - 0x009BDC 02:BBCC: 26
@@ -571,7 +545,6 @@ palTitleScreen:
 	.byte $0F					;- D 0 - - - 0x009BEB 02:BBDB: 0F
 	.byte $30					;- D 0 - - - 0x009BEC 02:BBDC: 30
 	.byte $2A					;- D 0 - - - 0x009BED 02:BBDD: 2A
-.endif
 
 palEnding:
 	;Full set of BG and sprite palettes for the ending
@@ -1701,12 +1674,8 @@ DrinkAnimHI:
 	.byte .HIBYTE(anDrinkStar_ID)			;Star
 
 ;Filler data
-.ifdef REGION_JP
-	.incbin "filler/fill04_JP.bin"
-.else
 	;- - - - - - 0x00A00E 02:BFFE: 00
 	.incbin "filler/fill04.bin"
-.endif
 
 
 

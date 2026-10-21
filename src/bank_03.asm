@@ -128,8 +128,3 @@ mapEnding:
 	;- D 0 - - - 0x007EEF 01:BEDF: 02
 	.incbin "map/mapEnding.bin"
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x007FDF 01:BFCF: 00
-	.incbin "filler/fill03_JP.bin"
-.endif

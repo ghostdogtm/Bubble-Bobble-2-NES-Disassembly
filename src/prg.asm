@@ -17,10 +17,5 @@
 
 .segment "HEADER"
 
-.ifdef REGION_US
 	.incbin "../header_us.bin"
-.endif
 
-.ifdef REGION_JP
-	.incbin "../header_jp.bin"
-.endif

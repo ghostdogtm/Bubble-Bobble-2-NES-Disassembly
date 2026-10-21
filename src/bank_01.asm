@@ -4,26 +4,14 @@
 ;Contents: Maps
 
 macTitle:
-.ifdef REGION_US
 	;- D 0 - - - 0x002010 00:A000: 03
 	.incbin "map/macTitle.bin"
-.endif
 
-.ifdef REGION_JP
-	;- D 0 - - - 0x002010 00:A000: 03
-	.incbin "map/macTitle_JP.bin"
-.endif
 
 mapTitle:
-.ifdef REGION_US
 	;- D 0 - - - 0x002295 00:A285: 00
 	.incbin "map/mapTitle.bin"
-.endif
 
-.ifdef REGION_JP
-	;- D 0 - - - 0x00229A 00:A28A: 00
-	.incbin "map/mapTitle_JP.bin"
-.endif
 
 mapRound21:
 	;- D 0 - - - 0x002395 00:A385: 09
@@ -122,16 +110,6 @@ macAdventure:
 	.incbin "map/macAdventure.bin"
 
 mapAdventure:
-.ifdef REGION_JP
-	;- - - - - - 0x003CD9 00:BCC9: 02
-	.incbin "map/mapAdventure_JP.bin"
-.else
 	;- D 0 - - - 0x003CD4 00:BCC4: 02
 	.incbin "map/mapAdventure.bin"
-.endif
 
-.ifdef REGION_JP
-;Filler data
-	;- - - - - - 0x003DD9 00:BDC9: 00
-	.incbin "filler/fill01_JP.bin"
-.endif

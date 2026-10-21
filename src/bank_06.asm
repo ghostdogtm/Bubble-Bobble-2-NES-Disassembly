@@ -88,21 +88,12 @@ RoundsFlowTable:
 	.word flowRound79
 
 DATA_06A0A2:
-.ifdef REGION_JP
-	.byte $FF
-	.byte $FF
-	.byte $FF
-	.byte $FF
-	.byte $FF
-	.byte $FF
-.else
 	.byte $6E					;- - - - - - 0x00C0B2 03:A0A2: 6E
 	.byte $4F					;- - - - - - 0x00C0B3 03:A0A3: 4F
 	.byte $73					;- - - - - - 0x00C0B4 03:A0A4: 73
 	.byte $4F					;- - - - - - 0x00C0B5 03:A0A5: 4F
 	.byte $78					;- - - - - - 0x00C0B6 03:A0A6: 78
 	.byte $4F					;- - - - - - 0x00C0B7 03:A0A7: 4F
-.endif
 
 flowRound01:
 	;- - - - - - 0x00C0B8 03:A0A8: C0

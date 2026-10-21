@@ -469,10 +469,5 @@ mapOpeningStage:
 	.incbin "map/mapOpeningStage.bin"
 
 ;Filler data
-.ifdef REGION_JP
-	;- - - - - - 0x001FB8 00:BFA8: 00
-	.incbin "filler/fill00_JP.bin"
-.else
 	;- - - - - - 0x001FB8 00:BFA8: 00
 	.incbin "filler/fill00.bin"
-.endif
